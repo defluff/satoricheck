@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SatoriCheck - Live Fact Checker</title>
+    <meta name="description" content="Real-time AI-powered fact-checking with live audio transcription">
+    <link rel="stylesheet" href="css/style.css?v=2">
+</head>
+
+<body>
+    <!-- Test Mode Banner -->
+    <div id="test-mode-banner" class="test-mode-banner hidden">
+        ⚠️ TEST MODE - Authentication Bypassed
+    </div>
+
+    <!-- Header -->
+    <header class="app-header">
+        <div class="header-content">
+            <h1 class="app-logo">
+                <span class="logo-icon">⚡</span>
+                SatoriCheck
+            </h1>
+
+            <div class="header-actions">
+                <!-- Token Balance -->
+                <div class="token-balance" id="token-balance" data-tooltip="View Refill Packs">
+                    <div class="battery-icon" id="battery-icon">
+                        <div class="battery-level" id="battery-level"></div>
+                    </div>
+                    <span class="token-count" id="token-count">0</span>
+                    <span class="token-label">CP</span>
+                </div>
+
+                <!-- Streak -->
+                <div class="streak-display" id="streak-display" data-tooltip="View Streak Rewards">
+                    <span class="streak-icon">🔥</span>
+                    <span class="streak-count" id="streak-count">0</span>
+                </div>
+
+                <!-- User Menu -->
+                <div class="user-menu">
+                    <button class="btn-icon" id="settings-btn" title="Settings">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path
+                                d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                            <circle cx="12" cy="12" r="3" />
+                        </svg>
+                    </button>
+
+                    <button class="btn-icon" id="help-btn" title="Help">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                            <circle cx="12" cy="17" r="0.5" fill="currentColor"></circle>
+                        </svg>
+                    </button>
+
+                    <button class="btn-secondary" id="logout-btn">Logout</button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Editor Section -->
+        <section class="editor-section">
+            <div class="section-header">
+                <h2>Editor</h2>
+                <div class="editor-controls">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="auto-check-toggle">
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">Auto-Check</span>
+                    </label>
+
+                    <label class="toggle-switch smart-agent-toggle"
+                        title="🧠 Smart Agent: Uses AI to identify multiple claims in your text before fact-checking. More accurate for complex paragraphs. Uses ~2x tokens.">
+                        <input type="checkbox" id="smart-agent-toggle">
+                        <span class="toggle-slider smart"></span>
+                        <span class="toggle-label">🧠 Smart</span>
+                    </label>
+
+                    <button class="btn-icon" id="mic-btn" title="Start/Stop Listening">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M12 1a5 5 0 0 0-5 5v6a5 5 0 0 0 10 0V6a5 5 0 0 0-5-5z" />
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                            <line x1="12" y1="19" x2="12" y2="23" />
+                            <line x1="8" y1="23" x2="16" y2="23" />
+                        </svg>
+                    </button>
+
+                    <button class="btn-primary" id="check-now-btn">Check Now</button>
+                </div>
+            </div>
+
+            <div class="transcript-container" id="transcript-container" contenteditable="true" spellcheck="true">
+                <div class="transcript-placeholder">
+                    Click the microphone to start listening or type/paste text to fact-check...
+                </div>
+            </div>
+
+            <!-- Selection Tooltip -->
+            <div class="selection-tooltip hidden" id="selection-tooltip">
+                <button class="btn-tooltip">Verify Selection</button>
+            </div>
+        </section>
+
+        <!-- Feed Section -->
+        <section class="feed-section">
+            <div class="section-header">
+                <h2>Fact Check Feed</h2>
+                <button class="btn-icon" id="export-btn" title="Export Results">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="7 10 12 15 17 10" />
+                        <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                </button>
+            </div>
+
+            <div class="feed-container" id="feed-container">
+                <div class="feed-placeholder">
+                    Your fact-checks will appear here
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Auth Modal -->
+    <div class="modal hidden" id="auth-modal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <h2 id="auth-title">Sign In</h2>
+
+            <!-- Welcome message -->
+            <p class="auth-subtitle">Verify facts in real-time with AI-powered analysis</p>
+
+            <!-- Returning User - Login -->
+            <button id="google-signin-btn" class="btn-google btn-full" data-action="login">
+                <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+                    <path
+                        d="M17.64 9.2c0-.637-.057-1.252-.164-1.841H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"
+                        fill="#4285F4" />
+                    <path
+                        d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.715H.957v2.332A8.997 8.997 0 0 0 9 18z"
+                        fill="#34A853" />
+                    <path
+                        d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"
+                        fill="#FBBC05" />
+                    <path
+                        d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"
+                        fill="#EA4335" />
+                </svg>
+                Sign in with Google
+            </button>
+
+            <div class="auth-divider">
+                <span>new here?</span>
+            </div>
+
+            <!-- New User - Register -->
+            <button id="google-register-btn" class="btn-google-outline btn-full" data-action="register">
+                <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+                    <path
+                        d="M17.64 9.2c0-.637-.057-1.252-.164-1.841H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"
+                        fill="#4285F4" />
+                    <path
+                        d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.715H.957v2.332A8.997 8.997 0 0 0 9 18z"
+                        fill="#34A853" />
+                    <path
+                        d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"
+                        fill="#FBBC05" />
+                    <path
+                        d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"
+                        fill="#EA4335" />
+                </svg>
+                Create Account with Google
+            </button>
+
+            <p class="auth-terms">By continuing, you agree to our Terms of Service and Privacy Policy</p>
+        </div>
+    </div>
+
+    <!-- Buy Tokens Modal -->
+    <div class="modal hidden" id="buy-tokens-modal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <button class="modal-close" id="close-buy-modal">×</button>
+            <h2>Recharge Your Batteries</h2>
+            <p class="modal-subtitle">Choose a battery pack to continue fact-checking</p>
+
+            <div class="token-packages">
+                <div class="package-card" data-package="battery_small">
+                    <div class="package-icon">🔋</div>
+                    <h3>Small Battery</h3>
+                    <div class="package-tokens">432 CP</div>
+                    <div class="package-price">4.50 CHF</div>
+                    <button class="btn-primary btn-full">Purchase</button>
+                </div>
+
+                <div class="package-card" data-package="battery_large">
+                    <div class="package-icon">🔋🔋</div>
+                    <h3>Medium Battery</h3>
+                    <div class="package-tokens">2,432 CP</div>
+                    <div class="package-price">24 CHF</div>
+                    <button class="btn-primary btn-full">Purchase</button>
+                </div>
+
+                <div class="package-card" data-package="generator">
+                    <div class="package-icon">⚡</div>
+                    <h3>Large Battery</h3>
+                    <div class="package-tokens">11,111 CP</div>
+                    <div class="package-price">99 CHF</div>
+                    <button class="btn-primary btn-full">Purchase</button>
+                </div>
+
+                <div class="package-card package-premium" data-package="wizard">
+                    <div class="package-badge">Best Value</div>
+                    <div class="package-icon">🧙‍♂️</div>
+                    <h3>Wizard Plantation</h3>
+                    <div class="package-tokens">5,000 CP/month</div>
+                    <div class="package-duration">5 Years</div>
+                    <div class="package-price">890 CHF</div>
+                    <button class="btn-primary btn-full">Subscribe</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal hidden" id="settings-modal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <button class="modal-close" id="close-settings-modal">×</button>
+            <h2>Settings</h2>
+
+            <div class="settings-section">
+                <h3>Account</h3>
+                <div class="settings-item">
+                    <span id="user-email">user@example.com</span>
+                </div>
+            </div>
+
+
+            <div class="settings-section">
+                <h3>Billing</h3>
+                <button class="btn-secondary" id="manage-billing-btn">Manage Billing</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Streak Modal -->
+    <div class="modal hidden" id="streak-modal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <button class="modal-close" id="close-streak-modal">×</button>
+            <h2>🔥 Your Streak Journey</h2>
+            <p class="modal-subtitle">Login daily to maintain your streak and unlock rewards!</p>
+
+            <div class="streak-roadmap" id="streak-roadmap"></div>
+        </div>
+    </div>
+
+    <!-- Help Modal -->
+    <div class="modal hidden" id="help-modal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content help-content">
+            <button class="modal-close" id="close-help-modal">×</button>
+            <h2>❓ Help & About</h2>
+
+            <div class="help-section">
+                <h3>About SatoriCheck</h3>
+                <p>SatoriCheck is an indie AI-powered fact-checking tool that helps you verify claims in real-time.</p>
+                <p>Built in Switzerland with ❤️<br><strong>Andreas</strong></p>
+            </div>
+
+            <div class="help-section">
+                <h3>Get in Touch</h3>
+                <div class="help-links">
+                    <a href="https://linkedin.com/in/andreasruegger" target="_blank" class="help-link">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
+                        </svg>
+                        LinkedIn
+                    </a>
+                    <a href="https://kiniroo.com" target="_blank" class="help-link">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <circle cx="12" cy="12" r="10" />
+                            <line x1="2" y1="12" x2="22" y2="12" />
+                            <path
+                                d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                        </svg>
+                        kiniroo.com
+                    </a>
+                </div>
+            </div>
+
+            <div class="help-section">
+                <button class="btn-secondary" id="show-intro-btn">📖 Show Introduction</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Introduction Modal -->
+    <div class="modal hidden" id="intro-modal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content intro-content">
+            <h2>👋 Welcome to SatoriCheck!</h2>
+
+            <div class="intro-features">
+                <div class="intro-feature">
+                    <span class="intro-icon">🎙️</span>
+                    <div>
+                        <strong>Live Transcription</strong>
+                        <p>Paste text or use live audio. For browser audio capture, a virtual audio cable is required.
+                        </p>
+                    </div>
+                </div>
+                <div class="intro-feature">
+                    <span class="intro-icon">🧠</span>
+                    <div>
+                        <strong>Smart Agent</strong>
+                        <p>Automatically identifies and separates multiple claims for individual verification.</p>
+                    </div>
+                </div>
+                <div class="intro-feature">
+                    <span class="intro-icon">🔍</span>
+                    <div>
+                        <strong>AI Fact-Checking</strong>
+                        <p>Powered by Google Gemini with reasoning and source references.</p>
+                    </div>
+                </div>
+                <div class="intro-feature">
+                    <span class="intro-icon">⚡</span>
+                    <div>
+                        <strong>Instant Verdicts</strong>
+                        <p>Get TRUE, FALSE, or MISLEADING results with detailed explanations.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="intro-pricing">
+                <p>🎁 First-time sign-ups receive <strong>5 free Check Points</strong> to try it out!</p>
+                <p>☕ For the price of a coffee, you'll get plenty of tokens to support our backend costs.</p>
+            </div>
+
+            <div class="intro-disclaimer">
+                <p><strong>Disclaimer:</strong> Detection methods may not always produce accurate or consistent results.
+                    Outputs should be interpreted with caution and in appropriate context. SatoriCheck does not assume
+                    responsibility for any inaccuracies or misclassifications.</p>
+            </div>
+
+            <button class="btn-primary" id="intro-close-btn">Get Started!</button>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- JavaScript Modules -->
+    <script type="module" src="js/app.js?v=2"></script>
+</body>
+
+</html>
