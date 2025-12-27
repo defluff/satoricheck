@@ -18,6 +18,7 @@ from backend.extensions import oauth
 from backend.jwt_utils import create_token, verify_token, refresh_token_if_needed
 from flask import url_for, redirect
 import secrets
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -81,15 +82,18 @@ def login_required(f):
     return decorated_function
 
 
-def provision_new_user(user):
+def provision_new_user(user, bonus_amount=None):
     """
     Create TokenBalance and Streak for a new user.
     Called during signup, Google OAuth registration, and test user creation.
     """
+    if bonus_amount is None:
+        bonus_amount = Config.SIGNUP_BONUS_TOKENS
+        
     # Create token balance with signup bonus
     token_balance = TokenBalance(
         user_id=user.id,
-        balance=Config.SIGNUP_BONUS_TOKENS
+        balance=bonus_amount
     )
     db_session.add(token_balance)
     
@@ -153,8 +157,15 @@ def signup():
         # Hash password
         password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
         
+        # Check if they had an account before (prevent bonus abuse)
+        email_hash = hashlib.sha256(email.lower().strip().encode()).hexdigest()
+        from backend.models import DeletedUser
+        was_deleted = db_session.query(DeletedUser).filter_by(email_hash=email_hash).first()
+        
+        bonus = 0 if was_deleted else Config.SIGNUP_BONUS_TOKENS
+        
         # Generate secure API token
-        api_token = secrets.token_hex(32)  # 64 character hex string
+        api_token = secrets.token_hex(32)
         
         # Create user
         user = User(
@@ -167,19 +178,23 @@ def signup():
         db_session.commit()
         
         # Provision new user (balance + streak)
-        provision_new_user(user)
+        provision_new_user(user, bonus_amount=bonus)
         
         # Log user in
         session['user_id'] = user.id
         
         logger.info(f"New user registered: {email}")
         
+        msg = f'Account created! You received {bonus} CP bonus'
+        if was_deleted:
+            msg = 'Welcome back! Your account has been recreated.'
+            
         return jsonify({
             'success': True,
-            'message': f'Account created! You received {Config.SIGNUP_BONUS_TOKENS} CP bonus',
+            'message': msg,
             'user': {
                 'email': user.email,
-                'balance': Config.SIGNUP_BONUS_TOKENS,
+                'balance': bonus,
                 'streak': 1
             }
         })
@@ -234,76 +249,9 @@ def login():
             db_session.add(streak)
             current_streak = 1
         
-        # Check for rewards
-        reward_amount = 0
-        reward_message = None
-        
-        # Rewards: 6->100, 14->200, 21->400, 30->1000 (Cycle based)
-        cycle_day = (current_streak - 1) % 30 + 1
-        
-        if cycle_day == 6:
-            reward_amount = 100
-            reward_message = "Mojo Rising! +100 CP Reward"
-        elif cycle_day == 14:
-            reward_amount = 200
-            reward_message = "Two Weeks Strong! +200 CP Reward"
-        elif cycle_day == 21:
-            reward_amount = 400
-            reward_message = "Habit Master! +400 CP Reward"
-        elif cycle_day == 30:
-            reward_amount = 1000
-            reward_message = "LEGENDARY! +1000 CP Reward"
-            
-        # Only grant if this is a NEW day (streak increased)
-        # Note: update_streak returns new count. We compare with stored DB value before commit?
-        # Actually update_streak updates the object. We need to check if we just crossed a boundary TODAY.
-        # Simplified: We assume update_streak handles the "once per day" check logic safely.
-        # We need to ensure we don't grant rewards multiple times on same day. 
-        # Since update_streak only increments once per day, checking the *new* value is safe 
-        # IF we only do it when the streak CHANGED. 
-        # But here we don't know if it changed easily without refactoring.
-        # Let's rely on the fact that update_streak increments only if yesterday was last active.
-        # Wait, if I log in 5 times today, streak is same. reward would trigger 5 times?
-        # FIX: We need to know if streak *incremented*.
-        
-        # Refetch to be safe or verify logic.
-        # update_streak logic: returns current_streak. It MODIFIES the object.
-        # We can check if streak.last_active_date was yesterday before update?
-        # Too complex to modify update_streak now.
-        # Alternative: Store `last_reward_streak` in DB? No schema change allowed easily.
-        # Hack: Check if transaction exists for this streak count? (Expensive)
-        # Better: Since update_streak updates `last_active_date` to NOW, 
-        # we can check if it WAS yesterday in the `streak.py`.
-        
-        # Let's Modify `streak.py` to return (count, incremented_bool) instead?
-        # Or just move reward logic there?
-        # For now, let's assume the user logs in once. 
-        # To be ROBUST: check if a "bonus" transaction exists for today?
-        from backend.models import Transaction
-        
-        if reward_amount > 0:
-            # Check if we already gave a bonus today
-            start_of_day = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-            existing_bonus = db_session.query(Transaction).filter(
-                Transaction.user_id == user.id,
-                Transaction.type == 'bonus',
-                Transaction.timestamp >= start_of_day
-            ).first()
-            
-            if not existing_bonus:
-                # Grant Reward
-                token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
-                if token_balance:
-                    token_balance.balance += reward_amount
-                    
-                    # Record Transaction
-                    trans = Transaction(
-                        user_id=user.id,
-                        type='bonus',
-                        amount=reward_amount,
-                        description=reward_message
-                    )
-                    db_session.add(trans)
+        # Check and grant streak reward using centralized function
+        from backend.services.streak import check_and_grant_streak_reward
+        check_and_grant_streak_reward(user.id, current_streak, db_session)
 
         
         db_session.commit()
@@ -393,6 +341,59 @@ def get_current_user():
 
 
 
+@auth_bp.route('/delete-account', methods=['POST'])
+@login_required
+def delete_account():
+    """Permanently delete user account and all related data."""
+    try:
+        user = request.current_user
+        user_email = user.email
+        
+        logger.warning(f"DELETING ACCOUNT: {user_email} (ID: {user.id})")
+        
+        # Imports to ensure we have all models needed for cleanup
+        from backend.models import TokenBalance, Streak, Transaction, FactCheck, LiveProSession, DeletedUser
+        
+        # 1. Create a tombstone record to prevent bonus abuse on re-signup
+        # We store SHA256 of email to be GDPR/Privacy compliant (no PII kept)
+        email_hash = hashlib.sha256(user_email.lower().strip().encode()).hexdigest()
+        
+        # Only add if not already there (shouldn't be, but safe)
+        existing_tombstone = db_session.query(DeletedUser).filter_by(email_hash=email_hash).first()
+        if not existing_tombstone:
+            tombstone = DeletedUser(email_hash=email_hash)
+            db_session.add(tombstone)
+
+        # 2. Delete dependent records explicitly (though cascade should handle it)
+        db_session.query(TokenBalance).filter_by(user_id=user.id).delete()
+        db_session.query(Streak).filter_by(user_id=user.id).delete()
+        db_session.query(Transaction).filter_by(user_id=user.id).delete()
+        db_session.query(FactCheck).filter_by(user_id=user.id).delete()
+        db_session.query(LiveProSession).filter_by(user_id=user.id).delete()
+        
+        # 2. Delete the user
+        db_session.delete(user)
+        db_session.commit()
+        
+        logger.info(f"Account deleted successfully: {user_email}")
+        
+        # 3. Clear session and cookies
+        session.clear()
+        
+        response = make_response(jsonify({
+            'success': True,
+            'message': 'Account and data permanently deleted'
+        }))
+        
+        response.delete_cookie(JWT_COOKIE_NAME)
+        return response
+        
+    except Exception as e:
+        logger.error(f"Account deletion error: {e}", exc_info=True)
+        db_session.rollback()
+        raise APIError('Account deletion failed')
+
+
 @auth_bp.route('/google')
 def google_login():
     """Initiate Google OAuth login."""
@@ -425,6 +426,13 @@ def google_callback():
             password_hash = bcrypt.hashpw(random_pw.encode('utf-8'), bcrypt.gensalt())
             api_token = secrets.token_hex(32)  # Secure API token
             
+            # Check if they had an account before (prevent bonus abuse)
+            email_hash = hashlib.sha256(email.lower().strip().encode()).hexdigest()
+            from backend.models import DeletedUser
+            was_deleted = db_session.query(DeletedUser).filter_by(email_hash=email_hash).first()
+            
+            bonus = 0 if was_deleted else Config.SIGNUP_BONUS_TOKENS
+
             user = User(
                 email=email,
                 password_hash=password_hash.decode('utf-8'),
@@ -435,9 +443,9 @@ def google_callback():
             db_session.commit()
             
             # Provision new user (balance + streak)
-            provision_new_user(user)
+            provision_new_user(user, bonus_amount=bonus)
             
-            logger.info(f"New Google user created: {email}")
+            logger.info(f"New Google user created: {email} (Bonus: {bonus} - was_deleted: {was_deleted})")
             
         else:
             # Update last login
@@ -445,8 +453,9 @@ def google_callback():
             
             # Update streak
             streak = db_session.query(Streak).filter_by(user_id=user.id).first()
+            current_streak = 1
             if streak:
-                update_streak(streak, streak.last_active_date)
+                current_streak = update_streak(streak, streak.last_active_date)
             else:
                 streak = Streak(
                     user_id=user.id,
@@ -455,6 +464,10 @@ def google_callback():
                     last_active_date=datetime.utcnow()
                 )
                 db_session.add(streak)
+            
+            # Check and grant streak reward using centralized function
+            from backend.services.streak import check_and_grant_streak_reward
+            check_and_grant_streak_reward(user.id, current_streak, db_session)
             
             db_session.commit()
             logger.info(f"Google user logged in: {email}")

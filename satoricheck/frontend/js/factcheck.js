@@ -17,6 +17,10 @@ class FactCheckManager {
         this.isAutoChecking = false;
         this.lastAutoCheckPosition = 0;
         this.sentenceHistory = []; // Store sentences for context window
+
+        // Stop functionality state
+        this.isProcessing = false;
+        this.abortRequested = false;
     }
 
     setupEventListeners() {
@@ -41,9 +45,26 @@ class FactCheckManager {
             });
         }
 
-        // Manual check button
+        // Manual check button (serves as Check or Stop)
         ui.elements.checkNowBtn.addEventListener('click', () => {
-            this.handleManualCheck();
+            // Priority 1: Stop if processing
+            if (this.isProcessing) {
+                console.log('⏹ Stop requested');
+                this.handleStop();
+                return;
+            }
+
+            // Priority 2: Check based on mode
+            const appMode = localStorage.getItem('analysisMode') || 'factcheck';
+            console.log('🔘 Check button clicked, mode:', appMode);
+
+            if (appMode === 'aidetect') {
+                console.log('🤖 Routing to AI detection...');
+                this.handleAICheck();
+            } else {
+                console.log('✓ Routing to fact check...');
+                this.handleManualCheck();
+            }
         });
 
         // Enter key in editor triggers check (if auto-check enabled)
@@ -146,6 +167,12 @@ class FactCheckManager {
             return;
         }
 
+        // Check if entire text block was already checked
+        if (this.checkedTexts.has(text)) {
+            ui.showToast('This text has already been checked', 'info');
+            return;
+        }
+
         // If Smart Agent is enabled, use the backend to identify claims first
         if (this.smartAgent) {
             this.handleSmartAgentCheck(text);
@@ -188,73 +215,138 @@ class FactCheckManager {
     }
 
     async processBatches(batches) {
-        for (let i = 0; i < batches.length; i++) {
-            const batch = batches[i];
-            const batchedText = batch.join(' ');
+        this.isProcessing = true;
+        this.abortRequested = false;
+        ui.setCheckButtonMode('stop');
 
-            try {
-                await this.checkText(batchedText, null);
+        try {
+            for (let i = 0; i < batches.length; i++) {
+                // Check if stop requested
+                if (this.abortRequested) {
+                    ui.showToast('⏹️ Stopped. Tokens used for completed checks are non-refundable.', 'warning');
+                    break;
+                }
 
-                // Mark sentences as checked after successful check
-                batch.forEach(s => this.checkedTexts.add(s));
+                const batch = batches[i];
+                const batchedText = batch.join(' ');
 
-            } catch (error) {
-                ui.showToast(`Batch ${i + 1} failed: ${error.message}`, 'error');
-                // Stop processing remaining batches if one fails (e.g., insufficient CP)
-                break;
+                try {
+                    await this.checkText(batchedText, null);
+
+                    // Mark sentences as checked after successful check
+                    batch.forEach(s => this.checkedTexts.add(s));
+
+                } catch (error) {
+                    ui.showToast(`Batch ${i + 1} failed: ${error.message}`, 'error');
+                    // Stop processing remaining batches if one fails (e.g., insufficient CP)
+                    break;
+                }
             }
+        } finally {
+            this.isProcessing = false;
+            ui.setCheckButtonMode('check');
         }
     }
 
 
     async handleSmartAgentCheck(text) {
-        // Smart Agent: First identify claims, then check each one
-        ui.showToast('🧠 Smart Agent analyzing...', 'info');
-
-        const maxRetries = 2;
-        let lastError = null;
-
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                // Call backend to identify claims
-                const response = await api.identifyClaims(text);
-
-                if (response.claims && response.claims.length > 0) {
-                    ui.showToast(`🧠 Found ${response.claims.length} claims to check`, 'success');
-
-                    // Check each claim individually
-                    for (const claim of response.claims) {
-                        const trimmedClaim = claim.trim();
-                        if (trimmedClaim.length > 5 && !this.checkedTexts.has(trimmedClaim)) {
-                            await this.checkText(trimmedClaim, null);
-                        }
-                    }
-
-                    // Mark full text as processed
-                    this.checkedTexts.add(text);
-                    return; // Success - exit function
-                } else {
-                    // No claims found, check as single block
-                    ui.showToast('🧠 No distinct claims found, checking as whole', 'info');
-                    this.checkText(text, null);
-                    return; // Success - exit function
-                }
-            } catch (error) {
-                lastError = error;
-                console.error(`Smart Agent attempt ${attempt} failed:`, error);
-
-                if (attempt < maxRetries) {
-                    ui.showToast(`🧠 Retrying... (${attempt}/${maxRetries})`, 'warning');
-                    // Wait before retry (exponential backoff)
-                    await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-                }
-            }
+        // Skip if already checked
+        if (this.checkedTexts.has(text)) {
+            ui.showToast('This text has already been checked', 'info');
+            return;
         }
 
-        // All retries exhausted - fall back to standard check
-        console.error('Smart Agent failed after retries:', lastError);
-        ui.showToast('Smart Agent unavailable, using standard check', 'warning');
-        this.checkText(text, null);
+        this.isProcessing = true;
+        this.abortRequested = false;
+        ui.setCheckButtonMode('stop');
+
+        try {
+            // Smart Agent: First identify claims, then check each one
+            ui.showToast('🧠 Smart Agent analyzing...', 'info');
+
+            const maxRetries = 2;
+            let lastError = null;
+            let identifiedClaims = null;
+
+            // Step 1: Identification Phase (Not interruptible as it's one call)
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    // Call backend to identify claims
+                    const response = await api.identifyClaims(text);
+
+                    if (response.claims) {
+                        identifiedClaims = response.claims;
+                        break; // Success
+                    }
+                } catch (error) {
+                    lastError = error;
+                    console.error(`Smart Agent attempt ${attempt} failed:`, error);
+                    if (attempt < maxRetries) {
+                        ui.showToast(`🧠 Retrying... (${attempt}/${maxRetries})`, 'warning');
+                        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+                    }
+                }
+            }
+
+            if (!identifiedClaims) {
+                // All retries exhausted - fall back to standard check
+                console.error('Smart Agent failed identifiers:', lastError);
+                ui.showToast('Smart Agent unavailable, using standard check', 'warning');
+                await this.checkText(text, null);
+                return;
+            }
+
+            // Step 2: Processing Phase (Interruptible)
+            if (identifiedClaims.length > 0) {
+                // Filter out already checked claims
+                const uncheckedClaims = identifiedClaims.filter(claim => {
+                    const trimmed = claim.trim();
+                    return trimmed.length > 5 && !this.checkedTexts.has(trimmed);
+                });
+
+                if (uncheckedClaims.length === 0) {
+                    ui.showToast('All identified claims already checked', 'info');
+                    this.checkedTexts.add(text);
+                    return;
+                }
+
+                ui.showToast(`🧠 Found ${uncheckedClaims.length} new claims to check`, 'success');
+
+                // Check each claim individually
+                for (const claim of uncheckedClaims) {
+                    // Check stop flag
+                    if (this.abortRequested) {
+                        ui.showToast('⏹️ Stopped. Tokens used for completed checks are non-refundable.', 'warning');
+                        break;
+                    }
+
+                    await this.checkText(claim.trim(), null);
+                }
+
+                // Mark full text as processed only if we finished
+                if (!this.abortRequested) {
+                    this.checkedTexts.add(text);
+                }
+            } else {
+                // No claims found, check as single block
+                ui.showToast('🧠 No distinct claims found, checking as whole', 'info');
+                await this.checkText(text, null);
+            }
+
+        } finally {
+            this.isProcessing = false;
+            ui.setCheckButtonMode('check');
+        }
+    }
+
+    handleStop() {
+        if (this.isProcessing) {
+            this.abortRequested = true;
+            ui.showToast('⏹️ Stopping after current check...', 'info');
+            // Disable button immediately to give feedback
+            const btn = document.getElementById('check-now-btn');
+            if (btn) btn.disabled = true;
+        }
     }
 
     handleAutoCheckFromTyping() {
@@ -272,7 +364,20 @@ class FactCheckManager {
         text = text.trim();
         if (!text) return;
 
-        // Extract sentences
+        // Check analysis mode
+        const appMode = localStorage.getItem('analysisMode') || 'factcheck';
+
+        // If in AI detection mode, just run AI check on the full text
+        if (appMode === 'aidetect') {
+            // For AI detection, check the entire text (minimum 20 words required)
+            const wordCount = text.split(/\s+/).length;
+            if (wordCount >= 20) {
+                this.handleAICheckWithText(text);
+            }
+            return;
+        }
+
+        // Standard fact-check mode: extract sentences
         const sentences = text.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
 
         if (sentences.length === 0) return;
@@ -309,7 +414,19 @@ class FactCheckManager {
             fullText = fullText.replace(placeholder.textContent, '').trim();
         }
 
-        // Get sentences for context
+        // Check analysis mode
+        const appMode = localStorage.getItem('analysisMode') || 'factcheck';
+
+        // If in AI detection mode, check the entire text
+        if (appMode === 'aidetect') {
+            const wordCount = fullText.split(/\s+/).length;
+            if (wordCount >= 20) {
+                this.handleAICheckWithText(fullText);
+            }
+            return;
+        }
+
+        // Standard fact-check mode: get sentences for context
         const sentences = fullText.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
 
         if (sentences.length === 0) return;
@@ -329,6 +446,78 @@ class FactCheckManager {
         }
 
         this.checkText(lastSentence, context);
+    }
+
+    /**
+     * Handle AI detection check (when in AI Detect mode)
+     */
+    async handleAICheck() {
+        console.log('🤖 handleAICheck called');
+        const transcriptEl = ui.elements.transcriptContainer;
+
+        // Get all text content
+        const placeholder = transcriptEl.querySelector('.transcript-placeholder');
+        let text = transcriptEl.textContent || transcriptEl.innerText || '';
+
+        // Remove placeholder text if it exists
+        if (placeholder && placeholder.textContent) {
+            text = text.replace(placeholder.textContent, '').trim();
+        }
+
+        text = text.trim();
+        console.log('🤖 Text to analyze:', text.substring(0, 50) + '...');
+
+        if (!text || text.length === 0) {
+            ui.showToast('Enter or paste some text to analyze', 'warning');
+            return;
+        }
+
+        await this.handleAICheckWithText(text);
+    }
+
+    /**
+     * Handle AI detection with provided text (for selection tooltip)
+     */
+    async handleAICheckWithText(text) {
+        console.log('🤖 handleAICheckWithText called with:', text.substring(0, 50) + '...');
+
+        // Check word count (API requires minimum 20 words)
+        const wordCount = text.split(/\s+/).length;
+        if (wordCount < 20) {
+            ui.showToast('Need at least 20 words for accurate AI detection', 'warning');
+            return;
+        }
+
+        // Create pending card
+        const cardId = ui.card.createAICard(text, true);
+
+        try {
+            const result = await api.analyzeAI(text);
+
+            if (result.success) {
+                ui.card.updateAICard(cardId, result);
+
+                // Update token balance if changed
+                if (result.new_balance !== undefined) {
+                    ui.updateBalance(result.new_balance);
+                }
+
+                ui.showToast(`AI Detection: ${result.ai_probability}% AI-generated`, 'info');
+            } else {
+                throw new Error(result.error || 'AI detection failed');
+            }
+        } catch (error) {
+            console.error('🤖 AI detection error:', error);
+            // Show error in card
+            ui.card.updateAICard(cardId, {
+                ai_probability: 50,
+                confidence: 'LOW',
+                ai_indicators: [],
+                human_indicators: [],
+                explanation: error.message || 'Analysis failed. Please try again.'
+            });
+            ui.showToast('AI detection failed: ' + error.message, 'error');
+        }
     }
 }
 

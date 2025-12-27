@@ -57,52 +57,50 @@ def analyze_claim():
         current_unbilled = token_balance.unbilled_words or 0
         total_unbilled = current_unbilled + word_count
         
-        # Calculate tokens to deduct
-        token_cost = total_unbilled // 250
-        remainder_words = total_unbilled % 250
+        # Get optional context and smart_agent flag
+        context = data.get('context')
+        smart_agent = data.get('smart_agent', False)
         
-        # Check balance
-        # Users must have at least 0 balance to operate, but if cost > 0 they need sufficient funds
+        # Calculate effective text for analysis
+        analysis_text = text
+        if context:
+            analysis_text = f"[Context: {context}]\n\n{text}"
+            logger.info(f"Using context window: {context[:50]}...")
+            
+        # Get global Gemini service (needed for pre-analysis)
+        gemini_service = get_gemini_service()
+
+        # Calculate base tokens (Word Accumulation Model)
+        token_cost = (total_unbilled // Config.WORDS_PER_CP) * Config.TOKENS_PER_CP_UNIT
+        remainder_words = total_unbilled % Config.WORDS_PER_CP
+        
+        # Smart Agent: Apply multiplier BEFORE deduction
+        if smart_agent:
+            token_cost *= 2
+            logger.info(f"Smart Agent enabled - 2x cost applied: {token_cost} CP")
+            
+            try:
+                # Pre-analysis to identify distinct claims
+                claims_result = gemini_service.identify_claims(text)
+                if claims_result and len(claims_result) > 1:
+                    logger.info(f"Smart Agent identified {len(claims_result)} distinct claims")
+                    analysis_text = f"[Pre-analysis: {len(claims_result)} claims identified]\n\n{analysis_text}"
+            except Exception as e:
+                logger.warning(f"Smart Agent pre-analysis failed, continuing with enhanced analysis: {e}")
+        
+        # Check balance (Checks FINAL calculated cost)
         if token_balance.balance < token_cost:
             raise APIError(
                 f'Insufficient tokens. Need {token_cost} CP, you have {token_balance.balance} CP',
                 status_code=403
             )
         
-        # Deduct tokens and update unbilled words
+        # Deduct tokens (Deducts FINAL calculated cost)
         token_balance.balance -= token_cost
         token_balance.unbilled_words = remainder_words
         token_balance.last_updated = datetime.utcnow()
         
-        # Get optional context and smart_agent flag
-        context = data.get('context')
-        smart_agent = data.get('smart_agent', False)
-        
-        # Calculate effective text for analysis (with context if provided)
-        analysis_text = text
-        if context:
-            analysis_text = f"[Context: {context}]\n\n{text}"
-            logger.info(f"Using context window: {context[:50]}...")
-        
-        logger.info(f"Analyzing claim for user {user.email}: {text[:100]}... (Base cost: {token_cost} CP, Unbilled: {remainder_words})")
-        
-        # Get global Gemini service
-        gemini_service = get_gemini_service()
-        
-        # Smart Agent: Pre-analysis to identify claims (if enabled)
-        if smart_agent:
-            try:
-                # First pass: identify distinct claims
-                claims_result = gemini_service.identify_claims(text)
-                if claims_result and len(claims_result) > 1:
-                    logger.info(f"Smart Agent identified {len(claims_result)} distinct claims")
-                    # Double cost only on successful pre-analysis
-                    token_cost *= 2
-                    logger.info(f"Smart Agent successful - 2x token cost applied: {token_cost} CP")
-                    # For now, we still send as one analysis but with claim separation hints
-                    analysis_text = f"[Pre-analysis: {len(claims_result)} claims identified]\n\n{analysis_text}"
-            except Exception as e:
-                logger.warning(f"Smart Agent pre-analysis failed, continuing with standard cost: {e}")
+        logger.info(f"Analyzing claim for user {user.email}: {text[:100]}... (Cost: {token_cost} CP)")
         
         # Record start time
         start_time = time.time()
@@ -132,6 +130,7 @@ def analyze_claim():
             explanation=result['explanation'],
             fallacy=result.get('fallacy'),
             sources=json.dumps(result.get('sources', [])),
+            source_reliability=result.get('source_reliability', 'MEDIUM'),
             timestamp=datetime.utcnow(),
             processing_time=processing_time
         )
@@ -150,6 +149,14 @@ def analyze_claim():
                 'explanation': result['explanation'],
                 'fallacy': result.get('fallacy'),
                 'sources': result.get('sources', []),
+                'source_reliability': result.get('source_reliability', 'MEDIUM'),
+                # Meta-Truth fields for quote claims
+                'is_quote_claim': result.get('is_quote_claim', False),
+                'quote_attribution': result.get('quote_attribution'),
+                'quote_verified': result.get('quote_verified'),
+                'quote_source': result.get('quote_source'),
+                'meta_truth_verdict': result.get('meta_truth_verdict', result['verdict']),
+                # Usage stats
                 'tokens_used': token_cost,
                 'word_count': word_count,
                 'processing_time': processing_time
@@ -233,4 +240,81 @@ def identify_claims():
     except Exception as e:
         logger.error(f"Identify claims error: {e}", exc_info=True)
         raise APIError('Failed to identify claims')
+
+
+@factcheck_bp.route('/analyze-ai', methods=['POST'])
+@login_required
+def analyze_ai():
+    """Analyze text for AI-generation likelihood (like GPT Zero)."""
+    start_time = time.time()
+    
+    try:
+        data = request.get_json()
+        
+        if not data:
+            raise APIError('No data provided')
+        
+        text = data.get('text')
+        
+        if not text or not text.strip():
+            raise APIError('No text provided')
+        
+        text = text.strip()
+        user = request.current_user
+        
+        # Minimum text length check
+        word_count = len(text.split())
+        if word_count < 20:
+            raise APIError('Text too short. Please provide at least 20 words for accurate AI detection.')
+        
+        # Get token balance
+        token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
+        if not token_balance:
+            raise APIError('No token balance found', status_code=403)
+        
+        # Same token logic as fact-checking (1 CP per 250 words)
+        current_unbilled = token_balance.unbilled_words or 0
+        total_unbilled = current_unbilled + word_count
+        
+        # Calculate tokens
+        token_cost = (total_unbilled // Config.WORDS_PER_CP) * Config.TOKENS_PER_CP_UNIT
+        remainder_words = total_unbilled % Config.WORDS_PER_CP
+        
+        # Check balance
+        if token_cost > 0 and token_balance.balance < token_cost:
+            raise APIError(f'Insufficient tokens. Need {token_cost} CP, have {token_balance.balance}', status_code=402)
+        
+        # Get Gemini service and analyze
+        gemini_service = get_gemini_service()
+        result = gemini_service.analyze_ai_content(text)
+        
+        # Deduct tokens if applicable
+        if token_cost > 0:
+            token_balance.balance -= token_cost
+            token_balance.unbilled_words = remainder_words
+            logger.info(f"AI Detection deducted {token_cost} CP from user {user.email}")
+        else:
+            token_balance.unbilled_words = total_unbilled
+        
+        db_session.commit()
+        
+        elapsed = time.time() - start_time
+        logger.info(f"AI Detection completed for user {user.email}: {result['ai_probability']}% in {elapsed:.2f}s")
+        
+        return jsonify({
+            'success': True,
+            'ai_probability': result['ai_probability'],
+            'confidence': result['confidence'],
+            'ai_indicators': result['ai_indicators'],
+            'human_indicators': result['human_indicators'],
+            'explanation': result['explanation'],
+            'tokens_used': token_cost,
+            'new_balance': token_balance.balance
+        })
+        
+    except APIError:
+        raise
+    except Exception as e:
+        logger.error(f"AI Detection error: {e}", exc_info=True)
+        raise APIError('AI detection service unavailable')
 

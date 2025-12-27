@@ -69,33 +69,56 @@
     <main class="main-content">
         <!-- Editor Section -->
         <section class="editor-section">
-            <div class="section-header">
+            <div class="section-header editor-header">
+                <!-- Single row layout matching Feed section -->
                 <h2>Editor</h2>
+
+                <!-- Controls grouped on the right -->
                 <div class="editor-controls">
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="auto-check-toggle">
-                        <span class="toggle-slider"></span>
-                        <span class="toggle-label">Auto-Check</span>
-                    </label>
+                    <!-- Left group: Auto / Smart toggles -->
+                    <div class="control-group">
+                        <label class="toggle-switch" title="Automatically check sentences as you type">
+                            <input type="checkbox" id="auto-check-toggle">
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-label">Auto</span>
+                        </label>
 
-                    <label class="toggle-switch smart-agent-toggle"
-                        title="🧠 Smart Agent: Uses AI to identify multiple claims in your text before fact-checking. More accurate for complex paragraphs. Uses ~2x tokens.">
-                        <input type="checkbox" id="smart-agent-toggle">
-                        <span class="toggle-slider smart"></span>
-                        <span class="toggle-label">🧠 Smart</span>
-                    </label>
+                        <label class="toggle-switch"
+                            title="Smart Agent: AI identifies claims before checking (2x tokens)">
+                            <input type="checkbox" id="smart-agent-toggle">
+                            <span class="toggle-slider smart"></span>
+                            <span class="toggle-label">Smart</span>
+                        </label>
+                    </div>
 
-                    <button class="btn-icon" id="mic-btn" title="Start/Stop Listening">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <path d="M12 1a5 5 0 0 0-5 5v6a5 5 0 0 0 10 0V6a5 5 0 0 0-5-5z" />
-                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                            <line x1="12" y1="19" x2="12" y2="23" />
-                            <line x1="8" y1="23" x2="16" y2="23" />
-                        </svg>
-                    </button>
+                    <!-- Right group: Transcription mode + Mic + Check -->
+                    <div class="control-group">
+                        <div class="transcription-mode-selector" id="transcription-mode-selector">
+                            <button class="mode-btn active" id="mode-standard" title="Free browser transcription">
+                                Standard
+                            </button>
+                            <button class="mode-btn mode-pro" id="mode-live-pro" title="Premium Deepgram (1 CP/min)">
+                                ⚡ Pro
+                            </button>
+                        </div>
 
-                    <button class="btn-primary" id="check-now-btn">Check Now</button>
+                        <!-- Live Pro Indicator -->
+                        <span class="live-pro-indicator hidden" id="live-pro-indicator">
+                            ⚡ Live
+                        </span>
+
+                        <button class="btn-icon" id="mic-btn" title="Start/Stop Listening">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M12 1a5 5 0 0 0-5 5v6a5 5 0 0 0 10 0V6a5 5 0 0 0-5-5z" />
+                                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                                <line x1="12" y1="19" x2="12" y2="23" />
+                                <line x1="8" y1="23" x2="16" y2="23" />
+                            </svg>
+                        </button>
+
+                        <button class="btn-primary btn-compact" id="check-now-btn">Check</button>
+                    </div>
                 </div>
             </div>
 
@@ -115,6 +138,17 @@
         <section class="feed-section">
             <div class="section-header">
                 <h2>Fact Check Feed</h2>
+
+                <!-- Analysis Mode Toggle (moved here for logical grouping) -->
+                <div class="analysis-mode-toggle" id="analysis-mode-toggle">
+                    <button class="analysis-mode-btn active" data-mode="factcheck" title="Verify factual claims">
+                        ✓ Fact Check
+                    </button>
+                    <button class="analysis-mode-btn" data-mode="aidetect" title="Detect AI-generated text (Beta)">
+                        🤖 AI Detect <span class="beta-tag">β</span>
+                    </button>
+                </div>
+
                 <button class="btn-icon" id="export-btn" title="Export Results">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -165,7 +199,7 @@
             </div>
 
             <!-- New User - Register -->
-            <button id="google-register-btn" class="btn-google-outline btn-full" data-action="register">
+            <button id="google-register-btn" class="btn-google-outline btn-full" data-action="register" disabled>
                 <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
                     <path
                         d="M17.64 9.2c0-.637-.057-1.252-.164-1.841H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"
@@ -183,7 +217,16 @@
                 Create Account with Google
             </button>
 
-            <p class="auth-terms">By continuing, you agree to our Terms of Service and Privacy Policy</p>
+            <div class="auth-legal-check">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="legal-terms-checkbox">
+                    <span class="checkbox-text">By continuing, you agree to our Terms and acknowledge that your audio
+                        and text will be processed by Deepgram and Google Gemini as described in our Privacy
+                        Policy.</span>
+                </label>
+            </div>
+
+            <p class="auth-terms">Independent Swiss project • Zurich 🇨🇭</p>
         </div>
     </div>
 
@@ -196,39 +239,8 @@
             <p class="modal-subtitle">Choose a battery pack to continue fact-checking</p>
 
             <div class="token-packages">
-                <div class="package-card" data-package="battery_small">
-                    <div class="package-icon">🔋</div>
-                    <h3>Small Battery</h3>
-                    <div class="package-tokens">432 CP</div>
-                    <div class="package-price">4.50 CHF</div>
-                    <button class="btn-primary btn-full">Purchase</button>
-                </div>
-
-                <div class="package-card" data-package="battery_large">
-                    <div class="package-icon">🔋🔋</div>
-                    <h3>Medium Battery</h3>
-                    <div class="package-tokens">2,432 CP</div>
-                    <div class="package-price">24 CHF</div>
-                    <button class="btn-primary btn-full">Purchase</button>
-                </div>
-
-                <div class="package-card" data-package="generator">
-                    <div class="package-icon">⚡</div>
-                    <h3>Large Battery</h3>
-                    <div class="package-tokens">11,111 CP</div>
-                    <div class="package-price">99 CHF</div>
-                    <button class="btn-primary btn-full">Purchase</button>
-                </div>
-
-                <div class="package-card package-premium" data-package="wizard">
-                    <div class="package-badge">Best Value</div>
-                    <div class="package-icon">🧙‍♂️</div>
-                    <h3>Wizard Plantation</h3>
-                    <div class="package-tokens">5,000 CP/month</div>
-                    <div class="package-duration">5 Years</div>
-                    <div class="package-price">890 CHF</div>
-                    <button class="btn-primary btn-full">Subscribe</button>
-                </div>
+                <!-- Dynamically rendered from backend -->
+                <div class="loading-packages">Loading battery packs...</div>
             </div>
         </div>
     </div>
@@ -245,8 +257,26 @@
                 <div class="settings-item">
                     <span id="user-email">user@example.com</span>
                 </div>
+
+                <div class="settings-danger-zone">
+                    <h4>Danger Zone</h4>
+                    <p class="settings-help">Deleting your account is permanent. You will lose all your fact-checking
+                        history, streaks, and any remaining Check Points (CP) without refund.</p>
+                    <button class="btn-danger-outline btn-full" id="delete-account-btn">Delete My Account</button>
+                </div>
             </div>
 
+            <div class="settings-section">
+                <h3>Audio Settings</h3>
+                <div class="form-group">
+                    <label for="mic-select">Microphone Input</label>
+                    <select id="mic-select" class="form-control">
+                        <option value="">Default System Microphone</option>
+                    </select>
+                </div>
+                <p class="settings-help">Note: Selecting a specific microphone helps when using virtual audio cables.
+                </p>
+            </div>
 
             <div class="settings-section">
                 <h3>Billing</h3>
@@ -255,6 +285,39 @@
         </div>
     </div>
 
+
+    <!-- Live Pro Confirmation Modal -->
+    <div class="modal hidden" id="live-pro-modal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content live-pro-modal-content">
+            <button class="modal-close" id="close-live-pro-modal">×</button>
+            <div class="live-pro-modal-header">
+                <span class="live-pro-icon">⚡</span>
+                <h2>Activate Live Pro?</h2>
+            </div>
+
+            <p class="live-pro-cost">Live Pro uses <strong>1 CP per minute</strong></p>
+
+            <ul class="live-pro-benefits">
+                <li><span class="benefit-check">✓</span> Virtual audio cable support</li>
+                <li><span class="benefit-check">✓</span> Premium accuracy (Deepgram Nova)</li>
+                <li><span class="benefit-check">✓</span> 40+ languages supported</li>
+                <li><span class="benefit-check">✓</span> Any microphone device</li>
+            </ul>
+
+            <label class="hide-modal-checkbox">
+                <input type="checkbox" id="hide-live-pro-modal-checkbox">
+                <span>Don't show this again</span>
+            </label>
+
+            <div class="modal-actions">
+                <button class="btn-secondary" id="cancel-live-pro">Cancel</button>
+                <button class="btn-primary live-pro-activate" id="activate-live-pro">
+                    ⚡ Activate
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- Streak Modal -->
     <div class="modal hidden" id="streak-modal">

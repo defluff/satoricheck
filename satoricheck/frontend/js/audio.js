@@ -38,9 +38,15 @@ class AudioManager {
             if (event.error === 'not-allowed') {
                 ui.showToast('Microphone permission denied', 'error');
             } else if (event.error === 'no-speech') {
-                // Just restart, no toast needed
-                if (this.isListening) {
-                    this.recognition.start();
+                // Debounce restart to prevent rapid-fire loop when mic is muted
+                if (this.isListening && !this._restartPending) {
+                    this._restartPending = true;
+                    setTimeout(() => {
+                        this._restartPending = false;
+                        if (this.isListening) {
+                            this.recognition.start();
+                        }
+                    }, 500);
                 }
             } else {
                 ui.showToast('Recognition error: ' + event.error, 'error');

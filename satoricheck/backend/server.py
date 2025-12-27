@@ -102,12 +102,40 @@ app.register_blueprint(billing_bp)
 app.register_blueprint(factcheck_bp)
 app.register_blueprint(export_bp)
 
+# Import and register Live Pro blueprint
+from backend.routes.live_pro import live_pro_bp
+app.register_blueprint(live_pro_bp)
+
 logger.info("✓ Blueprints registered")
 
 # Initialize global service instances
 from backend.services import init_services
 init_services()
 logger.info("✓ External API services initialized")
+
+# Initialize Deepgram service
+from backend.services.deepgram_service import init_deepgram_service
+init_deepgram_service()
+
+# Initialize background scheduler for cleanup tasks
+from apscheduler.schedulers.background import BackgroundScheduler
+from backend.routes.live_pro import cleanup_abandoned_sessions
+
+scheduler = BackgroundScheduler()
+scheduler.add_job(
+    func=cleanup_abandoned_sessions,
+    trigger='interval',
+    seconds=60,
+    id='cleanup_abandoned_sessions',
+    name='Cleanup abandoned Live Pro sessions',
+    replace_existing=True
+)
+
+# Only start scheduler in main process (not reloader)
+import os
+if os.environ.get('WERKZEUG_RUN_MAIN') != 'true' or not app.debug:
+    scheduler.start()
+    logger.info("✓ Background scheduler started (cleanup every 60s)")
 
 
 @app.route('/api/health')

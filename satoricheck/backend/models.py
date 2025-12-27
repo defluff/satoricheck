@@ -20,11 +20,15 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login = Column(DateTime)
     
+    # Live Pro preferences
+    hide_live_pro_modal = Column(Boolean, default=False)
+    
     # Relationships
     token_balance = relationship('TokenBalance', back_populates='user', uselist=False)
     streak = relationship('Streak', back_populates='user', uselist=False)
     transactions = relationship('Transaction', back_populates='user')
     fact_checks = relationship('FactCheck', back_populates='user')
+    live_pro_sessions = relationship('LiveProSession', back_populates='user')
     
     def __repr__(self):
         return f'<User {self.email}>'
@@ -112,6 +116,7 @@ class FactCheck(Base):
     explanation = Column(Text)
     fallacy = Column(String(255))
     sources = Column(Text)  # JSON array of URLs
+    source_reliability = Column(String(20))  # 'HIGH', 'MEDIUM', 'LOW'
     
     # Metadata
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
@@ -127,3 +132,49 @@ class FactCheck(Base):
     def __repr__(self):
         return f'<FactCheck id={self.id} verdict={self.verdict}>'
 
+
+class LiveProSession(Base):
+    """Live Pro transcription sessions for accurate billing tracking."""
+    __tablename__ = 'live_pro_sessions'
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    
+    # Session timing
+    started_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_heartbeat = Column(DateTime, nullable=False, default=datetime.utcnow)
+    ended_at = Column(DateTime)
+    
+    # Billing tracking
+    cp_consumed = Column(Integer, default=0)
+    duration_seconds = Column(Integer, default=0)
+    
+    # Session status
+    status = Column(String(20), default='active')  # 'active', 'completed', 'abandoned'
+    
+    # Metadata
+    language = Column(String(10), default='en')
+    device_id = Column(String(255))  # Audio device used
+    
+    user = relationship('User', back_populates='live_pro_sessions')
+    
+    # Composite index for active session queries
+    __table_args__ = (
+        Index('ix_livepro_user_status', 'user_id', 'status'),
+        Index('ix_livepro_heartbeat', 'last_heartbeat'),
+    )
+    
+    def __repr__(self):
+        return f'<LiveProSession id={self.id} user_id={self.user_id} status={self.status}>'
+
+
+class DeletedUser(Base):
+    """Minimal record to prevent bonus abuse and track churn."""
+    __tablename__ = 'deleted_users'
+    
+    id = Column(Integer, primary_key=True)
+    email_hash = Column(String(64), unique=True, index=True)  # SHA256 of email
+    deleted_at = Column(DateTime, default=datetime.utcnow)
+    
+    def __repr__(self):
+        return f'<DeletedUser hash={self.email_hash[:10]}...>'

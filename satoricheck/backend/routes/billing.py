@@ -22,6 +22,17 @@ if Config.STRIPE_SECRET_KEY:
     stripe.api_key = Config.STRIPE_SECRET_KEY
 
 
+@billing_bp.route('/packages', methods=['GET'])
+def get_packages():
+    """Get available token packages."""
+    return jsonify({
+        'success': True,
+        'packages': Config.TOKEN_PACKAGES,
+        'tokens_per_cp_unit': Config.TOKENS_PER_CP_UNIT,
+        'words_per_cp': Config.WORDS_PER_CP
+    })
+
+
 @billing_bp.route('/create-checkout', methods=['POST'])
 @login_required
 def create_checkout_session():
@@ -69,24 +80,16 @@ def create_checkout_session():
         
         # Determine if this is a subscription or one-time payment
         try:
-            # Wizard is now ONE-TIME payment (890 CHF for 5 years of monthly refills)
-            # All packages use 'payment' mode
+            # Use pre-created Stripe Price IDs for better promo code compatibility
             session = stripe.checkout.Session.create(
                 customer=stripe_customer_id,
                 payment_method_types=['card'],
                 line_items=[{
-                    'price_data': {
-                        'currency': package['currency'],
-                        'unit_amount': package['price'],
-                        'product_data': {
-                            'name': package['name'],
-                            'description': f"{package['tokens']} Check Points (CP)" if package_type != 'wizard' 
-                                else f"{package['tokens']} CP/month for {package.get('duration', 60)} months"
-                        }
-                    },
+                    'price': package['stripe_price_id'],
                     'quantity': 1
                 }],
                 mode='payment',
+                allow_promotion_codes=True,
                 success_url=request.host_url + 'payment-success?session_id={CHECKOUT_SESSION_ID}',
                 cancel_url=request.host_url + '?payment=cancelled',
                 metadata={
@@ -146,7 +149,7 @@ def payment_success():
             logger.error(f"Failed to retrieve Stripe session {session_id}: {str(e)}", exc_info=True)
             return redirect('/?error=payment_verification_failed')
         
-        if session.payment_status != 'paid' and session.status != 'complete':
+        if session.payment_status not in ['paid', 'no_payment_required'] and session.status != 'complete':
             logger.warning(f"Payment incomplete for session {session_id}: status={session.status}, payment_status={session.payment_status}")
             return redirect('/?error=payment_not_complete')
         
@@ -263,7 +266,53 @@ def stripe_webhook():
         except stripe.error.SignatureVerificationError:
             raise APIError('Invalid signature', status_code=400)
         
-        # Handle subscription renewal
+        # Handle one-time payments (Batteries)
+        if event['type'] == 'checkout.session.completed':
+            session = event['data']['object']
+            
+            # Check if already processed (idempotency)
+            existing_transaction = db_session.query(Transaction).filter_by(stripe_session_id=session['id']).first()
+            if existing_transaction:
+                logger.info(f"Webhook: Session {session['id']} already processed")
+                return jsonify({'success': True})
+            
+            # Extract metadata
+            if 'metadata' in session and 'user_id' in session['metadata']:
+                user_id = int(session['metadata']['user_id'])
+                package_type = session['metadata']['package_type']
+                tokens = int(session['metadata']['tokens'])
+                
+                # Fulfill order
+                token_balance = db_session.query(TokenBalance).filter_by(user_id=user_id).first()
+                if not token_balance:
+                    token_balance = TokenBalance(user_id=user_id, balance=0)
+                    db_session.add(token_balance)
+                
+                token_balance.balance += tokens
+                token_balance.last_updated = datetime.utcnow()
+                
+                # Handle Wizard setup via webhook (backup)
+                if package_type == 'wizard':
+                    token_balance.is_wizard = True
+                    token_balance.wizard_start_date = datetime.utcnow()
+                    token_balance.wizard_months_remaining = Config.TOKEN_PACKAGES['wizard']['duration']
+                
+                # Record transaction
+                transaction = Transaction(
+                    user_id=user_id,
+                    type='purchase',
+                    amount=tokens,
+                    description=f"Webhook: Purchased {Config.TOKEN_PACKAGES[package_type]['name']}",
+                    stripe_session_id=session['id'],
+                    stripe_customer_id=session.get('customer'),
+                    package_type=package_type,
+                    timestamp=datetime.utcnow()
+                )
+                db_session.add(transaction)
+                db_session.commit()
+                logger.info(f"Webhook: Fulfilled order for user {user_id}")
+        
+        # Handle subscription renewal (Wizard Refills)
         if event['type'] == 'invoice.payment_succeeded':
             invoice = event['data']['object']
             customer_id = invoice['customer']
@@ -281,8 +330,8 @@ def stripe_webhook():
                 ).first()
                 
                 if token_balance and token_balance.is_wizard:
-                    # Set balance to 5000 (wizard refill)
-                    token_balance.balance = 5000
+                    # Set balance to refill amount
+                    token_balance.balance = Config.WIZARD_REFILL_AMOUNT
                     token_balance.last_updated = datetime.utcnow()
                     
                     # Decrement months remaining
@@ -297,7 +346,7 @@ def stripe_webhook():
                     refill_transaction = Transaction(
                         user_id=transaction.user_id,
                         type='purchase',
-                        amount=5000,
+                        amount=Config.WIZARD_REFILL_AMOUNT,
                         description='Wizard monthly refill',
                         stripe_customer_id=customer_id,
                         package_type='wizard',
@@ -347,8 +396,8 @@ def wizard_monthly_refill():
         expired_count = 0
         
         for balance in wizard_balances:
-            # Refill to 5000 CP
-            balance.balance = 5000
+            # Refill CP
+            balance.balance = Config.WIZARD_REFILL_AMOUNT
             balance.last_updated = datetime.utcnow()
             
             # Decrement months remaining
@@ -363,7 +412,7 @@ def wizard_monthly_refill():
             refill_transaction = Transaction(
                 user_id=balance.user_id,
                 type='bonus',
-                amount=5000,
+                amount=Config.WIZARD_REFILL_AMOUNT,
                 description='Wizard monthly refill',
                 package_type='wizard',
                 timestamp=datetime.utcnow()

@@ -38,11 +38,27 @@ def get_balance():
     # Get streak info
     streak_info = get_streak_info(current_streak)
     
+    # Check if a reward was granted today (for frontend toast)
+    today_reward = None
+    start_of_day = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    recent_bonus = db_session.query(Transaction).filter(
+        Transaction.user_id == user.id,
+        Transaction.type == 'bonus',
+        Transaction.timestamp >= start_of_day
+    ).first()
+    
+    if recent_bonus:
+        today_reward = {
+            'amount': recent_bonus.amount,
+            'message': recent_bonus.description
+        }
+    
     return jsonify({
         'success': True,
         'balance': token_balance.balance,
         'is_wizard': token_balance.is_wizard,
-        'streak': streak_info
+        'streak': streak_info,
+        'today_reward': today_reward
     })
 
 

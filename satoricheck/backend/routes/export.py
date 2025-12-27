@@ -12,6 +12,7 @@ from datetime import datetime
 from backend.database import db_session
 from backend.models import FactCheck
 from backend.routes.auth import login_required
+from backend.error_handlers import APIError
 
 logger = logging.getLogger(__name__)
 
@@ -49,14 +50,13 @@ def export_fact_checks():
                 'Explanation',
                 'Fallacy',
                 'Sources',
-                'Tokens Used'
-            ])
-            
+                            ])
+
             # Write data
             for fc in fact_checks:
                 sources = json.loads(fc.sources) if fc.sources else []
                 sources_str = '; '.join(sources)
-                
+
                 writer.writerow([
                     fc.id,
                     fc.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
@@ -64,10 +64,8 @@ def export_fact_checks():
                     fc.verdict,
                     fc.explanation,
                     fc.fallacy or '',
-                    sources_str,
-                    fc.tokens_used
+                    sources_str
                 ])
-            
             # Create response
             output.seek(0)
             response = make_response(output.getvalue())
@@ -79,11 +77,11 @@ def export_fact_checks():
             return response
         
         else:
-            raise APIError('Unsupported format. Use: csv')
+            raise APIError('Unsupported format. Use: csv', status_code=400)
         
+    except APIError:
+        raise
     except Exception as e:
         logger.error(f"Export error: {e}", exc_info=True)
-        return jsonify({
-            'success': False,
-            'error': 'Failed to export data'
-        }), 500
+        raise APIError('Failed to export data')
+

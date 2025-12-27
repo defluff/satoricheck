@@ -21,6 +21,35 @@ class GeminiService:
         self.api_key = Config.GEMINI_API_KEY
         self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={self.api_key}"
     
+    def _validate_url(self, url):
+        """Check if a URL is reachable (returns 200). Quick HEAD request with timeout."""
+        if not url or not isinstance(url, str):
+            return False
+        if not url.startswith('http://') and not url.startswith('https://'):
+            return False
+        try:
+            # Use HEAD request for speed (no body download)
+            response = requests.head(url, timeout=3, allow_redirects=True, headers={
+                'User-Agent': 'Mozilla/5.0 (compatible; SatoriCheck/1.0)'
+            })
+            return response.status_code < 400
+        except Exception:
+            return False
+    
+    def _validate_sources(self, sources):
+        """Filter sources to only include live URLs."""
+        if not sources or not isinstance(sources, list):
+            return []
+        
+        valid_sources = []
+        for url in sources[:5]:  # Check max 5 to avoid slowdown
+            if self._validate_url(url):
+                valid_sources.append(url)
+                if len(valid_sources) >= 3:  # Keep max 3 valid sources
+                    break
+        
+        return valid_sources
+    
     def analyze_claim(self, text):
         """
         Analyze text for factual claims using Gemini API.
@@ -42,12 +71,15 @@ class GeminiService:
             
             if cached:
                 logger.info(f"Cache hit for text: {text[:50]}...")
+                # Return cached sources directly - they were validated when stored
+                sources = json.loads(cached.sources) if cached.sources else []
                 return {
                     "is_claim": cached.is_claim,
                     "verdict": cached.verdict,
                     "explanation": cached.explanation,
                     "fallacy": cached.fallacy,
-                    "sources": json.loads(cached.sources) if cached.sources else []
+                    "sources": sources,
+                    "source_reliability": cached.source_reliability
                 }
         except Exception as e:
             logger.warning(f"Cache lookup failed: {e}")
@@ -165,34 +197,51 @@ class GeminiService:
         raise Exception("Fact-check service temporarily unavailable. Please try again.")
     
     def _build_fact_check_prompt(self, text):
-        """Build the fact-checking prompt."""
-        return f"""You are a professional fact-checker. Analyze the following text and determine:
+        """Build the fact-checking prompt with Meta-Truth awareness."""
+        return f"""You are an elite, impartial fact-checker specializing in detecting misinformation and state propaganda.
+Analyze the following text with extreme skepticism.
 
-1. Whether it contains a factual claim that can be verified
-2. If it is a claim, determine its truthfulness
-3. Identify any logical fallacies
-4. Provide sources to support your analysis
+CRITICAL DETECTION - QUOTE CLAIMS:
+If the text contains phrases like "X said", "X claimed", "X stated", "according to X", then this is a QUOTE CLAIM.
+For QUOTE CLAIMS, you MUST set is_quote_claim=true and fill in ALL quote fields.
+
+EXAMPLE - Quote Claim:
+Input: "Trump said the US is a peace-loving nation"
+Response should include:
+- is_quote_claim: true
+- quote_attribution: "Donald Trump"
+- quote_verified: true (if he did say this)
+- quote_source: "Rally in Pennsylvania, October 2024" (if known)
+- meta_truth_verdict: "FALSE" (because the US has engaged in many wars)
+- verdict: "FALSE" (matches meta_truth_verdict)
+
+TWO-LEVEL ANALYSIS FOR QUOTES:
+- LEVEL 1: Did the person actually say this? (quote_verified)
+- LEVEL 2: Is what they said TRUE in reality? (meta_truth_verdict)
+Your final "verdict" should reflect LEVEL 2 (the truth of the content, NOT whether someone said it).
 
 Text to analyze:
 "{text}"
 
-Respond in the following JSON format:
+REQUIRED JSON RESPONSE FORMAT:
 {{
-    "is_claim": true/false,
+    "is_claim": true,
+    "is_quote_claim": true or false,
+    "quote_attribution": "Name of person or null",
+    "quote_verified": true or false or null,
+    "quote_source": "Where/when they said it or null",
+    "meta_truth_verdict": "TRUE" or "FALSE" or "MISLEADING" or "COULD_NOT_VERIFY",
     "verdict": "TRUE" or "FALSE" or "MISLEADING" or "COULD_NOT_VERIFY" or "NOT_A_CLAIM",
-    "explanation": "detailed explanation of your analysis (optional for NOT_A_CLAIM)",
-    "fallacy": "name of logical fallacy if detected, or null",
-    "sources": ["url1", "url2", ...]
+    "explanation": "Your verdict summary in MAX 5 sentences.",
+    "fallacy": null or "fallacy name",
+    "sources": ["https://authoritative-source-1.com/article", "https://authoritative-source-2.com/page"],
+    "source_reliability": "HIGH" or "MEDIUM" or "LOW"
 }}
 
-Important guidelines:
-- Only mark as "TRUE" if the claim is factually accurate
-- Mark as "FALSE" if the claim is factually incorrect
-- Mark as "MISLEADING" if the claim is partially true but missing context or contains distortions
-- Mark as "COULD_NOT_VERIFY" if the claim cannot be verified with available information
-- Mark as "NOT_A_CLAIM" if the text is opinion, question, or non-verifiable statement (no explanation needed)
-- Always provide credible sources (news outlets, academic papers, official statistics) for claims
-- Identify logical fallacies like: strawman, ad hominem, false equivalence, slippery slope, etc.
+IMPORTANT RULES:
+- SOURCES: Provide 1-3 real, authoritative URLs that support your verdict. Use actual website URLs.
+- EXPLANATION: Maximum 5 sentences. State your verdict first, then the key facts. Be precise and direct.
+- For quote claims, is_quote_claim MUST be true.
 
 Respond ONLY with valid JSON, no additional text."""
     
@@ -242,6 +291,26 @@ Respond ONLY with valid JSON, no additional text."""
             # Ensure fallacy is present
             if 'fallacy' not in result:
                 result['fallacy'] = None
+
+            # Ensure source_reliability is present
+            if 'source_reliability' not in result:
+                result['source_reliability'] = 'MEDIUM'
+            
+            # Ensure Meta-Truth fields have defaults
+            if 'is_quote_claim' not in result:
+                result['is_quote_claim'] = False
+            if 'quote_attribution' not in result:
+                result['quote_attribution'] = None
+            if 'quote_verified' not in result:
+                result['quote_verified'] = None
+            if 'quote_source' not in result:
+                result['quote_source'] = None
+            if 'meta_truth_verdict' not in result:
+                result['meta_truth_verdict'] = result.get('verdict')
+            
+            # Validate sources - filter out dead links
+            if result.get('sources'):
+                result['sources'] = self._validate_sources(result['sources'])
             
             return result
             
@@ -252,7 +321,8 @@ Respond ONLY with valid JSON, no additional text."""
                 'verdict': 'MISLEADING',
                 'explanation': 'Unable to fully verify this claim. The AI model returned an invalid response.',
                 'fallacy': None,
-                'sources': []
+                'sources': [],
+                'source_reliability': 'LOW'
             }
         except Exception as e:
             logger.error(f"Error parsing Gemini response: {e}")
@@ -325,4 +395,131 @@ If zero claims found, return: {{"claims": []}}"""
             logger.warning(f"Smart Agent failed: {e}", exc_info=True)
             return []
 
+    def analyze_ai_content(self, text):
+        """
+        Analyze text for AI-generation likelihood (similar to GPT Zero).
+        
+        Args:
+            text: The text to analyze
+            
+        Returns:
+            Dict containing AI probability and indicators
+        """
+        prompt = f"""You are an expert AI text detector. Your job is to determine if text was written by an AI language model (like ChatGPT, Claude, Gemini) or by a human.
+
+STRONG AI INDICATORS (score +20 each if present):
+- "Furthermore," "Moreover," "In addition," "As a result," at sentence starts
+- Phrases like "significantly transformed," "remarkable efficiency," "unprecedented capacity"
+- Perfect parallel sentence structures
+- Generic corporate/academic tone with no personal voice
+- Every paragraph is roughly the same length
+- No contractions (using "cannot" instead of "can't")
+- Hedging phrases like "it is important to note," "one might argue"
+- Bullet-point-ready prose (lists disguised as paragraphs)
+- Overuse of "various," "numerous," "substantial," "enhance"
+
+STRONG HUMAN INDICATORS (score -15 each if present):
+- Typos, grammatical errors, or informal punctuation
+- Personal opinions ("I think," "in my experience")
+- Specific examples from real life
+- Slang, contractions, or casual language
+- Emotional reactions or humor
+- Run-on sentences or fragments
+- Inconsistent formatting or structure
+
+SCORING GUIDE:
+- 80-100%: Clearly AI (multiple strong AI indicators, corporate/smooth prose)
+- 60-79%: Likely AI (some AI patterns, too polished)
+- 40-59%: Uncertain (mixed signals)
+- 20-39%: Likely Human (some polish but genuine voice)
+- 0-19%: Clearly Human (obvious personal voice, imperfections)
+
+TEXT TO ANALYZE:
+\"\"\"
+{text}
+\"\"\"
+
+Be decisive. The text above uses classic AI writing patterns if it:
+- Opens with broad generalizations about technology/society
+- Uses transition words like "Furthermore" or "Moreover"
+- Has perfectly balanced paragraphs
+- Lacks any personal voice or specific examples
+
+RESPOND WITH JSON ONLY:
+{{
+    "ai_probability": <0-100 integer - be decisive, avoid 50>,
+    "confidence": "HIGH" or "MEDIUM" or "LOW",
+    "ai_indicators": ["specific patterns found in THIS text"],
+    "human_indicators": ["human traits found, if any"],
+    "explanation": "2-sentence verdict"
+}}"""
+
+        try:
+            payload = {"contents": [{"parts": [{"text": prompt}]}]}
+            response = requests.post(
+                self.api_url, 
+                json=payload, 
+                headers={'Content-Type': 'application/json'}, 
+                timeout=30
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            if 'candidates' not in data or not data['candidates']:
+                raise ValueError("No candidates in response")
+            
+            content = data['candidates'][0]['content']['parts'][0]['text'].strip()
+            
+            # Clean markdown code blocks
+            if content.startswith('```json'):
+                content = content[7:]
+            elif content.startswith('```'):
+                content = content[3:]
+            if content.endswith('```'):
+                content = content[:-3]
+            
+            result = json.loads(content.strip())
+            
+            # Validate required fields with defaults
+            if 'ai_probability' not in result:
+                result['ai_probability'] = 50
+            if 'confidence' not in result:
+                result['confidence'] = 'LOW'
+            if 'ai_indicators' not in result:
+                result['ai_indicators'] = []
+            if 'human_indicators' not in result:
+                result['human_indicators'] = []
+            if 'explanation' not in result:
+                result['explanation'] = 'Unable to fully analyze text.'
+            
+            # Ensure indicators are lists of strings (Gemini sometimes returns dicts)
+            def sanitize_indicators(items):
+                if not isinstance(items, list):
+                    return []
+                return [str(item) if not isinstance(item, str) else item for item in items]
+            
+            result['ai_indicators'] = sanitize_indicators(result['ai_indicators'])
+            result['human_indicators'] = sanitize_indicators(result['human_indicators'])
+            
+            logger.info(f"AI Detection result: {result['ai_probability']}% AI probability")
+            return result
+            
+        except requests.exceptions.Timeout:
+            logger.error("AI detection timeout")
+            return {
+                'ai_probability': 50,
+                'confidence': 'LOW',
+                'ai_indicators': [],
+                'human_indicators': [],
+                'explanation': 'Analysis timed out. Please try again.'
+            }
+        except Exception as e:
+            logger.error(f"AI detection failed: {e}", exc_info=True)
+            return {
+                'ai_probability': 50,
+                'confidence': 'LOW',
+                'ai_indicators': [],
+                'human_indicators': [],
+                'explanation': f'Analysis failed: {str(e)}'
+            }
 

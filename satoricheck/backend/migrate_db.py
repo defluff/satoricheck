@@ -19,6 +19,13 @@ def run_migration():
         except Exception as e:
             print(f"Note (api_token): {e}")
         
+        # Migration 3: source_reliability column
+        try:
+            conn.execute(text("ALTER TABLE fact_checks ADD COLUMN source_reliability VARCHAR(20)"))
+            print("✓ Added source_reliability column to fact_checks")
+        except Exception as e:
+            print(f"Note (source_reliability): {e}")
+        
         # Commit changes
         conn.commit()
         print("Migration complete!")

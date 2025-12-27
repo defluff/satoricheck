@@ -65,6 +65,12 @@ class APIClient {
         });
     }
 
+    async deleteAccount() {
+        return this.request('/auth/delete-account', {
+            method: 'POST'
+        });
+    }
+
     // Token endpoints
     async getBalance() {
         return this.request('/tokens/balance');
@@ -83,8 +89,45 @@ class APIClient {
     }
 
     async createPortalSession() {
-        return this.request('/billing/create-portal', {
+        return this.request('/billing/portal', {
             method: 'POST'
+        });
+    }
+
+    async getPackages() {
+        return this.request('/billing/packages');
+    }
+
+    // Live Pro endpoints
+    async getLiveProConfig() {
+        return this.request('/live-pro/config');
+    }
+
+    async startLiveProSession(language = 'en', deviceId = null) {
+        return this.request('/live-pro/start', {
+            method: 'POST',
+            body: JSON.stringify({ language, device_id: deviceId })
+        });
+    }
+
+    async liveProHeartbeat(sessionId) {
+        return this.request('/live-pro/heartbeat', {
+            method: 'POST',
+            body: JSON.stringify({ session_id: sessionId })
+        });
+    }
+
+    async deductLiveProTime(seconds) {
+        return this.request('/live-pro/deduct', {
+            method: 'POST',
+            body: JSON.stringify({ seconds })
+        });
+    }
+
+    async endLiveProSession(sessionId) {
+        return this.request('/live-pro/end', {
+            method: 'POST',
+            body: JSON.stringify({ session_id: sessionId })
         });
     }
 
@@ -110,6 +153,13 @@ class APIClient {
 
     async identifyClaims(text) {
         return this.request('/factcheck/identify-claims', {
+            method: 'POST',
+            body: JSON.stringify({ text })
+        });
+    }
+
+    async analyzeAI(text) {
+        return this.request('/factcheck/analyze-ai', {
             method: 'POST',
             body: JSON.stringify({ text })
         });

@@ -36,38 +36,52 @@ class Config:
     PORT = int(os.getenv('PORT', 8000))
     HOST = os.getenv('HOST', '127.0.0.1')
     
-    # Token pricing (batteries)
+    # Deepgram (for Live Pro transcription)
+    DEEPGRAM_API_KEY = os.getenv('DEEPGRAM_API_KEY')
+    
+    # Token pricing (batteries) - NEW: Reduced by 5x for Live Pro margins
     TOKEN_PACKAGES = {
         'battery_small': {
             'name': 'Small Battery',
-            'tokens': 432,  # 96 CP/CHF
-            'price': 450,  # in cents (4.50 CHF)
-            'currency': 'chf'
+            'tokens': 86,  # Was 432, now ÷5
+            'price': 450,  # 4.50 CHF
+            'currency': 'chf',
+            'stripe_price_id': 'price_1SiEx8DnKgm8pOxQ6XL616H1'
+        },
+        'battery_medium': {
+            'name': 'Medium Battery',
+            'tokens': 486,  # Was 2432, now ÷5
+            'price': 2400,  # 24 CHF
+            'currency': 'chf',
+            'stripe_price_id': 'price_1SiExTDnKgm8pOxQIx7ONzbb'
         },
         'battery_large': {
-            'name': 'Medium Battery',
-            'tokens': 2432,  # 101 CP/CHF (better than small!)
-            'price': 2400,  # 24 CHF
-            'currency': 'chf'
-        },
-        'generator': {
             'name': 'Large Battery',
-            'tokens': 11111,
+            'tokens': 2222,  # Was 11111, now ÷5
             'price': 9900,  # 99 CHF
-            'currency': 'chf'
+            'currency': 'chf',
+            'stripe_price_id': 'price_1SiEy2DnKgm8pOxQ0heRz08W'
         },
         'wizard': {
             'name': 'Wizard Energy Plantation',
-            'tokens': 5000,  # Initial + monthly refills
-            'price': 89000,  # 890 CHF ONE-TIME (not monthly!)
+            'tokens': 1000,  # Was 5000, now ÷5 (per month)
+            'price': 89000,  # 890 CHF ONE-TIME
             'currency': 'chf',
-            'is_subscription': False,  # One-time payment
-            'duration': 60  # 5 years of monthly refills
+            'is_subscription': False,
+            'duration': 60,  # 5 years of monthly refills
+            'stripe_price_id': 'price_1SiEyODnKgm8pOxQIlGabEOQ'
         }
     }
     
-    # Token costs
-    TOKENS_PER_250_WORDS = 1
+    WIZARD_REFILL_AMOUNT = 1000  # Was 5000, now ÷5
+    
+    # Token costs - NEW: 5x more words per CP for text mode
+    WORDS_PER_CP = 1250  # Was 250, now 5x (to maintain margins with Live Pro)
+    TOKENS_PER_CP_UNIT = 1
+    
+    # Live Pro: Time-based billing
+    LIVE_PRO_CP_PER_MINUTE = 1  # 1 CP = 1 minute of Deepgram transcription
+    
     SIGNUP_BONUS_TOKENS = 5  # Freemium: 5 free CP to test the app
     
     # Streak milestones
