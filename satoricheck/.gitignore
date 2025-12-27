@@ -39,7 +39,4 @@ build/
 *.egg-info/
 
 # Private planning docs (keep local only)
-docs/FINAL_AUDIT_PLAN.md
-docs/PITCHDECK_MODULE.md
-docs/STOP_BUTTON.md
-docs/LIVE_PRO_TASKS.md
+docs/
