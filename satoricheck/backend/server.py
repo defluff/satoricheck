@@ -5,6 +5,7 @@ Clean, modular Flask application with robust error handling.
 import os
 from flask import Flask, jsonify, send_from_directory, request, redirect
 from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 import logging
 import sys
 from datetime import datetime
@@ -37,6 +38,10 @@ app = Flask(__name__, static_folder='../frontend', static_url_path='')
 app.config['SECRET_KEY'] = Config.SECRET_KEY
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = Config.ENV == 'production'
+
+# Trust proxy headers (Cloud Run, nginx, etc.)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
 # Enable CORS (Production + Extension + Local)
 CORS(app, supports_credentials=True, origins=[
