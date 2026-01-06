@@ -54,6 +54,32 @@ def start_session():
     if not deepgram.is_available():
         raise APIError('Live Pro is not available', status_code=503)
     
+    # ABUSE PREVENTION: Check for existing active session (1 per user limit)
+    existing_session = db_session.query(LiveProSession).filter_by(
+        user_id=user.id,
+        status='active'
+    ).first()
+    
+    if existing_session:
+        # Check if it's actually stale (no heartbeat in 60s) - if so, auto-close it
+        if existing_session.id in active_sessions:
+            last_heartbeat = active_sessions[existing_session.id].get('last_heartbeat', 0)
+            if time.time() - last_heartbeat > 60:
+                # Stale session, close it
+                existing_session.status = 'abandoned'
+                existing_session.ended_at = datetime.utcnow()
+                del active_sessions[existing_session.id]
+                db_session.commit()
+                logger.info(f"Auto-closed stale session {existing_session.id} for user {user.email}")
+            else:
+                raise APIError('You already have an active Live Pro session. Please close it first.', status_code=409)
+        else:
+            # Session in DB but not in memory - mark as abandoned
+            existing_session.status = 'abandoned'
+            existing_session.ended_at = datetime.utcnow()
+            db_session.commit()
+            logger.info(f"Cleaned up orphaned session {existing_session.id} for user {user.email}")
+    
     # Check balance
     token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
     if not token_balance or token_balance.balance < Config.LIVE_PRO_CP_PER_MINUTE:
@@ -83,7 +109,8 @@ def start_session():
     active_sessions[session.id] = {
         'user_id': user.id,
         'last_heartbeat': time.time(),
-        'last_billing': time.time()
+        'last_billing': time.time(),
+        'started_at': time.time()  # Track session start for max duration
     }
     
     logger.info(f"Live Pro session {session.id} started for user {user.email}, balance: {token_balance.balance} CP")
@@ -94,7 +121,8 @@ def start_session():
         'websocket_url': deepgram.get_websocket_url(language),
         'auth_header': deepgram.get_auth_header(),
         'cp_per_minute': Config.LIVE_PRO_CP_PER_MINUTE,
-        'balance': token_balance.balance
+        'balance': token_balance.balance,
+        'max_duration_seconds': 7200  # Inform client of 2-hour limit
     })
 
 
@@ -346,35 +374,59 @@ def cleanup_abandoned_sessions():
     """
     Background task to clean up abandoned sessions.
     Should be called periodically (every 60 seconds).
+    
+    Handles:
+    1. Sessions with no heartbeat for 60+ seconds (abandoned)
+    2. Sessions exceeding 2-hour hard limit (abuse prevention)
     """
+    MAX_SESSION_DURATION = 7200  # 2 hours in seconds
+    
     try:
         now = time.time()
         abandoned_ids = []
+        timeout_ids = []
         
-        # Find sessions with no heartbeat for 60+ seconds
         for session_id, data in list(active_sessions.items()):
+            # Check for abandoned (no heartbeat for 60s)
             if now - data['last_heartbeat'] > 60:
                 abandoned_ids.append(session_id)
+            # Check for hard timeout (session running > 2 hours)
+            elif 'started_at' in data and now - data['started_at'] > MAX_SESSION_DURATION:
+                timeout_ids.append(session_id)
         
         # Clean up abandoned sessions
         for session_id in abandoned_ids:
             logger.warning(f"Abandoning session {session_id} - no heartbeat for 60s")
-            
-            session = db_session.query(LiveProSession).get(session_id)
-            if session and session.status == 'active':
-                elapsed = (datetime.utcnow() - session.started_at).total_seconds()
-                session.duration_seconds = int(elapsed)
-                session.status = 'abandoned'
-                session.ended_at = datetime.utcnow()
-                db_session.commit()
-            
-            # Remove from active tracking
-            if session_id in active_sessions:
-                del active_sessions[session_id]
+            _close_session(session_id, 'abandoned')
         
-        if abandoned_ids:
-            logger.info(f"Cleaned up {len(abandoned_ids)} abandoned sessions")
+        # Clean up sessions exceeding hard limit
+        for session_id in timeout_ids:
+            logger.warning(f"Terminating session {session_id} - exceeded 2-hour limit")
+            _close_session(session_id, 'timeout')
+        
+        total_cleaned = len(abandoned_ids) + len(timeout_ids)
+        if total_cleaned:
+            logger.info(f"Cleaned up {len(abandoned_ids)} abandoned + {len(timeout_ids)} timeout sessions")
             
     except Exception as e:
         logger.error(f"Error in cleanup_abandoned_sessions: {e}", exc_info=True)
+        db_session.rollback()
+
+
+def _close_session(session_id, status):
+    """Helper to close a session with given status."""
+    try:
+        session = db_session.query(LiveProSession).get(session_id)
+        if session and session.status == 'active':
+            elapsed = (datetime.utcnow() - session.started_at).total_seconds()
+            session.duration_seconds = int(elapsed)
+            session.status = status
+            session.ended_at = datetime.utcnow()
+            db_session.commit()
+        
+        # Remove from active tracking
+        if session_id in active_sessions:
+            del active_sessions[session_id]
+    except Exception as e:
+        logger.error(f"Error closing session {session_id}: {e}")
         db_session.rollback()
