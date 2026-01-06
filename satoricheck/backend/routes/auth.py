@@ -405,6 +405,11 @@ def google_login():
 def google_callback():
     """Handle Google OAuth callback."""
     try:
+        # Fast-fail: reject requests without OAuth code/state (bots/crawlers)
+        if 'code' not in request.args or 'state' not in request.args:
+            logger.warning("OAuth callback hit without code/state - likely a bot")
+            return redirect('/?error=invalid_oauth_request')
+        
         token = oauth.google.authorize_access_token()
         resp = oauth.google.get('https://www.googleapis.com/oauth2/v3/userinfo')
         user_info = resp.json()

@@ -1,0 +1,7 @@
+User-agent: *
+Disallow: /api/auth/
+Disallow: /billing/webhook
+Allow: /
+
+# Crawl delay for polite bots
+Crawl-delay: 10
