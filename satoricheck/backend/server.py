@@ -122,6 +122,11 @@ logger.info("✓ External API services initialized")
 from backend.services.deepgram_service import init_deepgram_service
 init_deepgram_service()
 
+# Initialize database (create tables if they don't exist)
+logger.info("Initializing database...")
+init_db()
+logger.info("✓ Database initialized")
+
 # Initialize background scheduler for cleanup tasks
 from apscheduler.schedulers.background import BackgroundScheduler
 from backend.routes.live_pro import cleanup_abandoned_sessions
