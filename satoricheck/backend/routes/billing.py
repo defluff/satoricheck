@@ -90,7 +90,7 @@ def create_checkout_session():
                 }],
                 mode='payment',
                 allow_promotion_codes=True,
-                success_url=request.host_url + 'payment-success?session_id={CHECKOUT_SESSION_ID}',
+                success_url=request.host_url + 'api/billing/success?session_id={CHECKOUT_SESSION_ID}',
                 cancel_url=request.host_url + '?payment=cancelled',
                 metadata={
                     'user_id': user.id,
