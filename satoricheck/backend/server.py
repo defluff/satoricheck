@@ -45,8 +45,8 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
 # Enable CORS (Production + Extension + Local)
 CORS(app, supports_credentials=True, origins=[
-    'https://alpha.satoricheck.com',
-    'https://satoricheck.com',
+    'https://satoricheck-829698588154.europe-west6.run.app',  # Cloud Run production
+    'https://satoricheck.com',  # Future custom domain (if configured)
     'chrome-extension://*',
     'http://localhost:*', 
     'http://127.0.0.1:*'
