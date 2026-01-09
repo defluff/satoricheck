@@ -2,6 +2,7 @@ Flask==3.0.0
 Flask-CORS==6.0.0
 Flask-Limiter==3.5.0
 flask-sock==0.7.0
+websocket-client==1.7.0
 SQLAlchemy==2.0.36
 bcrypt==4.1.2
 stripe==8.11.0

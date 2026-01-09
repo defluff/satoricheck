@@ -71,6 +71,39 @@ def redirect_https():
         url = request.url.replace('http://', 'https://', 1)
         return redirect(url, code=301)
 
+@app.after_request
+def set_security_headers(response):
+    """Add security headers to all responses."""
+    # Prevent clickjacking
+    response.headers['X-Frame-Options'] = 'DENY'
+    
+    # Prevent MIME-type sniffing
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    
+    # XSS protection (legacy browsers)
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    
+    # Referrer policy
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    
+    # Content Security Policy
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://js.stripe.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self' wss: https://api.deepgram.com https://generativelanguage.googleapis.com https://api.stripe.com; "
+        "frame-src https://js.stripe.com; "
+        "frame-ancestors 'none';"
+    )
+    
+    # HSTS - enforce HTTPS (production only)
+    if Config.ENV == 'production':
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    
+    return response
+
 @app.route('/health')
 def health():
     """Robust health check for Cloud Run"""
@@ -122,6 +155,10 @@ app.register_blueprint(export_bp)
 # Import and register Live Pro blueprint
 from backend.routes.live_pro import live_pro_bp
 app.register_blueprint(live_pro_bp)
+
+# Initialize WebSocket proxy for Live Pro (keeps Deepgram key server-side)
+from backend.services.websocket_proxy import init_websocket_proxy
+init_websocket_proxy(app)
 
 logger.info("✓ Blueprints registered")
 

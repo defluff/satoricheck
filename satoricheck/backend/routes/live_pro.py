@@ -115,12 +115,15 @@ def start_session():
     
     logger.info(f"Live Pro session {session.id} started for user {user.email}, balance: {token_balance.balance} CP")
     
+    # Build the proxy WebSocket URL (browser connects here, we proxy to Deepgram)
+    # Use wss:// in production, ws:// in development
+    ws_protocol = 'wss' if Config.ENV == 'production' else 'ws'
+    proxy_url = f"{ws_protocol}://{request.host}/api/livepro/ws/{session.id}"
+    
     return jsonify({
         'success': True,
         'session_id': session.id,
-        'websocket_url': deepgram.get_websocket_url(language),
-        # SECURITY: auth_header removed to prevent API key theft
-        # TODO: Implement WebSocket proxy at /api/livepro/ws/{session_id}
+        'websocket_url': proxy_url,  # Points to OUR proxy, not Deepgram directly
         'cp_per_minute': Config.LIVE_PRO_CP_PER_MINUTE,
         'balance': token_balance.balance,
         'max_duration_seconds': 7200  # Inform client of 2-hour limit
