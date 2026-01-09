@@ -1,5 +1,7 @@
 # Environment variables
 .env
+.env.local
+.env.*.local
 
 # Python
 __pycache__/
@@ -10,6 +12,7 @@ __pycache__/
 venv/
 env/
 ENV/
+.venv/
 
 # Database
 *.db
@@ -21,6 +24,7 @@ ENV/
 .idea/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
@@ -29,14 +33,21 @@ Thumbs.db
 # Logs
 *.log
 
-# Test coverage
+# Test coverage & pytest
+.pytest_cache/
 .coverage
 htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
 
 # Distribution
 dist/
 build/
 *.egg-info/
+eggs/
+wheels/
 
 # Private planning docs (keep local only)
 docs/
+
