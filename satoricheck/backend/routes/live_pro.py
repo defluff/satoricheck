@@ -39,8 +39,8 @@ def get_live_pro_config():
         'available': deepgram.is_available(),
         'cp_per_minute': Config.LIVE_PRO_CP_PER_MINUTE,
         'balance': balance,
-        'websocket_url': deepgram.get_websocket_url() if deepgram.is_available() else None,
-        'auth_header': deepgram.get_auth_header() if deepgram.is_available() else None
+        'websocket_url': deepgram.get_websocket_url() if deepgram.is_available() else None
+        # SECURITY: auth_header removed - implement WebSocket proxy instead
     })
 
 
@@ -119,7 +119,8 @@ def start_session():
         'success': True,
         'session_id': session.id,
         'websocket_url': deepgram.get_websocket_url(language),
-        'auth_header': deepgram.get_auth_header(),
+        # SECURITY: auth_header removed to prevent API key theft
+        # TODO: Implement WebSocket proxy at /api/livepro/ws/{session_id}
         'cp_per_minute': Config.LIVE_PRO_CP_PER_MINUTE,
         'balance': token_balance.balance,
         'max_duration_seconds': 7200  # Inform client of 2-hour limit

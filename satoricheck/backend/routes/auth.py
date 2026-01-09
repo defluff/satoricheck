@@ -22,6 +22,12 @@ import hashlib
 
 logger = logging.getLogger(__name__)
 
+# Import rate limiter from server
+def get_limiter():
+    """Lazy import to avoid circular dependency."""
+    from backend.server import limiter
+    return limiter
+
 # Cookie settings
 JWT_COOKIE_NAME = 'satori_token'
 JWT_COOKIE_SECURE = Config.ENV != 'development'  # True in production
@@ -133,6 +139,7 @@ def create_test_user():
 @auth_bp.route('/signup', methods=['POST'])
 def signup():
     """Register a new user."""
+    # Rate limit: 5 signups per hour per IP (prevent bonus farming)
     try:
         data = request.get_json()
         
@@ -209,6 +216,7 @@ def signup():
 @auth_bp.route('/login', methods=['POST'])
 def login():
     """Log in a user."""
+    # Rate limit: 10 logins per minute per IP (prevent brute force)
     try:
         data = request.get_json()
         

@@ -52,6 +52,18 @@ CORS(app, supports_credentials=True, origins=[
     'http://127.0.0.1:*'
 ])
 
+# Rate limiting to prevent abuse
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://",  # Use Redis in production if multi-instance
+)
+logger.info("✓ Rate limiter initialized")
+
 @app.before_request
 def redirect_https():
     """Redirect HTTP to HTTPS in production (Cloud Run)"""
