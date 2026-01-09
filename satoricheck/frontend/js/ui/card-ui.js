@@ -104,7 +104,7 @@ class CardUI {
         if (result.source_reliability) {
             const reliability = document.createElement('span');
             reliability.className = `reliability-badge reliability-${result.source_reliability.toLowerCase()}`;
-            reliability.innerHTML = `🛡️ Source Reliability: <strong>${result.source_reliability}</strong>`;
+            reliability.innerHTML = DOMPurify.sanitize(`🛡️ Source Reliability: <strong>${result.source_reliability}</strong>`);
             detailsContainer.appendChild(reliability);
         }
 
@@ -237,7 +237,7 @@ class CardUI {
         // For beta, always show a disclaimer
         const disclaimer = '<em style="color: var(--color-text-muted); font-size: 0.75rem;">This is a beta feature. Results are estimates only.</em>';
 
-        resultContainer.innerHTML = `
+        resultContainer.innerHTML = DOMPurify.sanitize(`
             <div class="ai-probability-container ${colorClass}">
                 <div class="ai-probability-header">
                     <span class="ai-probability-value">${probability}%</span>
@@ -264,7 +264,7 @@ class CardUI {
                     <ul>${result.human_indicators.map(i => `<li>${this.escapeHtml(String(i))}</li>`).join('')}</ul>
                 </div>
             ` : ''}
-        `;
+        `);
 
         // Make expandable
         card.addEventListener('click', () => {
