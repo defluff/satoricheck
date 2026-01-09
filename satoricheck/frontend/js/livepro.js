@@ -96,8 +96,8 @@ class LiveProManager {
 
             this.audioStream = await navigator.mediaDevices.getUserMedia(constraints);
 
-            // Connect to Deepgram WebSocket
-            await this.connectWebSocket(session.websocket_url, session.auth_header);
+            // Connect to backend WebSocket proxy (auth handled server-side)
+            await this.connectWebSocket(session.websocket_url);
 
             // Start recording and streaming
             this.startStreaming();
@@ -129,20 +129,16 @@ class LiveProManager {
     }
 
     /**
-     * Connect to Deepgram WebSocket
+     * Connect to WebSocket proxy (no auth header needed - session validated server-side)
      */
-    connectWebSocket(url, authHeader) {
+    connectWebSocket(url) {
         return new Promise((resolve, reject) => {
-            // Use subprotocol for authentication
-            if (!authHeader?.Authorization) {
-                reject(new Error('Missing auth header from server'));
-                return;
-            }
-            const token = authHeader.Authorization.split(' ')[1];
-            this.webSocket = new WebSocket(url, ['token', token]);
+            // Connect directly to our backend proxy - no auth header needed
+            // The proxy validates the session server-side
+            this.webSocket = new WebSocket(url);
 
             this.webSocket.onopen = () => {
-                console.log('Deepgram WebSocket connected');
+                console.log('WebSocket proxy connected');
                 resolve();
             };
 
@@ -151,12 +147,12 @@ class LiveProManager {
             };
 
             this.webSocket.onerror = (error) => {
-                console.error('Deepgram WebSocket error:', error);
+                console.error('WebSocket error:', error);
                 reject(new Error('WebSocket connection failed'));
             };
 
             this.webSocket.onclose = (event) => {
-                console.log('Deepgram WebSocket closed:', event.code, event.reason);
+                console.log('WebSocket closed:', event.code, event.reason);
                 if (this.isActive) {
                     // Unexpected close - try to reconnect or stop
                     this.stop();
