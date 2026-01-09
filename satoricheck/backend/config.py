@@ -30,6 +30,7 @@ class Config:
     
     # Application
     TEST_MODE = os.getenv('TEST_MODE', 'false').lower() == 'true'
+    MAINTENANCE_MODE = os.getenv('MAINTENANCE_MODE', 'false').lower() == 'true'
     DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///satoricheck.db')
     
     # Server
@@ -82,7 +83,8 @@ class Config:
     # Live Pro: Time-based billing
     LIVE_PRO_CP_PER_MINUTE = 1  # 1 CP = 1 minute of Deepgram transcription
     
-    SIGNUP_BONUS_TOKENS = 5  # Freemium: 5 free CP to test the app
+    # Signup bonus
+    SIGNUP_BONUS_TOKENS = 3  # Freemium: 3 free CP to test the app
     
     # Streak milestones
     STREAK_MILESTONES = [

@@ -65,6 +65,20 @@ limiter = Limiter(
 logger.info("✓ Rate limiter initialized")
 
 @app.before_request
+def check_maintenance_mode():
+    """Check if maintenance mode is active."""
+    if Config.MAINTENANCE_MODE:
+        # Allow health checks and static files
+        if request.path == '/health' or request.path.startswith('/static') or request.path.startswith('/assets'):
+            return None
+            
+        # Return 503 Service Unavailable for everything else
+        return jsonify({
+            'error': 'Maintenance Mode',
+            'message': 'SatoriCheck is currently undergoing maintenance. Please try again later.'
+        }), 503
+
+@app.before_request
 def redirect_https():
     """Redirect HTTP to HTTPS in production (Cloud Run)"""
     if not Config.TEST_MODE and request.headers.get('X-Forwarded-Proto') == 'http':
