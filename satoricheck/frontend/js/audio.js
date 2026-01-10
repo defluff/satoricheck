@@ -37,6 +37,9 @@ class AudioManager {
 
             if (event.error === 'not-allowed') {
                 ui.showToast('Microphone permission denied', 'error');
+            } else if (event.error === 'aborted') {
+                // User manually stopped - show friendly message
+                ui.showToast('Microphone stopped', 'info');
             } else if (event.error === 'no-speech') {
                 // Debounce restart to prevent rapid-fire loop when mic is muted
                 if (this.isListening && !this._restartPending) {
