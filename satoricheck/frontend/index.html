@@ -270,9 +270,13 @@
                 <h3>Audio Settings</h3>
                 <div class="form-group">
                     <label for="mic-select">Microphone Input</label>
-                    <select id="mic-select" class="form-control">
-                        <option value="">Default System Microphone</option>
-                    </select>
+                    <div class="mic-select-row">
+                        <select id="mic-select" class="form-control">
+                            <option value="">Default System Microphone</option>
+                        </select>
+                        <button class="btn-secondary btn-compact" id="request-mic-access-btn"
+                            title="Request microphone access to see all devices">Request Access</button>
+                    </div>
                 </div>
                 <p class="settings-help">Note: Selecting a specific microphone helps when using virtual audio cables.
                 </p>
@@ -280,13 +284,42 @@
 
             <div class="settings-section">
                 <h3>Billing</h3>
-                <button class="btn-secondary" id="manage-billing-btn">Manage Billing</button>
+                <button class="btn-secondary" id="manage-billing-btn">Billing Account</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Billing Account Modal -->
+    <div class="modal hidden" id="billing-account-modal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content billing-modal-content">
+            <button class="modal-close" id="close-billing-modal">×</button>
+            <h2>💳 Billing Account</h2>
+
+            <!-- Active Subscriptions Section -->
+            <div class="billing-section subscriptions-section disabled-section">
+                <h3>Active Subscriptions</h3>
+                <div class="coming-soon-box">
+                    <span class="coming-soon-icon">🚀</span>
+                    <p>Subscriptions coming soon!</p>
+                    <p class="coming-soon-subtext">Save more with monthly plans</p>
+                </div>
+            </div>
+
+            <!-- Transaction History Section -->
+            <div class="billing-section">
+                <h3>Transaction History</h3>
+                <div class="transaction-list" id="transaction-list">
+                    <div class="loading-transactions">Loading transactions...</div>
+                </div>
             </div>
         </div>
     </div>
 
 
     <!-- Live Pro Confirmation Modal -->
+
     <div class="modal hidden" id="live-pro-modal">
         <div class="modal-overlay"></div>
         <div class="modal-content live-pro-modal-content">

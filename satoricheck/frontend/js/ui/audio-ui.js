@@ -37,6 +37,29 @@ class AudioUI {
             console.error('Error listing audio devices:', error);
         }
     }
+
+    /**
+     * Request microphone permission to reveal device labels
+     * @returns {Promise<boolean>} True if permission granted
+     */
+    async requestMicPermission() {
+        try {
+            // Request permission by getting a stream
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            
+            // Immediately stop the stream - we just needed the permission
+            stream.getTracks().forEach(track => track.stop());
+            
+            // Now refresh the device list with proper labels
+            await this.updateAudioDevices();
+            
+            return true;
+        } catch (error) {
+            console.error('Microphone permission denied:', error);
+            return false;
+        }
+    }
 }
 
 export default new AudioUI();
+

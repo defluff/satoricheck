@@ -242,6 +242,26 @@ class App {
             });
         }
 
+        // Request microphone access button
+        const requestMicAccessBtn = document.getElementById('request-mic-access-btn');
+        if (requestMicAccessBtn) {
+            requestMicAccessBtn.addEventListener('click', async () => {
+                requestMicAccessBtn.disabled = true;
+                requestMicAccessBtn.textContent = 'Requesting...';
+
+                const granted = await ui.requestMicPermission();
+
+                if (granted) {
+                    ui.showToast('Microphone access granted! Device list updated.', 'success');
+                    requestMicAccessBtn.textContent = '✓ Access Granted';
+                } else {
+                    ui.showToast('Microphone permission denied. Enable in browser settings.', 'error');
+                    requestMicAccessBtn.disabled = false;
+                    requestMicAccessBtn.textContent = 'Request Access';
+                }
+            });
+        }
+
         // Token balance click - show buy modal
         ui.elements.tokenCount.parentElement.addEventListener('click', () => {
             ui.showModal('buy-tokens-modal');
@@ -313,10 +333,18 @@ class App {
             ui.handleExport();
         });
 
-        // Manage billing button
+        // Manage billing button - opens Billing Account modal
         ui.elements.manageBillingBtn.addEventListener('click', async () => {
             await this.handleManageBilling();
         });
+
+        // Close billing account modal
+        const closeBillingModal = document.getElementById('close-billing-modal');
+        if (closeBillingModal) {
+            closeBillingModal.addEventListener('click', () => {
+                ui.hideModal('billing-account-modal');
+            });
+        }
 
         // Close modals on overlay click
         document.querySelectorAll('.modal-overlay').forEach(overlay => {
@@ -378,12 +406,71 @@ class App {
     }
 
     async handleManageBilling() {
+        // Open the billing account modal
+        ui.showModal('billing-account-modal');
+
+        // Fetch and render transaction history
+        const transactionList = document.getElementById('transaction-list');
+        if (!transactionList) return;
+
+        transactionList.innerHTML = '<div class="loading-transactions">Loading transactions...</div>';
+
         try {
-            const response = await api.createPortalSession();
-            window.open(response.url, '_blank');
+            const response = await api.getTransactionHistory();
+
+            if (response.success && response.transactions.length > 0) {
+                transactionList.innerHTML = response.transactions.map(t => {
+                    const isPositive = t.amount > 0;
+                    const date = new Date(t.timestamp).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric'
+                    });
+                    // Use textContent-safe values to prevent XSS
+                    const safeDesc = t.description || t.type;
+                    const amountPrefix = isPositive ? '+' : '';
+
+                    return `
+                        <div class="transaction-item">
+                            <div class="transaction-info">
+                                <span class="transaction-desc">${this.escapeHtml(safeDesc)}</span>
+                                <span class="transaction-date">${date}</span>
+                            </div>
+                            <span class="transaction-amount ${isPositive ? 'positive' : 'negative'}">
+                                ${amountPrefix}${t.amount} CP
+                            </span>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                transactionList.innerHTML = `
+                    <div class="transaction-empty">
+                        <div class="transaction-empty-icon">📋</div>
+                        <p>No transactions yet</p>
+                        <p style="font-size: 0.8rem; margin-top: 4px;">Purchase tokens to get started!</p>
+                    </div>
+                `;
+            }
         } catch (error) {
-            ui.showToast('Failed to open billing portal: ' + error.message, 'error');
+            console.error('Failed to load transactions:', error);
+            // Show friendly message for auth errors (user not logged in)
+            const isAuthError = error.message?.includes('Authentication') || error.message?.includes('401');
+            transactionList.innerHTML = `
+                <div class="transaction-empty">
+                    <div class="transaction-empty-icon">${isAuthError ? '🔒' : '⚠️'}</div>
+                    <p>${isAuthError ? 'Please sign in to view transactions' : 'Failed to load transactions'}</p>
+                </div>
+            `;
         }
+    }
+
+    /**
+     * Escape HTML to prevent XSS
+     */
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 
     checkPaymentStatus() {

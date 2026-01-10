@@ -122,6 +122,10 @@ class UIManager {
         return this.audio.updateAudioDevices();
     }
 
+    requestMicPermission() {
+        return this.audio.requestMicPermission();
+    }
+
     // ===== Card Delegation =====
     createCard(claim, isPending = false) {
         return this.card.createCard(claim, isPending);

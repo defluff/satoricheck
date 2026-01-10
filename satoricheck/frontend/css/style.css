@@ -2285,3 +2285,141 @@ body {
     margin-top: var(--spacing-md);
     opacity: 1;
 }
+
+/* ===== Mic Select Row ===== */
+.mic-select-row {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: center;
+}
+
+.mic-select-row .form-control {
+    flex: 1;
+}
+
+.mic-select-row .btn-compact {
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* ===== Billing Account Modal ===== */
+.billing-modal-content {
+    max-width: 480px;
+}
+
+.billing-section {
+    margin-bottom: var(--spacing-lg);
+}
+
+.billing-section h3 {
+    font-size: 1rem;
+    color: var(--color-text);
+    margin-bottom: var(--spacing-md);
+    padding-bottom: var(--spacing-sm);
+    border-bottom: 1px solid var(--color-border);
+}
+
+/* Coming Soon Box */
+.coming-soon-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-xl);
+    background: var(--color-surface-elevated);
+    border: 2px dashed var(--color-border);
+    border-radius: var(--radius-lg);
+    text-align: center;
+}
+
+.coming-soon-icon {
+    font-size: 2rem;
+    margin-bottom: var(--spacing-sm);
+}
+
+.coming-soon-box p {
+    color: var(--color-text);
+    font-weight: 600;
+    margin: 0;
+}
+
+.coming-soon-subtext {
+    color: var(--color-text-muted) !important;
+    font-weight: 400 !important;
+    font-size: 0.85rem;
+    margin-top: var(--spacing-xs) !important;
+}
+
+.disabled-section {
+    opacity: 0.6;
+}
+
+/* Transaction List */
+.transaction-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.loading-transactions {
+    text-align: center;
+    padding: var(--spacing-lg);
+    color: var(--color-text-muted);
+}
+
+.transaction-empty {
+    text-align: center;
+    padding: var(--spacing-xl);
+    color: var(--color-text-muted);
+}
+
+.transaction-empty-icon {
+    font-size: 2rem;
+    margin-bottom: var(--spacing-sm);
+}
+
+.transaction-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--color-surface);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--spacing-sm);
+}
+
+.transaction-item:last-child {
+    margin-bottom: 0;
+}
+
+.transaction-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.transaction-desc {
+    font-size: 0.875rem;
+    color: var(--color-text);
+}
+
+.transaction-date {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}
+
+.transaction-amount {
+    font-weight: 600;
+    font-size: 0.9rem;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+}
+
+.transaction-amount.positive {
+    color: var(--color-success);
+    background: var(--bg-success-subtle);
+}
+
+.transaction-amount.negative {
+    color: var(--color-error);
+    background: var(--bg-error-subtle);
+}
