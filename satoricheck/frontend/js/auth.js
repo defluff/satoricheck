@@ -12,6 +12,47 @@ class AuthManager {
         this.isLogin = true;
     }
 
+    /**
+     * Detect if the user is in an in-app browser (Instagram, Facebook, TikTok, etc.)
+     * Google OAuth blocks these browsers for security reasons (403 disallowed_useragent)
+     */
+    isInAppBrowser() {
+        const ua = navigator.userAgent || navigator.vendor || '';
+        // Common in-app browser identifiers
+        const inAppPatterns = [
+            /FBAN|FBAV/i,           // Facebook
+            /Instagram/i,            // Instagram
+            /Twitter|X\//i,          // Twitter/X
+            /Line\//i,               // Line
+            /Snapchat/i,             // Snapchat
+            /Pinterest/i,            // Pinterest
+            /TikTok/i,               // TikTok
+            /LinkedInApp/i,          // LinkedIn
+            /KAKAOTALK/i,            // KakaoTalk
+            /WhatsApp/i,             // WhatsApp
+            /MicroMessenger/i,       // WeChat
+        ];
+        return inAppPatterns.some(pattern => pattern.test(ua));
+    }
+
+    /**
+     * Show warning if user is in an in-app browser
+     * Returns true if blocked (user should not proceed)
+     */
+    checkAndWarnInAppBrowser() {
+        if (this.isInAppBrowser()) {
+            alert(
+                '⚠️ In-App Browser Detected\n\n' +
+                'Google Sign-In is not supported in this browser.\n\n' +
+                'Please open SatoriCheck in Safari or Chrome:\n' +
+                '• Tap the ⋮ or ⋯ menu\n' +
+                '• Select "Open in Safari" or "Open in Browser"'
+            );
+            return true; // blocked
+        }
+        return false; // OK to proceed
+    }
+
     async init() {
         // Check if user is already logged in
         try {
@@ -35,6 +76,7 @@ class AuthManager {
         const googleLoginBtn = document.getElementById('google-signin-btn');
         if (googleLoginBtn) {
             googleLoginBtn.addEventListener('click', () => {
+                if (this.checkAndWarnInAppBrowser()) return;
                 window.location.href = '/api/auth/google?action=login';
             });
         }
@@ -51,6 +93,7 @@ class AuthManager {
 
         if (googleRegisterBtn) {
             googleRegisterBtn.addEventListener('click', () => {
+                if (this.checkAndWarnInAppBrowser()) return;
                 if (legalCheckbox && !legalCheckbox.checked) {
                     ui.showToast('Please agree to the terms to continue', 'warning');
                     return;
