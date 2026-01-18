@@ -37,15 +37,15 @@ class GeminiService:
             return False
     
     def _validate_sources(self, sources):
-        """Filter sources to only include live URLs."""
+        """Filter sources to only include live URLs. Enforces 1-5 sources."""
         if not sources or not isinstance(sources, list):
             return []
         
         valid_sources = []
-        for url in sources[:5]:  # Check max 5 to avoid slowdown
+        for url in sources[:10]:  # Check up to 10 to find 5 valid
             if self._validate_url(url):
                 valid_sources.append(url)
-                if len(valid_sources) >= 3:  # Keep max 3 valid sources
+                if len(valid_sources) >= 5:  # Max 5 valid sources
                     break
         
         return valid_sources
@@ -239,7 +239,7 @@ REQUIRED JSON RESPONSE FORMAT:
 }}
 
 IMPORTANT RULES:
-- SOURCES: Provide 1-3 real, authoritative URLs that support your verdict. Use actual website URLs.
+- SOURCES: You MUST provide at least 1 and up to 5 real, authoritative URLs that support your verdict. NEVER return empty sources.
 - EXPLANATION: Maximum 5 sentences. State your verdict first, then the key facts. Be precise and direct.
 - For quote claims, is_quote_claim MUST be true.
 
