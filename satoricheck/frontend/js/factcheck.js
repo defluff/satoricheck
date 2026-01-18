@@ -312,7 +312,7 @@ class FactCheckManager {
 
                 ui.showToast(`🧠 Found ${uncheckedClaims.length} new claims to check`, 'success');
 
-                // Check each claim individually
+                // Check each claim individually, passing original text as context for Grok trigger detection
                 for (const claim of uncheckedClaims) {
                     // Check stop flag
                     if (this.abortRequested) {
@@ -320,7 +320,8 @@ class FactCheckManager {
                         break;
                     }
 
-                    await this.checkText(claim.trim(), null);
+                    // Pass original text as context so Grok can check triggers against it
+                    await this.checkText(claim.trim(), text);
                 }
 
                 // Mark full text as processed only if we finished

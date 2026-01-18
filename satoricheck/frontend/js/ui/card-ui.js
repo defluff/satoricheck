@@ -100,6 +100,30 @@ class CardUI {
             detailsContainer.appendChild(metaTruthBox);
         }
 
+        // Add Social Context (Grok)
+        if (result.social && result.social.found) {
+            const socialBox = document.createElement('div');
+            socialBox.className = 'social-context-box';
+
+            const sourceVerified = result.social.source_verified ? ' ✓' : '';
+            const engagement = result.social.engagement
+                ? `<span class="social-engagement">♥ ${result.social.engagement.likes || 0} 🔁 ${result.social.engagement.retweets || 0}</span>`
+                : '';
+
+            socialBox.innerHTML = DOMPurify.sanitize(`
+                <div class="social-header">🐦 Social Context</div>
+                <div class="social-content">
+                    <div class="social-source">${result.social.source}${sourceVerified}</div>
+                    <p class="social-text">"${result.social.text}"</p>
+                    ${result.social.posted_at ? `<span class="social-date">${result.social.posted_at}</span>` : ''}
+                    ${engagement}
+                    ${result.social.url ? `<a href="${result.social.url}" target="_blank" rel="noopener noreferrer" class="social-link">View on X →</a>` : ''}
+                </div>
+                ${result.social.context ? `<p class="social-context-note">${result.social.context}</p>` : ''}
+            `);
+            detailsContainer.appendChild(socialBox);
+        }
+
         // Add reliability badge
         if (result.source_reliability) {
             const reliability = document.createElement('span');

@@ -40,6 +40,12 @@ class Config:
     # Deepgram (for Live Pro transcription)
     DEEPGRAM_API_KEY = os.getenv('DEEPGRAM_API_KEY')
     
+    # xAI Grok API (for Social Context in Smart Mode)
+    GROK_API_KEY = os.getenv('GROK_API_KEY')
+    GROK_ENABLED = os.getenv('GROK_ENABLED', 'true').lower() == 'true'
+    GROK_TIMEOUT = int(os.getenv('GROK_TIMEOUT', '30'))  # seconds (API can be slow)
+    GROK_MAX_CALLS_PER_DAY = 1000
+    
     # Token pricing (batteries) - NEW: Reduced by 5x for Live Pro margins
     TOKEN_PACKAGES = {
         'battery_small': {
