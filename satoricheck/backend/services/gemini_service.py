@@ -19,7 +19,7 @@ class GeminiService:
         else:
             logger.info(f"GEMINI_API_KEY loaded: {Config.GEMINI_API_KEY[:10]}...")
         self.api_key = Config.GEMINI_API_KEY
-        self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={self.api_key}"
+        self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent?key={self.api_key}"
     
     def _validate_url(self, url):
         """Check if a URL is reachable (returns 200). Quick HEAD request with timeout."""
