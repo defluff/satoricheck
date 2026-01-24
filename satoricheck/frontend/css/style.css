@@ -1369,6 +1369,19 @@ body {
 
     .header-actions {
         gap: var(--spacing-sm);
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+
+    /* Smaller token/streak displays on mobile */
+    .token-balance,
+    .streak-display {
+        min-width: auto;
+        padding: var(--spacing-xs);
+    }
+
+    .user-menu {
+        gap: var(--spacing-xs);
     }
 
     .main-content {
@@ -1430,6 +1443,77 @@ body {
         /* Reset any conflicting styles */
         order: unset;
         align-self: auto;
+    }
+
+    /* Streak Grid: 5 columns on tablets */
+    .streak-grid {
+        grid-template-columns: repeat(5, 1fr);
+        gap: 6px;
+        max-width: 100%;
+    }
+}
+
+/* Very small screens (phones) */
+@media (max-width: 480px) {
+    .header-content {
+        flex-wrap: wrap;
+        gap: var(--spacing-sm);
+    }
+
+    .app-logo {
+        font-size: 1.25rem;
+    }
+
+    .logo-icon {
+        font-size: 1.4rem;
+    }
+
+    .header-actions {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    /* Even smaller displays */
+    .token-balance,
+    .streak-display {
+        padding: 4px 6px;
+    }
+
+    .token-count,
+    .streak-count {
+        font-size: 0.75rem;
+    }
+
+    .token-label {
+        font-size: 0.65rem;
+    }
+
+    .btn-icon {
+        width: 28px;
+        height: 28px;
+    }
+
+    #logout-btn {
+        padding: var(--spacing-xs) var(--spacing-sm);
+        font-size: 0.75rem;
+    }
+
+    /* Streak Grid: 5 columns, smaller gaps */
+    .streak-grid {
+        grid-template-columns: repeat(5, 1fr);
+        gap: 4px;
+    }
+
+    .streak-day {
+        min-width: 36px;
+    }
+
+    .streak-count-large {
+        font-size: 2rem;
+    }
+
+    .streak-info-container h3 {
+        font-size: 1rem;
     }
 }
 
