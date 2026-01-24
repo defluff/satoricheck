@@ -1,15 +1,16 @@
 # SatoriCheck
 
-AI-powered fact-checking app with live audio transcription, Meta Analysis for quote claims, and Stripe billing.
+Fully vibecoded, AI-powered fact-checking app with live audio transcription, Meta Analysis for quote claims, and Stripe billing, using antigravity IDE
 
 ## ✨ Features
 
-- 🎙️ **Live Pro** — Premium Deepgram transcription (1 CP/minute)
 - 🎤 **Standard Mode** — Free browser-based speech recognition
+- 🎙️ **Live Pro** — Premium Deepgram transcription (1 CP/minute)
 - 🤖 **AI Fact-Checking** — Google Gemini with web search grounding
 - 🧠 **Smart Agent** — Auto-separates multiple claims for individual verification
 - 🔍 **Meta Analysis** — Distinguishes between "X said Y" (quote) and whether Y is actually true
-- 🔥 **Streak System** — Daily login rewards with CP bonuses
+- � **Social Sharing** — Generate shareable cards for verified claims for X & Linkedin
+- �🔥 **Streak System** — Daily login rewards with CP bonuses
 - ⚡ **Token Billing** — Stripe integration for Check Points (CP)
 - 🔐 **Google OAuth** — One-click sign-in
 - 🗑️ **Account Deletion** — GDPR-compliant data erasure with anti-abuse protection
@@ -17,14 +18,17 @@ AI-powered fact-checking app with live audio transcription, Meta Analysis for qu
 ## 🚀 Quick Start
 
 ```bash
-# 1. Install dependencies
+# 1. Enter project directory
+cd satoricheck
+
+# 2. Install dependencies
 pip install -r requirements.txt
 
-# 2. Configure environment
+# 3. Configure environment
 cp .env.example .env
 # Edit .env with your API keys
 
-# 3. Run server
+# 4. Run server
 python3 -m backend.server
 ```
 
@@ -71,7 +75,8 @@ satoricheck/
 │   │   ├── factcheck.py   # AI analysis + Smart Agent
 │   │   ├── live_pro.py    # Deepgram session management
 │   │   ├── tokens.py      # Balance + streak
-│   │   └── export.py      # CSV export
+│   │   ├── export.py      # CSV export
+│   │   └── analytics.py   # Social sharing stats
 │   └── services/
 │       ├── gemini_service.py    # Fact-checking AI
 │       ├── deepgram_service.py  # Audio transcription
@@ -87,10 +92,8 @@ satoricheck/
 │       ├── livepro.js     # Live Pro WebSocket
 │       ├── audio.js       # Browser speech
 │       ├── selection.js   # Text selection
+│       ├── share.js       # Social image generation
 │       └── ui.js          # UI updates
-└── docs/
-    ├── PRICING_MODEL.md   # Token economics
-    └── STRIPE_PROMO_GUIDE.md  # Promo code setup
 ```
 
 ## 💰 Token Economics
@@ -133,8 +136,8 @@ Events to listen for:
 
 ## 📜 Legal
 
-- Privacy Policy: See `docs/PRIVACY_POLICY.md`
-- Terms of Service: See `docs/TERMS_OF_SERVICE.md`
+- Privacy Policy: [View on GitHub Gist](https://gist.github.com/defluff/bccc4d328f850de6eec1521ba4c2be22)
+- Terms of Service: [View on GitHub Gist](https://gist.github.com/defluff/bccc4d328f850de6eec1521ba4c2be22)
 
 Data handling:
 - User data stored in PostgreSQL
@@ -145,8 +148,11 @@ Data handling:
 
 ## 📝 License
 
-Proprietary — Built in Switzerland 🇨🇭
+**All Rights Reserved.**
+
+This project is source-available for educational and portfolio purposes only.
+See [LICENSE](LICENSE) for details.
 
 ---
 
-Built with ❤️ by Andreas
+Built with ❤️ in Switzerland by Andreas
