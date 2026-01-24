@@ -33,7 +33,7 @@ class LiveProManager {
             this.cpPerMinute = config.cp_per_minute || 1;
 
             if (!this.available) {
-                console.log('Live Pro not available (Deepgram not configured)');
+                // Live Pro not available (Deepgram not configured)
             }
 
             // Add beforeunload handler to cleanup session if user closes tab
@@ -138,7 +138,6 @@ class LiveProManager {
             this.webSocket = new WebSocket(url);
 
             this.webSocket.onopen = () => {
-                console.log('WebSocket proxy connected');
                 resolve();
             };
 
@@ -152,7 +151,6 @@ class LiveProManager {
             };
 
             this.webSocket.onclose = (event) => {
-                console.log('WebSocket closed:', event.code, event.reason);
                 if (this.isActive) {
                     // Unexpected close - try to reconnect or stop
                     this.stop();
@@ -233,7 +231,6 @@ class LiveProManager {
                         ui.updateBalance(result.new_balance);
                         const elapsed = Math.floor((Date.now() - this.sessionStartTime) / 1000);
                         this.totalSeconds = elapsed;
-                        console.log(`Live Pro heartbeat: ${result.cp_deducted} CP deducted`);
                     }
                 } else if (result.status === 'insufficient_balance') {
                     // Out of credits
@@ -262,7 +259,6 @@ class LiveProManager {
         if (this.sessionId) {
             try {
                 const result = await api.endLiveProSession(this.sessionId);
-                console.log(`Live Pro session ended: ${result.cp_consumed} CP consumed`);
             } catch (error) {
                 console.error('End session failed:', error);
             }

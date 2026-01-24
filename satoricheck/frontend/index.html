@@ -7,6 +7,7 @@
     <title>SatoriCheck - Live Fact Checker</title>
     <meta name="description" content="Real-time AI-powered fact-checking with live audio transcription">
     <link rel="stylesheet" href="css/style.css?v=2">
+    <link rel="stylesheet" href="css/share.css?v=1">
 </head>
 
 <body>
@@ -84,7 +85,7 @@
                         </label>
 
                         <label class="toggle-switch"
-                            title="Smart Agent: AI identifies claims before checking (2x tokens)">
+                            title="Smart Agent: AI identifies claims before checking. Enables sharing.">
                             <input type="checkbox" id="smart-agent-toggle">
                             <span class="toggle-slider smart"></span>
                             <span class="toggle-label">Smart</span>
@@ -425,9 +426,8 @@
                     <span class="intro-icon">🧠</span>
                     <div>
                         <strong>Smart Checks (Multi Agent Context)</strong>
-                        <p>The Smart function identifies and separates multiple claims for individual verification and
-                            considers context. It also does a Meta Analysis and activates the Social Check, to verify
-                            claims on social media.</p>
+                        <p>Identifies and separates claims with Meta Analysis.
+                            Enables sharing verdicts to X and LinkedIn.</p>
                     </div>
                 </div>
                 <div class="intro-feature">
@@ -463,11 +463,41 @@
         </div>
     </div>
 
+    <!-- Hidden Share Card Template (off-screen for html-to-image capture) -->
+    <div class="share-card-container" id="share-card-container">
+        <div class="share-card" id="share-card">
+            <p class="share-card-claim" id="share-card-claim">Claim text will be inserted here</p>
+
+            <div class="share-card-verdict" id="share-card-verdict">
+                <span class="share-card-verdict-emoji" id="share-card-emoji">❓</span>
+                <span class="share-card-verdict-text" id="share-card-verdict-text">VERDICT</span>
+            </div>
+
+            <p class="share-card-explanation" id="share-card-explanation">
+                Explanation text will be inserted here.
+            </p>
+
+            <div class="share-card-footer">
+                <div class="share-card-branding">
+                    <span class="share-card-branding-icon">🔍</span>
+                    <span>satoricheck.com</span>
+                </div>
+                <span class="share-card-disclaimer">AI-generated analysis. May contain errors.</span>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Container -->
     <div class="toast-container" id="toast-container"></div>
 
     <!-- Security: DOMPurify for XSS protection -->
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+
+    <!-- html-to-image for share card generation -->
+    <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.min.js"></script>
+
+    <!-- Share module (image generation, platform sharing) -->
+    <script src="js/share.js?v=1"></script>
 
     <!-- JavaScript Modules -->
     <script type="module" src="js/app.js?v=2"></script>

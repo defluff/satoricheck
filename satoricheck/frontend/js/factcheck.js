@@ -39,7 +39,7 @@ class FactCheckManager {
             smartAgentToggle.addEventListener('change', (e) => {
                 this.smartAgent = e.target.checked;
                 ui.showToast(
-                    this.smartAgent ? 'Smart Agent enabled 🧠 (2x tokens)' : 'Smart Agent disabled',
+                    this.smartAgent ? 'Smart Agent enabled' : 'Smart Agent disabled',
                     this.smartAgent ? 'success' : 'info'
                 );
             });
@@ -49,20 +49,16 @@ class FactCheckManager {
         ui.elements.checkNowBtn.addEventListener('click', () => {
             // Priority 1: Stop if processing
             if (this.isProcessing) {
-                console.log('⏹ Stop requested');
                 this.handleStop();
                 return;
             }
 
             // Priority 2: Check based on mode
             const appMode = localStorage.getItem('analysisMode') || 'factcheck';
-            console.log('🔘 Check button clicked, mode:', appMode);
 
             if (appMode === 'aidetect') {
-                console.log('🤖 Routing to AI detection...');
                 this.handleAICheck();
             } else {
-                console.log('✓ Routing to fact check...');
                 this.handleManualCheck();
             }
         });
@@ -109,8 +105,11 @@ class FactCheckManager {
             // Call API
             const response = await api.analyzeText(trimmedText, context, this.smartAgent);
 
-            // Update card with results
-            ui.updateCard(cardId, response.result);
+            // Update card with results (include Smart Agent flag for share button visibility)
+            ui.updateCard(cardId, {
+                ...response.result,
+                isSmartAgentMode: this.smartAgent
+            });
             this.checkedTexts.add(trimmedText);
 
             // Update balance
@@ -453,7 +452,6 @@ class FactCheckManager {
      * Handle AI detection check (when in AI Detect mode)
      */
     async handleAICheck() {
-        console.log('🤖 handleAICheck called');
         const transcriptEl = ui.elements.transcriptContainer;
 
         // Get all text content
@@ -466,7 +464,6 @@ class FactCheckManager {
         }
 
         text = text.trim();
-        console.log('🤖 Text to analyze:', text.substring(0, 50) + '...');
 
         if (!text || text.length === 0) {
             ui.showToast('Enter or paste some text to analyze', 'warning');
@@ -480,7 +477,6 @@ class FactCheckManager {
      * Handle AI detection with provided text (for selection tooltip)
      */
     async handleAICheckWithText(text) {
-        console.log('🤖 handleAICheckWithText called with:', text.substring(0, 50) + '...');
 
         // Check word count (API requires minimum 20 words)
         const wordCount = text.split(/\s+/).length;

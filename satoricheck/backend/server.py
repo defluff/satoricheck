@@ -170,6 +170,10 @@ app.register_blueprint(export_bp)
 from backend.routes.live_pro import live_pro_bp
 app.register_blueprint(live_pro_bp)
 
+# Import and register Analytics blueprint (share tracking)
+from backend.routes.analytics import analytics_bp
+app.register_blueprint(analytics_bp)
+
 # Initialize WebSocket proxy for Live Pro (keeps Deepgram key server-side)
 from backend.services.websocket_proxy import init_websocket_proxy
 init_websocket_proxy(app)

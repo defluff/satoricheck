@@ -179,6 +179,33 @@ class CardUI {
             }
         }
 
+        // Add share button if Smart Agent mode (single claim guaranteed)
+        if (result.isSmartAgentMode) {
+            const shareContainer = document.createElement('div');
+            shareContainer.className = 'share-button-container';
+
+            const shareButton = document.createElement('button');
+            shareButton.className = 'share-button';
+            shareButton.innerHTML = `<span class="share-button-icon">📤</span> Share Verdict`;
+
+            // Store verdict data on button for share module
+            shareButton.verdictData = {
+                claim_text: card.querySelector('.claim-text')?.textContent?.replace(/^"|"$/g, '') || '',
+                verdict: result.verdict,
+                explanation: result.explanation
+            };
+
+            shareButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (window.shareModule) {
+                    window.shareModule.showShareMenu(shareButton, shareButton.verdictData);
+                }
+            });
+
+            shareContainer.appendChild(shareButton);
+            detailsContainer.appendChild(shareContainer);
+        }
+
         // Add click handler to toggle expansion
         card.style.cursor = 'pointer';
         card.addEventListener('click', () => {

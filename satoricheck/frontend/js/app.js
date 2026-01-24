@@ -18,7 +18,6 @@ class App {
     }
 
     async init() {
-        console.log('🚀 SatoriCheck initializing...');
 
         // Initialize auth first
         await auth.init();
@@ -37,7 +36,6 @@ class App {
         // Initialize Live Pro
         const liveProAvailable = await livepro.init();
         if (liveProAvailable) {
-            console.log('⚡ Live Pro available');
             // Set up Live Pro transcript handler
             livepro.onTranscript((transcript, isFinal) => {
                 ui.appendTranscript(transcript, isFinal);
@@ -64,7 +62,6 @@ class App {
         }
 
 
-        console.log('✅ SatoriCheck ready!');
     }
 
     setupEventListeners() {

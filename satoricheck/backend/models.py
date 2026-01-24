@@ -178,3 +178,19 @@ class DeletedUser(Base):
     
     def __repr__(self):
         return f'<DeletedUser hash={self.email_hash[:10]}...>'
+
+
+class ShareStats(Base):
+    """Anonymous share tracking for social sharing feature.
+    
+    Privacy-first: No user_id, no content stored.
+    Only tracks platform and timestamp for aggregate analytics.
+    """
+    __tablename__ = 'share_stats'
+    
+    id = Column(Integer, primary_key=True)
+    platform = Column(String(20), nullable=False)  # 'X', 'LinkedIn', 'Download'
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    
+    def __repr__(self):
+        return f'<ShareStats platform={self.platform}>'
