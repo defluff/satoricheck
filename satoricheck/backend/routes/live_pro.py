@@ -309,51 +309,47 @@ def cleanup_abandoned_sessions():
     MAX_SESSION_DURATION = 7200  # 2 hours in seconds
     
     try:
-        now = time.time()
-        abandoned_ids = []
-        timeout_ids = []
+        now = datetime.utcnow()
+        limit_heartbeat = now - timedelta(seconds=60)
+        limit_duration = now - timedelta(seconds=MAX_SESSION_DURATION)
         
-        # Query DB for active sessions
-        active_sessions_list = db_session.query(LiveProSession).filter_by(status='active').all()
+        # 1. Identify and Close Abandoned Sessions (SQL Filter)
+        # Filter: Status=active AND last_heartbeat < 60s ago
+        abandoned_query = db_session.query(LiveProSession).filter(
+            LiveProSession.status == 'active',
+            LiveProSession.last_heartbeat < limit_heartbeat
+        )
         
-        for session in active_sessions_list:
-            # Check for abandoned (no heartbeat for 60s)
-            time_since_heartbeat = (datetime.utcnow() - session.last_heartbeat).total_seconds()
-            if time_since_heartbeat > 60:
-                abandoned_ids.append(session.id)
-            # Check for hard timeout (session running > 2 hours)
-            elif (datetime.utcnow() - session.started_at).total_seconds() > MAX_SESSION_DURATION:
-                timeout_ids.append(session.id)
+        abandoned_count = abandoned_query.count()
+        if abandoned_count > 0:
+            logger.warning(f"Closing {abandoned_count} abandoned sessions (no heartbeat)")
+            abandoned_query.update({
+                'status': 'abandoned',
+                'ended_at': now
+            }, synchronize_session=False)
+            
+        # 2. Identify and Close Timeout Sessions (SQL Filter)
+        # Filter: Status=active AND started_at < 2 hours ago
+        timeout_query = db_session.query(LiveProSession).filter(
+            LiveProSession.status == 'active',
+            LiveProSession.started_at < limit_duration
+        )
         
-        # Clean up abandoned sessions
-        for session_id in abandoned_ids:
-            logger.warning(f"Abandoning session {session_id} - no heartbeat for 60s")
-            _close_session(session_id, 'abandoned')
-        
-        # Clean up sessions exceeding hard limit
-        for session_id in timeout_ids:
-            logger.warning(f"Terminating session {session_id} - exceeded 2-hour limit")
-            _close_session(session_id, 'timeout')
-        
-        total_cleaned = len(abandoned_ids) + len(timeout_ids)
-        if total_cleaned:
-            logger.info(f"Cleaned up {len(abandoned_ids)} abandoned + {len(timeout_ids)} timeout sessions")
+        timeout_count = timeout_query.count()
+        if timeout_count > 0:
+            logger.warning(f"Closing {timeout_count} timed-out sessions (> 2 hours)")
+            timeout_query.update({
+                'status': 'timeout',
+                'ended_at': now
+            }, synchronize_session=False)
+
+        if abandoned_count > 0 or timeout_count > 0:
+            db_session.commit()
+            logger.info(f"Cleanup complete: {abandoned_count} abandoned, {timeout_count} timeouts")
             
     except Exception as e:
         logger.error(f"Error in cleanup_abandoned_sessions: {e}", exc_info=True)
         db_session.rollback()
 
 
-def _close_session(session_id, status):
-    """Helper to close a session with given status."""
-    try:
-        session = db_session.query(LiveProSession).get(session_id)
-        if session and session.status == 'active':
-            elapsed = (datetime.utcnow() - session.started_at).total_seconds()
-            session.duration_seconds = int(elapsed)
-            session.status = status
-            session.ended_at = datetime.utcnow()
-            db_session.commit()
-    except Exception as e:
-        logger.error(f"Error closing session {session_id}: {e}")
-        db_session.rollback()
+
