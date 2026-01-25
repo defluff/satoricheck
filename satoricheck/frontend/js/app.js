@@ -392,7 +392,7 @@ class App {
         this.liveProMode = true;
         modeLivePro?.classList.add('active');
         modeStandard?.classList.remove('active');
-        ui.showToast('⚡ Live Pro mode activated (1 CP/min)', 'success');
+        // Toast removed to avoid confusion (Live Pro isn't 'Active' until Mic is clicked)
     }
 
     async handlePurchase(packageType) {

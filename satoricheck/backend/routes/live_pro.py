@@ -115,6 +115,19 @@ def start_session():
     })
 
 
+@live_pro_bp.errorhandler(Exception)
+def handle_live_pro_error(error):
+    """Local error handler for this blueprint to debug start failures."""
+    if isinstance(error, APIError):
+        return jsonify(error.to_dict()), error.status_code
+    
+    logger.error(f"Live Pro Unexpected Error: {error}", exc_info=True)
+    return jsonify({
+        'success': False,
+        'error': str(error) if Config.ENV == 'development' else 'Failed to start Live Pro session'
+    }), 500
+
+
 
 
 
