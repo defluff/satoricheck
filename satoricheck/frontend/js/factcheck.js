@@ -39,7 +39,7 @@ class FactCheckManager {
             smartAgentToggle.addEventListener('change', (e) => {
                 this.smartAgent = e.target.checked;
                 ui.showToast(
-                    this.smartAgent ? 'Smart Agent enabled' : 'Smart Agent disabled',
+                    this.smartAgent ? 'Smart Agent enabled ✓' : 'Smart Agent disabled',
                     this.smartAgent ? 'success' : 'info'
                 );
             });
@@ -261,7 +261,7 @@ class FactCheckManager {
 
         try {
             // Smart Agent: First identify claims, then check each one
-            ui.showToast('🧠 Smart Agent analyzing...', 'info');
+            ui.showToast('Smart Agent analyzing...', 'info');
 
             const maxRetries = 2;
             let lastError = null;
@@ -281,7 +281,7 @@ class FactCheckManager {
                     lastError = error;
                     console.error(`Smart Agent attempt ${attempt} failed:`, error);
                     if (attempt < maxRetries) {
-                        ui.showToast(`🧠 Retrying... (${attempt}/${maxRetries})`, 'warning');
+                        ui.showToast(`Retrying... (${attempt}/${maxRetries})`, 'warning');
                         await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
                     }
                 }
@@ -329,7 +329,7 @@ class FactCheckManager {
                 }
             } else {
                 // No claims found, check as single block
-                ui.showToast('🧠 No distinct claims found, checking as whole', 'info');
+                ui.showToast('No distinct claims found, checking as whole', 'info');
                 await this.checkText(text, null);
             }
 
@@ -445,7 +445,15 @@ class FactCheckManager {
             context = contextSentences.join(' ');
         }
 
-        this.checkText(lastSentence, context);
+        // Check if Smart Agent is enabled
+        if (this.smartAgent) {
+            // Use Smart Agent to identify and check claims for this sentence
+            // Note: handleSmartAgentCheck handles its own "checkedTexts" logic
+            this.handleSmartAgentCheck(lastSentence);
+        } else {
+            // Standard check with context
+            this.checkText(lastSentence, context);
+        }
     }
 
     /**
