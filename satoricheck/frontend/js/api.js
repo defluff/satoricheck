@@ -117,12 +117,7 @@ class APIClient {
         });
     }
 
-    async deductLiveProTime(seconds) {
-        return this.request('/live-pro/deduct', {
-            method: 'POST',
-            body: JSON.stringify({ seconds })
-        });
-    }
+
 
     async endLiveProSession(sessionId) {
         return this.request('/live-pro/end', {

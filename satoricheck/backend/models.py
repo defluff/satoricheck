@@ -143,6 +143,7 @@ class LiveProSession(Base):
     # Session timing
     started_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     last_heartbeat = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_billed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     ended_at = Column(DateTime)
     
     # Billing tracking

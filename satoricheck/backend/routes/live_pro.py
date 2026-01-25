@@ -18,9 +18,8 @@ logger = logging.getLogger(__name__)
 
 live_pro_bp = Blueprint('live_pro', __name__, url_prefix='/api/live-pro')
 
-# In-memory session tracking for heartbeat monitoring
-# Key: session_id, Value: {user_id, last_heartbeat_time, last_billing_time}
-active_sessions = {}
+# In-memory session tracking REMOVED in favor of Database State
+# active_sessions = {}
 
 
 @live_pro_bp.route('/config', methods=['GET'])
@@ -62,23 +61,14 @@ def start_session():
     
     if existing_session:
         # Check if it's actually stale (no heartbeat in 60s) - if so, auto-close it
-        if existing_session.id in active_sessions:
-            last_heartbeat = active_sessions[existing_session.id].get('last_heartbeat', 0)
-            if time.time() - last_heartbeat > 60:
-                # Stale session, close it
-                existing_session.status = 'abandoned'
-                existing_session.ended_at = datetime.utcnow()
-                del active_sessions[existing_session.id]
-                db_session.commit()
-                logger.info(f"Auto-closed stale session {existing_session.id} for user {user.email}")
-            else:
-                raise APIError('You already have an active Live Pro session. Please close it first.', status_code=409)
-        else:
-            # Session in DB but not in memory - mark as abandoned
+        if (datetime.utcnow() - existing_session.last_heartbeat).total_seconds() > 60:
+            # Stale session, close it
             existing_session.status = 'abandoned'
             existing_session.ended_at = datetime.utcnow()
             db_session.commit()
-            logger.info(f"Cleaned up orphaned session {existing_session.id} for user {user.email}")
+            logger.info(f"Auto-closed stale session {existing_session.id} for user {user.email}")
+        else:
+            raise APIError('You already have an active Live Pro session. Please close it first.', status_code=409)
     
     # Check balance
     token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
@@ -98,6 +88,7 @@ def start_session():
         user_id=user.id,
         started_at=datetime.utcnow(),
         last_heartbeat=datetime.utcnow(),
+        last_billed_at=datetime.utcnow(),
         status='active',
         language=language,
         device_id=device_id
@@ -105,13 +96,7 @@ def start_session():
     db_session.add(session)
     db_session.commit()
     
-    # Track in memory for heartbeat monitoring
-    active_sessions[session.id] = {
-        'user_id': user.id,
-        'last_heartbeat': time.time(),
-        'last_billing': time.time(),
-        'started_at': time.time()  # Track session start for max duration
-    }
+    # In-memory tracking removed
     
     logger.info(f"Live Pro session {session.id} started for user {user.email}, balance: {token_balance.balance} CP")
     
@@ -130,78 +115,7 @@ def start_session():
     })
 
 
-@live_pro_bp.route('/deduct', methods=['POST'])
-@login_required
-def deduct_time():
-    """
-    Deduct CP based on time used.
-    Called periodically by frontend during a Live Pro session.
-    
-    Expected payload:
-    {
-        "seconds": 30  // Time elapsed since last deduction
-    }
-    """
-    try:
-        data = request.get_json()
-        if not data:
-            raise APIError('No data provided')
-        
-        seconds = data.get('seconds', 0)
-        if seconds <= 0:
-            raise APIError('Invalid seconds value')
-        
-        user = request.current_user
-        
-        # Calculate CP to deduct (1 CP per 60 seconds, round up)
-        # Standardized: same rounding as heartbeat billing
-        minutes_used = seconds / 60.0
-        cp_to_deduct = max(1, int(minutes_used + 0.5))  # Round up, minimum 1 CP
-        
-        # Get token balance
-        token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
-        if not token_balance:
-            raise APIError('No token balance found', status_code=403)
-        
-        # Check if enough balance
-        if token_balance.balance < cp_to_deduct:
-            # Deduct what's left
-            cp_to_deduct = token_balance.balance
-            out_of_credits = True
-        else:
-            out_of_credits = False
-        
-        # Deduct
-        token_balance.balance -= cp_to_deduct
-        token_balance.last_updated = datetime.utcnow()
-        
-        # Record transaction (aggregate multiple deductions into one per session later)
-        transaction = Transaction(
-            user_id=user.id,
-            type='deduction',
-            amount=-cp_to_deduct,
-            description=f'Live Pro ({seconds}s)',
-            timestamp=datetime.utcnow()
-        )
-        db_session.add(transaction)
-        db_session.commit()
-        
-        logger.info(f"Live Pro deduction: {cp_to_deduct} CP for {seconds}s, user {user.email}, remaining: {token_balance.balance}")
-        
-        return jsonify({
-            'success': True,
-            'cp_deducted': cp_to_deduct,
-            'new_balance': token_balance.balance,
-            'out_of_credits': out_of_credits
-        })
-        
-    except APIError:
-        db_session.rollback()
-        raise
-    except Exception as e:
-        db_session.rollback()
-        logger.error(f"Live Pro deduction error: {e}", exc_info=True)
-        raise APIError('Failed to process Live Pro billing')
+
 
 
 @live_pro_bp.route('/heartbeat', methods=['POST'])
@@ -217,27 +131,35 @@ def heartbeat():
             raise APIError('No data provided')
         
         session_id = data.get('session_id')
-        if not session_id or session_id not in active_sessions:
-            raise APIError('Invalid or expired session', status_code=404)
+        
+        session_id = data.get('session_id')
+        if not session_id:
+            raise APIError('Invalid session ID', status_code=404)
         
         user = request.current_user
         
-        # Update heartbeat timestamp
-        active_sessions[session_id]['last_heartbeat'] = time.time()
-        
-        # Update database
+        # Get session from DB
         session = db_session.query(LiveProSession).get(session_id)
-        if session:
-            session.last_heartbeat = datetime.utcnow()
+        if not session or session.status != 'active':
+            # Client might be out of sync, tell them to stop
+            return jsonify({'status': 'invalid_session'})
+            
+        if session.user_id != user.id:
+            raise APIError('Unauthorized', status_code=403)
+        
+        # Update heartbeat timestamp
+        session.last_heartbeat = datetime.utcnow()
         
         # Check if 30 seconds elapsed since last billing
-        now = time.time()
-        last_billing = active_sessions[session_id]['last_billing']
+        # Use DB timestamps (UTC)
+        now = datetime.utcnow()
+        last_billing = session.last_billed_at
         
-        if now - last_billing >= 30:
+        elapsed_since_billing = (now - last_billing).total_seconds()
+        
+        if elapsed_since_billing >= 30:
             # Calculate elapsed time and deduct CP
-            elapsed_seconds = int(now - last_billing)
-            minutes_used = elapsed_seconds / 60.0
+            minutes_used = elapsed_since_billing / 60.0
             cp_to_deduct = max(1, int(minutes_used + 0.5))  # Round up, minimum 1 CP
             
             # Get token balance
@@ -252,23 +174,20 @@ def heartbeat():
                 token_balance.last_updated = datetime.utcnow()
                 
                 # Update session
-                if session:
-                    session.cp_consumed += cp_to_deduct
-                    session.duration_seconds = int((datetime.utcnow() - session.started_at).total_seconds())
+                session.cp_consumed += cp_to_deduct
+                session.duration_seconds = int((datetime.utcnow() - session.started_at).total_seconds())
+                session.last_billed_at = now  # Update billing timer
                 
                 # Record transaction
                 transaction = Transaction(
                     user_id=user.id,
                     type='deduction',
                     amount=-cp_to_deduct,
-                    description=f'Live Pro session {session_id} ({elapsed_seconds}s)',
+                    description=f'Live Pro session {session_id} ({int(elapsed_since_billing)}s)',
                     timestamp=datetime.utcnow()
                 )
                 db_session.add(transaction)
                 db_session.commit()
-                
-                # Update last billing time
-                active_sessions[session_id]['last_billing'] = now
                 
                 logger.info(f"Live Pro heartbeat billing: {cp_to_deduct} CP for session {session_id}")
                 
@@ -321,11 +240,18 @@ def end_session():
         elapsed_seconds = int((datetime.utcnow() - session.started_at).total_seconds())
         
         # Check if there's time since last billing
-        if session_id in active_sessions:
-            last_billing_time = active_sessions[session_id]['last_billing']
-            remaining_seconds = int(time.time() - last_billing_time)
+        # Check final billing segment
+        last_billing_time = session.last_billed_at
+        remaining_seconds = (datetime.utcnow() - last_billing_time).total_seconds()
+        
+        if remaining_seconds > 0:
+            # Grace Period Check (4s)
+            potential_total_duration = (datetime.utcnow() - session.started_at).total_seconds()
             
-            if remaining_seconds > 0:
+            if potential_total_duration < 4:
+                logger.info(f"Session {session_id} ended within grace period ({potential_total_duration}s). No charge.")
+                # Do NOT deduct.
+            else:
                 # Final deduction
                 minutes_used = remaining_seconds / 60.0
                 cp_to_deduct = max(1, int(minutes_used + 0.5))
@@ -341,13 +267,10 @@ def end_session():
                         user_id=user.id,
                         type='deduction',
                         amount=-cp_to_deduct,
-                        description=f'Live Pro session {session_id} (final {remaining_seconds}s)',
+                        description=f'Live Pro session {session_id} (final {int(remaining_seconds)}s)',
                         timestamp=datetime.utcnow()
                     )
                     db_session.add(transaction)
-            
-            # Remove from active tracking
-            del active_sessions[session_id]
         
         # Update session status
         session.ended_at = datetime.utcnow()
@@ -390,13 +313,17 @@ def cleanup_abandoned_sessions():
         abandoned_ids = []
         timeout_ids = []
         
-        for session_id, data in list(active_sessions.items()):
+        # Query DB for active sessions
+        active_sessions_list = db_session.query(LiveProSession).filter_by(status='active').all()
+        
+        for session in active_sessions_list:
             # Check for abandoned (no heartbeat for 60s)
-            if now - data['last_heartbeat'] > 60:
-                abandoned_ids.append(session_id)
+            time_since_heartbeat = (datetime.utcnow() - session.last_heartbeat).total_seconds()
+            if time_since_heartbeat > 60:
+                abandoned_ids.append(session.id)
             # Check for hard timeout (session running > 2 hours)
-            elif 'started_at' in data and now - data['started_at'] > MAX_SESSION_DURATION:
-                timeout_ids.append(session_id)
+            elif (datetime.utcnow() - session.started_at).total_seconds() > MAX_SESSION_DURATION:
+                timeout_ids.append(session.id)
         
         # Clean up abandoned sessions
         for session_id in abandoned_ids:
@@ -427,10 +354,6 @@ def _close_session(session_id, status):
             session.status = status
             session.ended_at = datetime.utcnow()
             db_session.commit()
-        
-        # Remove from active tracking
-        if session_id in active_sessions:
-            del active_sessions[session_id]
     except Exception as e:
         logger.error(f"Error closing session {session_id}: {e}")
         db_session.rollback()

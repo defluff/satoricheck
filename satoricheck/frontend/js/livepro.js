@@ -16,11 +16,18 @@ class LiveProManager {
         this.sessionId = null;
         this.heartbeatInterval = null;
         this.totalSeconds = 0;
+        this.totalSeconds = 0;
         this.onTranscriptCallback = null;
+        this.onStopCallback = null;
 
         // Config from backend
         this.cpPerMinute = 1;
         this.available = false;
+
+        // Connection Stability
+        this.maxRetries = 3;
+        this.retryCount = 0;
+        this.isRetrying = false;
     }
 
     /**
@@ -70,6 +77,13 @@ class LiveProManager {
     }
 
     /**
+     * Set callback for when session stops
+     */
+    onStop(callback) {
+        this.onStopCallback = callback;
+    }
+
+    /**
      * Start Live Pro session
      */
     async start(deviceId = null, language = 'en') {
@@ -90,9 +104,23 @@ class LiveProManager {
             this.sessionId = session.session_id;
 
             // Get audio stream
+            // Get audio stream with strict constraints for Deepgram compatibility
+            // Force 16kHz Mono to avoid Opux/WebM complexity in the proxy
             const constraints = {
-                audio: deviceId ? { deviceId: { exact: deviceId } } : true
+                audio: {
+                    deviceId: deviceId ? { exact: deviceId } : undefined,
+                    channelCount: 1,
+                    sampleRate: 16000,
+                    echoCancellation: false,
+                    noiseSuppression: false, // Let Deepgram handle this
+                    autoGainControl: false
+                }
             };
+
+            // Security Check: Ensure secure context (HTTPS)
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error('Microphone access requires a secure connection (HTTPS).');
+            }
 
             this.audioStream = await navigator.mediaDevices.getUserMedia(constraints);
 
@@ -150,11 +178,41 @@ class LiveProManager {
                 reject(new Error('WebSocket connection failed'));
             };
 
-            this.webSocket.onclose = (event) => {
-                if (this.isActive) {
-                    // Unexpected close - try to reconnect or stop
-                    this.stop();
-                    ui.showToast('Live Pro connection lost', 'warning');
+            this.webSocket.onclose = async (event) => {
+                console.log('Deepgram WebSocket closed:', event.code, event.reason);
+
+                if (this.isActive && !this.isRetrying) {
+                    // Check if we should retry (Code 1006 is abnormal closure)
+                    if (this.retryCount < this.maxRetries) {
+                        console.log(`Connection lost. Retrying (${this.retryCount + 1}/${this.maxRetries})...`);
+                        this.isRetrying = true;
+                        this.retryCount++;
+
+                        try {
+                            // Wait 1s before retry
+                            await new Promise(r => setTimeout(r, 1000));
+
+                            // Re-establish WebSocket only (keep media stream)
+                            // Note: We might need a new session ID if the backend closed it, 
+                            // but for network blips, re-connecting to the same proxy URL might work 
+                            // if the backend logic supports it. 
+                            // However, the safest backend approach implies a new session.
+                            // For this iteration, we'll try to restart the full flow to be safe.
+
+                            this.isRetrying = false; // Reset flag before restart
+                            this.stop(); // Clean up current state
+                            await this.start(deviceId, language); // Restart
+
+                        } catch (retryError) {
+                            console.error('Retry failed:', retryError);
+                            this.stop();
+                            ui.showToast('Connection failed after retries', 'error');
+                        }
+                    } else {
+                        // Max retries reached
+                        this.stop();
+                        ui.showToast('Live Pro connection lost', 'warning');
+                    }
                 }
             };
 
@@ -265,6 +323,11 @@ class LiveProManager {
         }
 
         this.cleanup();
+
+        // Notify listeners
+        if (this.onStopCallback) {
+            this.onStopCallback();
+        }
 
         ui.showToast(`Live Pro stopped (${Math.floor(finalSeconds / 60)}m ${finalSeconds % 60}s)`, 'info');
     }

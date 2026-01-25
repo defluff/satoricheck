@@ -43,6 +43,13 @@ class App {
                     factcheck.handleAutoCheck(transcript);
                 }
             });
+
+            // Handle automatic stops (connection loss, etc)
+            livepro.onStop(() => {
+                ui.elements.micBtn.classList.remove('active', 'live-pro-active');
+                const liveProIndicator = document.getElementById('live-pro-indicator');
+                if (liveProIndicator) liveProIndicator.classList.add('hidden');
+            });
         } else {
             // Hide Live Pro button if not available
             const liveProBtn = document.getElementById('mode-live-pro');
@@ -416,37 +423,41 @@ class App {
             const response = await api.getTransactionHistory();
 
             if (response.success && response.transactions.length > 0) {
-                transactionList.innerHTML = response.transactions.map(t => {
-                    const isPositive = t.amount > 0;
-                    const date = new Date(t.timestamp).toLocaleDateString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric'
-                    });
-                    // Use textContent-safe values to prevent XSS
-                    const safeDesc = t.description || t.type;
-                    const amountPrefix = isPositive ? '+' : '';
+                // Filter: Only show Purchases (positive) or Bonuses. Hide internal usage costs (negative).
+                const visibleTransactions = response.transactions.filter(t =>
+                    t.type === 'purchase' || t.type === 'bonus' || t.amount > 0
+                );
 
-                    return `
-                        <div class="transaction-item">
-                            <div class="transaction-info">
-                                <span class="transaction-desc">${this.escapeHtml(safeDesc)}</span>
-                                <span class="transaction-date">${date}</span>
+                if (visibleTransactions.length > 0) {
+                    transactionList.innerHTML = visibleTransactions.map(t => {
+                        const isPositive = t.amount > 0;
+                        const date = new Date(t.timestamp).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric'
+                        });
+                        // Use textContent-safe values to prevent XSS
+                        const safeDesc = t.description || t.type;
+                        const amountPrefix = isPositive ? '+' : '';
+
+                        return `
+                            <div class="transaction-item">
+                                <div class="transaction-info">
+                                    <span class="transaction-desc">${this.escapeHtml(safeDesc)}</span>
+                                    <span class="transaction-date">${date}</span>
+                                </div>
+                                <span class="transaction-amount ${isPositive ? 'positive' : 'negative'}">
+                                    ${amountPrefix}${t.amount} CP
+                                </span>
                             </div>
-                            <span class="transaction-amount ${isPositive ? 'positive' : 'negative'}">
-                                ${amountPrefix}${t.amount} CP
-                            </span>
-                        </div>
-                    `;
-                }).join('');
+                        `;
+                    }).join('');
+                } else {
+                    // Filtered list is empty (or original was empty)
+                    this.renderEmptyTransactions(transactionList);
+                }
             } else {
-                transactionList.innerHTML = `
-                    <div class="transaction-empty">
-                        <div class="transaction-empty-icon">📋</div>
-                        <p>No transactions yet</p>
-                        <p style="font-size: 0.8rem; margin-top: 4px;">Purchase tokens to get started!</p>
-                    </div>
-                `;
+                this.renderEmptyTransactions(transactionList);
             }
         } catch (error) {
             console.error('Failed to load transactions:', error);
@@ -468,6 +479,16 @@ class App {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    renderEmptyTransactions(container) {
+        container.innerHTML = `
+            <div class="transaction-empty">
+                <div class="transaction-empty-icon">📋</div>
+                <p>No transactions yet</p>
+                <p style="font-size: 0.8rem; margin-top: 4px;">Purchase tokens to get started!</p>
+            </div>
+        `;
     }
 
     checkPaymentStatus() {

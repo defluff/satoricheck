@@ -15,7 +15,8 @@ from backend.config import Config
 from backend.database import db_session
 from backend.models import LiveProSession, TokenBalance, Transaction
 from backend.routes.auth import login_required
-from backend.routes.live_pro import active_sessions
+from backend.models import LiveProSession, TokenBalance, Transaction
+from backend.routes.auth import login_required
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -49,14 +50,14 @@ def ws_proxy(ws, session_id):
     """
     logger.info(f"WebSocket proxy connection for session {session_id}")
     
-    # Validate session exists and is active
-    if session_id not in active_sessions:
-        ws.send(json.dumps({'error': 'Invalid or expired session'}))
-        ws.close()
-        return
+    # Validated by DB lookup below
+    # if session_id not in active_sessions:
+    #     ws.send(json.dumps({'error': 'Invalid or expired session'}))
+    #     ws.close()
+    #     return
     
-    session_data = active_sessions[session_id]
-    user_id = session_data['user_id']
+    # session_data = active_sessions[session_id]
+    # user_id = session_data['user_id']
     
     # Get session from DB for language preference
     db_session_obj = db_session.query(LiveProSession).get(session_id)
@@ -64,6 +65,8 @@ def ws_proxy(ws, session_id):
         ws.send(json.dumps({'error': 'Session not active'}))
         ws.close()
         return
+    
+    user_id = db_session_obj.user_id # Get user_id from DB object
     
     language = db_session_obj.language or 'en'
     
@@ -89,7 +92,7 @@ def ws_proxy(ws, session_id):
         logger.info(f"Connected to Deepgram for session {session_id}")
         
         # Update session heartbeat
-        active_sessions[session_id]['last_heartbeat'] = time.time()
+        # active_sessions[session_id]['last_heartbeat'] = time.time()
         
         # Start thread to receive from Deepgram and send to browser
         stop_event = threading.Event()
@@ -133,15 +136,10 @@ def ws_proxy(ws, session_id):
                     # Could be a control message
                     deepgram_ws.send(audio_data)
                 
-                # Update heartbeat
-                active_sessions[session_id]['last_heartbeat'] = time.time()
-                
-                # Server-side billing every 30 seconds
-                now = time.time()
-                if now - last_billing_time >= 30:
-                    elapsed = now - last_billing_time
-                    bill_user(user_id, session_id, elapsed)
-                    last_billing_time = now
+
+                # Heartbeat updated solely by client calling /heartbeat API
+                # This keeps separation of concerns clean.
+                # Proxy just proxies.
                     
             except TimeoutError:
                 # No data received, just continue
@@ -150,10 +148,7 @@ def ws_proxy(ws, session_id):
                 logger.error(f"WebSocket proxy error: {e}")
                 break
         
-        # Final billing for remaining time
-        final_elapsed = time.time() - last_billing_time
-        if final_elapsed > 5:  # Only bill if > 5 seconds
-            bill_user(user_id, session_id, final_elapsed)
+        # Billing handled by /heartbeat and /end endpoints
             
     except Exception as e:
         logger.error(f"Failed to connect to Deepgram: {e}")
@@ -169,41 +164,4 @@ def ws_proxy(ws, session_id):
         logger.info(f"WebSocket proxy closed for session {session_id}")
 
 
-def bill_user(user_id, session_id, elapsed_seconds):
-    """Deduct CP based on elapsed time (server-controlled)."""
-    try:
-        minutes_used = elapsed_seconds / 60.0
-        cp_to_deduct = max(1, int(minutes_used + 0.5))  # Round up, minimum 1 CP
-        
-        # Get token balance
-        token_balance = db_session.query(TokenBalance).filter_by(user_id=user_id).first()
-        if not token_balance:
-            return
-        
-        if token_balance.balance >= cp_to_deduct:
-            token_balance.balance -= cp_to_deduct
-            token_balance.last_updated = datetime.utcnow()
-            
-            # Update session CP consumed
-            session_obj = db_session.query(LiveProSession).get(session_id)
-            if session_obj:
-                session_obj.cp_consumed = (session_obj.cp_consumed or 0) + cp_to_deduct
-            
-            # Record transaction
-            transaction = Transaction(
-                user_id=user_id,
-                type='deduction',
-                amount=-cp_to_deduct,
-                description=f'Live Pro proxy session {session_id}',
-                timestamp=datetime.utcnow()
-            )
-            db_session.add(transaction)
-            db_session.commit()
-            
-            logger.info(f"Billed {cp_to_deduct} CP for session {session_id}")
-        else:
-            logger.warning(f"Insufficient balance for session {session_id}")
-            
-    except Exception as e:
-        logger.error(f"Billing error: {e}")
-        db_session.rollback()
+
