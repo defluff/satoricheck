@@ -92,6 +92,20 @@ class LiveProManager {
             return false;
         }
 
+        this.currentDeviceId = deviceId;
+        this.currentLanguage = language;
+
+        // Explicitly request microphone permission first to match standard mode UX
+        // This ensures the browser prompt appears before we create a backend session
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach(track => track.stop()); // Release immediately, just checking permission
+        } catch (permError) {
+            console.error('Microphone permission denied:', permError);
+            ui.showToast('Microphone access is required for Live Pro', 'error');
+            return false;
+        }
+
         try {
             // Get session config from backend
             const session = await api.startLiveProSession(language, deviceId);
@@ -201,7 +215,7 @@ class LiveProManager {
 
                             this.isRetrying = false; // Reset flag before restart
                             this.stop(); // Clean up current state
-                            await this.start(deviceId, language); // Restart
+                            await this.start(this.currentDeviceId, this.currentLanguage); // Restart
 
                         } catch (retryError) {
                             console.error('Retry failed:', retryError);

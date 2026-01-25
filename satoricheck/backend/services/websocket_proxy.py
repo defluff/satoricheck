@@ -1,23 +1,19 @@
 """
 WebSocket Proxy for Deepgram Live Pro.
-Routes audio from browser → backend → Deepgram, keeping API key server-side.
+Routes audio from browser → backend → Deepgram using the official SDK.
 """
-import asyncio
 import logging
-import time
-from flask import Blueprint, request
-from flask_sock import Sock
-import websocket
 import threading
 import json
+import time
+from flask import Blueprint
+from flask_sock import Sock
+
+from deepgram import DeepgramClient, DeepgramClientOptions, LiveOptions, LiveTranscriptionEvents
 
 from backend.config import Config
 from backend.database import db_session
-from backend.models import LiveProSession, TokenBalance, Transaction
-from backend.routes.auth import login_required
-from backend.models import LiveProSession, TokenBalance, Transaction
-from backend.routes.auth import login_required
-from datetime import datetime
+from backend.models import LiveProSession
 
 logger = logging.getLogger(__name__)
 
@@ -25,143 +21,162 @@ logger = logging.getLogger(__name__)
 ws_bp = Blueprint('ws', __name__)
 sock = Sock()
 
-# Deepgram WebSocket URL
-DEEPGRAM_WS_URL = "wss://api.deepgram.com/v1/listen"
-
-
-def init_websocket_proxy(app):
+def init_websocket_proxy(app) -> None:
     """Initialize WebSocket support on Flask app."""
     sock.init_app(app)
-    logger.info("✓ WebSocket proxy initialized")
-
+    logger.info("✓ WebSocket proxy initialized (SDK Mode)")
 
 @sock.route('/api/livepro/ws/<int:session_id>')
-def ws_proxy(ws, session_id):
+def ws_proxy(ws, session_id: int) -> None:
     """
-    WebSocket proxy for Live Pro transcription.
-    
-    Flow:
-    1. Browser connects to this endpoint
-    2. We validate the session belongs to the user
-    3. We open a WebSocket to Deepgram (with OUR API key)
-    4. We relay audio from browser → Deepgram
-    5. We relay transcripts from Deepgram → browser
-    6. We handle billing server-side
+    WebSocket proxy for Live Pro transcription using Deepgram SDK.
     """
     logger.info(f"WebSocket proxy connection for session {session_id}")
-    
-    # Validated by DB lookup below
-    # if session_id not in active_sessions:
-    #     ws.send(json.dumps({'error': 'Invalid or expired session'}))
-    #     ws.close()
-    #     return
-    
-    # session_data = active_sessions[session_id]
-    # user_id = session_data['user_id']
-    
-    # Get session from DB for language preference
-    db_session_obj = db_session.query(LiveProSession).get(session_id)
-    if not db_session_obj or db_session_obj.status != 'active':
-        ws.send(json.dumps({'error': 'Session not active'}))
+
+    # 1. Validate Session from DB
+    try:
+        # Use a fresh session check
+        db_session_obj = db_session.query(LiveProSession).get(session_id)
+        if not db_session_obj or db_session_obj.status != 'active':
+            ws.send(json.dumps({'error': 'Session not active'}))
+            ws.close()
+            return
+
+        user_id = db_session_obj.user_id
+        language = db_session_obj.language or 'en'
+    except Exception as e:
+        logger.error(f"Database check failed for session {session_id}: {e}")
         ws.close()
         return
-    
-    user_id = db_session_obj.user_id # Get user_id from DB object
-    
-    language = db_session_obj.language or 'en'
-    
-    # Build Deepgram URL with parameters
-    params = {
-        "model": "nova-2",
-        "language": language,
-        "punctuate": "true",
-        "interim_results": "true",
-        "utterance_end_ms": "1000",
-        "vad_events": "true"
-    }
-    query_string = "&".join(f"{k}={v}" for k, v in params.items())
-    deepgram_url = f"{DEEPGRAM_WS_URL}?{query_string}"
-    
-    # Connect to Deepgram with our API key
-    deepgram_ws = None
+
+    # 2. Setup Deepgram Client
     try:
-        deepgram_ws = websocket.create_connection(
-            deepgram_url,
-            header=[f"Authorization: Token {Config.DEEPGRAM_API_KEY}"]
+        # Configuration for the Deepgram Client
+        # SDK v3+ often accepts simple config or defaults.
+        # We'll rely on the client to handle keepalives default or pass via config dict if needed
+        # but for now, simple init to fix the ImportError
+        
+        deepgram = DeepgramClient(Config.DEEPGRAM_API_KEY)
+
+        # Create a websocket connection to Deepgram
+        options = LiveOptions(
+            model="nova-2", 
+            language=language or "en", 
+            smart_format=True, 
+            interim_results=True, 
+            utterance_end_ms="1000", 
+            vad_events=True,
+            endpointing=True, # Enable endpointing
+            keepalive=True # Pass keepalive here in LiveOptions if supported, or rely on client default
         )
-        logger.info(f"Connected to Deepgram for session {session_id}")
         
-        # Update session heartbeat
-        # active_sessions[session_id]['last_heartbeat'] = time.time()
-        
-        # Start thread to receive from Deepgram and send to browser
-        stop_event = threading.Event()
-        
-        def relay_from_deepgram():
-            """Receive transcripts from Deepgram and send to browser."""
-            try:
-                while not stop_event.is_set():
-                    try:
-                        result = deepgram_ws.recv()
-                        if result:
-                            ws.send(result)
-                    except websocket.WebSocketConnectionClosedException:
-                        break
-                    except Exception as e:
-                        logger.error(f"Deepgram receive error: {e}")
-                        break
-            finally:
-                stop_event.set()
-        
-        # Start relay thread
-        relay_thread = threading.Thread(target=relay_from_deepgram, daemon=True)
-        relay_thread.start()
-        
-        # Main loop: receive audio from browser and send to Deepgram
-        last_billing_time = time.time()
-        
-        while not stop_event.is_set():
-            try:
-                # Receive audio data from browser
-                audio_data = ws.receive(timeout=1)
-                
-                if audio_data is None:
-                    # Connection closed
-                    break
-                
-                # Forward to Deepgram
-                if isinstance(audio_data, bytes):
-                    deepgram_ws.send_binary(audio_data)
-                else:
-                    # Could be a control message
-                    deepgram_ws.send(audio_data)
-                
+        dg_connection = deepgram.listen.websocket.v("1")
 
-                # Heartbeat updated solely by client calling /heartbeat API
-                # This keeps separation of concerns clean.
-                # Proxy just proxies.
-                    
-            except TimeoutError:
-                # No data received, just continue
-                continue
+        # 3. Define Event Handlers
+        def on_open(self, open, **kwargs):
+            logger.info(f"Deepgram connection OPEN for session {session_id}")
+
+        def on_message(self, result, **kwargs):
+            try:
+                # The SDK returns an object, we need to extract the raw JSON or construct it
+                # result is a LiveResultResponse
+                # We need to send back the generic JSON structure the frontend expects
+                
+                # Verify if we have a transcript
+                transcript = result.channel.alternatives[0].transcript
+                if transcript:
+                    # Construct minimal response payload for frontend
+                    payload = {
+                        "channel": {
+                            "alternatives": [
+                                {
+                                    "transcript": transcript
+                                }
+                            ]
+                        },
+                        "is_final": result.is_final
+                    }
+                    ws.send(json.dumps(payload))
             except Exception as e:
-                logger.error(f"WebSocket proxy error: {e}")
-                break
-        
-        # Billing handled by /heartbeat and /end endpoints
+                logger.error(f"Error relaying transcript: {e}")
+
+        def on_metadata(self, metadata, **kwargs):
+            pass # We don't need to forward metadata for now
+
+        def on_speech_started(self, speech_started, **kwargs):
+            pass
+
+        def on_speech_ended(self, speech_ended, **kwargs):
+            pass
+
+        def on_close(self, close, **kwargs):
+            logger.info(f"Deepgram connection CLOSED for session {session_id}")
+
+        def on_error(self, error, **kwargs):
+            logger.error(f"Deepgram connection ERROR: {error}")
+
+        # Register handlers
+        dg_connection.on(LiveTranscriptionEvents.Open, on_open)
+        dg_connection.on(LiveTranscriptionEvents.Transcript, on_message)
+        dg_connection.on(LiveTranscriptionEvents.Metadata, on_metadata)
+        dg_connection.on(LiveTranscriptionEvents.SpeechStarted, on_speech_started)
+        dg_connection.on(LiveTranscriptionEvents.SpeechEnded, on_speech_ended)
+        dg_connection.on(LiveTranscriptionEvents.Close, on_close)
+        dg_connection.on(LiveTranscriptionEvents.Error, on_error)
+
+        # 4. Connect to Deepgram
+        options = LiveOptions(
+            model="nova-2",
+            language=language or "en",
+            smart_format=True,
+            encoding="linear16", # We will force raw bytes if possible, or let browser send opus
+            channels=1,
+            sample_rate=16000,
+            interim_results=True,
+            utterance_end_ms="1000",
+            vad_events=True,
+        )
+
+        # NOTE: The browser sends OPUS/WebM usually. Deepgram supports this auto-detect mostly,
+        # but specifying "linear16" might break if we send WebM.
+        # Let's REMOVE encoding/sample_rate to let Deepgram auto-detect container format from the stream.
+        options = LiveOptions(
+            model="nova-2",
+            language=language or "en",
+            smart_format=True,
+            interim_results=True,
+            utterance_end_ms="1000",
+            vad_events=True,
+        )
+
+        if dg_connection.start(options) is False:
+            logger.error("Failed to start Deepgram connection")
+            ws.close()
+            return
             
+        logger.info(f"Deepgram Live connection started for session {session_id}")
+
+        # 5. Main Loop: Relay Audio from Browser -> Deepgram
+        try:
+            while True:
+                data = ws.receive()
+                if data is None:
+                    break # Connection closed by browser
+                
+                if isinstance(data, bytes):
+                    dg_connection.send(data)
+                else:
+                    # Handle control messages if any
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"Browser WebSocket error in proxy: {e}")
+        finally:
+            # Cleanup
+            dg_connection.finish()
+            logger.info(f"Proxy cleanup for session {session_id}")
+
     except Exception as e:
-        logger.error(f"Failed to connect to Deepgram: {e}")
-        ws.send(json.dumps({'error': 'Failed to connect to transcription service'}))
-    finally:
-        # Cleanup
-        stop_event.set()
-        if deepgram_ws:
-            try:
-                deepgram_ws.close()
-            except:
-                pass
-        logger.info(f"WebSocket proxy closed for session {session_id}")
-
-
-
+        logger.error(f"Deepgram Setup Error: {e}")
+        ws.send(json.dumps({'error': 'Transcription service error'}))
+        ws.close()

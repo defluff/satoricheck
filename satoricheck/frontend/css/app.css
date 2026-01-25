@@ -190,6 +190,8 @@
     gap: var(--spacing-sm);
 }
 
+
+
 /* Smart Agent Toggle Specifics */
 .toggle-switch input:checked+.toggle-slider.smart {
     background: linear-gradient(135deg, #9333ea, #7c3aed);

@@ -24,7 +24,7 @@ live_pro_bp = Blueprint('live_pro', __name__, url_prefix='/api/live-pro')
 
 @live_pro_bp.route('/config', methods=['GET'])
 @login_required
-def get_live_pro_config():
+def get_live_pro_config() -> tuple:
     """Get Live Pro configuration and availability."""
     user = request.current_user
     deepgram = get_deepgram_service()
@@ -45,7 +45,7 @@ def get_live_pro_config():
 
 @live_pro_bp.route('/start', methods=['POST'])
 @login_required
-def start_session():
+def start_session() -> tuple:
     """Start a Live Pro transcription session."""
     user = request.current_user
     deepgram = get_deepgram_service()
@@ -60,15 +60,12 @@ def start_session():
     ).first()
     
     if existing_session:
-        # Check if it's actually stale (no heartbeat in 60s) - if so, auto-close it
-        if (datetime.utcnow() - existing_session.last_heartbeat).total_seconds() > 60:
-            # Stale session, close it
-            existing_session.status = 'abandoned'
-            existing_session.ended_at = datetime.utcnow()
-            db_session.commit()
-            logger.info(f"Auto-closed stale session {existing_session.id} for user {user.email}")
-        else:
-            raise APIError('You already have an active Live Pro session. Please close it first.', status_code=409)
+        # Check if it's actually stale (no heartbeat in 60s) OR just force close it if it matches current user
+        # This prevents "Ghost Session" lockouts after page reload
+        existing_session.status = 'abandoned'
+        existing_session.ended_at = datetime.utcnow()
+        db_session.commit()
+        logger.info(f"Auto-closed existing session {existing_session.id} for user {user.email} (Restarted)")
     
     # Check balance
     token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
@@ -116,7 +113,7 @@ def start_session():
 
 
 @live_pro_bp.errorhandler(Exception)
-def handle_live_pro_error(error):
+def handle_live_pro_error(error: Exception) -> tuple:
     """Local error handler for this blueprint to debug start failures."""
     if isinstance(error, APIError):
         return jsonify(error.to_dict()), error.status_code
@@ -128,12 +125,9 @@ def handle_live_pro_error(error):
     }), 500
 
 
-
-
-
 @live_pro_bp.route('/heartbeat', methods=['POST'])
 @login_required
-def heartbeat():
+def heartbeat() -> tuple:
     """
     Client sends heartbeat every 10 seconds.
     Server checks if 30 seconds elapsed since last billing and deducts CP if needed.
@@ -142,8 +136,6 @@ def heartbeat():
         data = request.get_json()
         if not data:
             raise APIError('No data provided')
-        
-        session_id = data.get('session_id')
         
         session_id = data.get('session_id')
         if not session_id:
@@ -227,7 +219,7 @@ def heartbeat():
 
 @live_pro_bp.route('/end', methods=['POST'])
 @login_required
-def end_session():
+def end_session() -> tuple:
     """
     End a Live Pro session.
     Final billing and cleanup.
@@ -310,7 +302,7 @@ def end_session():
         raise APIError('Failed to end Live Pro session')
 
 
-def cleanup_abandoned_sessions():
+def cleanup_abandoned_sessions() -> None:
     """
     Background task to clean up abandoned sessions.
     Should be called periodically (every 60 seconds).
@@ -363,6 +355,3 @@ def cleanup_abandoned_sessions():
     except Exception as e:
         logger.error(f"Error in cleanup_abandoned_sessions: {e}", exc_info=True)
         db_session.rollback()
-
-
-
