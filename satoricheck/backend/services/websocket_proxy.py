@@ -110,10 +110,10 @@ def ws_proxy(ws, session_id: int) -> None:
             pass
 
         def on_close(self, close, **kwargs):
-            logger.info(f"Deepgram connection CLOSED for session {session_id}")
+            logger.info(f"Deepgram connection CLOSED for session {session_id}. Code: {close.code}, Reason: {close.reason}")
 
         def on_error(self, error, **kwargs):
-            logger.error(f"Deepgram connection ERROR: {error}")
+            logger.error(f"Deepgram connection ERROR for session {session_id}: {error}")
 
         # Register handlers
         dg_connection.on(LiveTranscriptionEvents.Open, on_open)
