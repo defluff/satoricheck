@@ -11,6 +11,10 @@ from flask_sock import Sock
 
 from deepgram import DeepgramClient, DeepgramClientOptions, LiveOptions, LiveTranscriptionEvents
 
+from datetime import datetime
+import os
+import ssl
+import certifi
 from backend.config import Config
 from backend.database import db_session
 from backend.models import LiveProSession
@@ -56,21 +60,18 @@ def ws_proxy(ws, session_id: int) -> None:
         # We'll rely on the client to handle keepalives default or pass via config dict if needed
         # but for now, simple init to fix the ImportError
         
-        deepgram = DeepgramClient(Config.DEEPGRAM_API_KEY)
-
         # Create a websocket connection to Deepgram
-        options = LiveOptions(
-            model="nova-2", 
-            language=language or "en", 
-            smart_format=True, 
-            interim_results=True, 
-            utterance_end_ms="1000", 
-            vad_events=True,
-            endpointing=True, # Enable endpointing
-            keepalive=True # Pass keepalive here in LiveOptions if supported, or rely on client default
-        )
+        # We use v("1") as per SDK v3.x conventions used in this codebase
         
-        dg_connection = deepgram.listen.websocket.v("1")
+        # Robust SSL Fix: Set environment variable for the entire process/thread
+        # This ensures underlying C-extensions (like those used by aiohttp/websockets) use the correct CA
+        os.environ['SSL_CERT_FILE'] = certifi.where()
+        
+        # Configure Deepgram options
+        config = DeepgramClientOptions(options={"keepalive": "true"})
+        
+        deepgram = DeepgramClient(Config.DEEPGRAM_API_KEY, config)
+        dg_connection = deepgram.listen.live.v("1")
 
         # 3. Define Event Handlers
         def on_open(self, open, **kwargs):
@@ -103,43 +104,25 @@ def ws_proxy(ws, session_id: int) -> None:
         def on_metadata(self, metadata, **kwargs):
             pass # We don't need to forward metadata for now
 
-        def on_speech_started(self, speech_started, **kwargs):
-            pass
 
-        def on_speech_ended(self, speech_ended, **kwargs):
-            pass
 
         def on_close(self, close, **kwargs):
             logger.info(f"Deepgram connection CLOSED for session {session_id}. Code: {close.code}, Reason: {close.reason}")
 
         def on_error(self, error, **kwargs):
             logger.error(f"Deepgram connection ERROR for session {session_id}: {error}")
+            # We can't easily close the socket from here, but logging helps debug
 
         # Register handlers
         dg_connection.on(LiveTranscriptionEvents.Open, on_open)
         dg_connection.on(LiveTranscriptionEvents.Transcript, on_message)
         dg_connection.on(LiveTranscriptionEvents.Metadata, on_metadata)
-        dg_connection.on(LiveTranscriptionEvents.SpeechStarted, on_speech_started)
-        dg_connection.on(LiveTranscriptionEvents.SpeechEnded, on_speech_ended)
+
         dg_connection.on(LiveTranscriptionEvents.Close, on_close)
         dg_connection.on(LiveTranscriptionEvents.Error, on_error)
 
         # 4. Connect to Deepgram
-        options = LiveOptions(
-            model="nova-2",
-            language=language or "en",
-            smart_format=True,
-            encoding="linear16", # We will force raw bytes if possible, or let browser send opus
-            channels=1,
-            sample_rate=16000,
-            interim_results=True,
-            utterance_end_ms="1000",
-            vad_events=True,
-        )
-
-        # NOTE: The browser sends OPUS/WebM usually. Deepgram supports this auto-detect mostly,
-        # but specifying "linear16" might break if we send WebM.
-        # Let's REMOVE encoding/sample_rate to let Deepgram auto-detect container format from the stream.
+        # Single, clean configuration relying on Deepgram auto-detection for audio format
         options = LiveOptions(
             model="nova-2",
             language=language or "en",
@@ -147,6 +130,7 @@ def ws_proxy(ws, session_id: int) -> None:
             interim_results=True,
             utterance_end_ms="1000",
             vad_events=True,
+            endpointing=True
         )
 
         if dg_connection.start(options) is False:
@@ -163,6 +147,7 @@ def ws_proxy(ws, session_id: int) -> None:
                 if data is None:
                     break # Connection closed by browser
                 
+                # print(f"DEBUG: Received {len(data)} bytes from browser", flush=True)
                 if isinstance(data, bytes):
                     dg_connection.send(data)
                 else:

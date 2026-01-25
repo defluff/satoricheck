@@ -232,7 +232,9 @@ class LiveProManager {
 
             // Timeout
             setTimeout(() => {
-                if (this.webSocket.readyState !== WebSocket.OPEN) {
+                if (this.webSocket && (this.webSocket.readyState !== WebSocket.OPEN)) {
+                    // Only reject if we are still trying to connect (and haven't been cleaned up)
+                    // If this.webSocket is null, cleanup() was probably called, so we ignore
                     reject(new Error('WebSocket connection timeout'));
                 }
             }, 10000);

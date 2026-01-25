@@ -16,7 +16,7 @@ if 'sqlite' in Config.DATABASE_URL:
     # SQLite: file-based, no connection pooling needed
     engine = create_engine(
         Config.DATABASE_URL,
-        echo=Config.ENV == 'development',
+        echo=False,
         connect_args={'check_same_thread': False}
     )
 else:
