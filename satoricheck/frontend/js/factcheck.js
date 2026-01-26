@@ -95,14 +95,7 @@ class FactCheckManager {
         const cardId = ui.createCard(trimmedText, true);
 
         try {
-            // Prepare request with optional context and smart agent flag
-            const requestData = {
-                text: trimmedText,
-                context: context,
-                smart_agent: this.smartAgent
-            };
-
-            // Call API
+            // Call API directly - Retries now handled in api.js based on 503/429 errors
             const response = await api.analyzeText(trimmedText, context, this.smartAgent);
 
             // Update card with results (include Smart Agent flag for share button visibility)
@@ -247,6 +240,50 @@ class FactCheckManager {
         }
     }
 
+    /**
+     * Process items with concurrency limit
+     * @param {Array} items - Items to process
+     * @param {number} concurrency - Max concurrent requests
+     * @param {Function} taskFn - Async function to run for each item
+     */
+    async processWithConcurrency(items, concurrency, taskFn) {
+        const queue = [...items];
+        const workers = [];
+
+        // Create worker function
+        const worker = async () => {
+            while (queue.length > 0) {
+                // Check stop flag
+                if (this.abortRequested) {
+                    break;
+                }
+
+                // Get next item
+                const item = queue.shift();
+
+                try {
+                    await taskFn(item);
+                } catch (error) {
+                    console.error('Task failed:', error);
+                    // Continue to next item even if one fails
+                }
+            }
+        };
+
+        // Start workers
+        const limit = Math.min(concurrency, items.length);
+        for (let i = 0; i < limit; i++) {
+            workers.push(worker());
+        }
+
+        // Wait for all to finish
+        await Promise.all(workers);
+
+        if (this.abortRequested) {
+            ui.showToast('⏹️ Stopped. Tokens used for completed checks are non-refundable.', 'warning');
+        }
+    }
+
 
     async handleSmartAgentCheck(text) {
         // Skip if already checked
@@ -260,8 +297,11 @@ class FactCheckManager {
         ui.setCheckButtonMode('stop');
 
         try {
+            let tempCardId = null;
+
             // Smart Agent: First identify claims, then check each one
-            ui.showToast('Smart Agent analyzing...', 'info');
+            // Create a temporary card to show status
+            tempCardId = ui.createCard("🧠 Smart Agent identifying claims...", true);
 
             const maxRetries = 2;
             let lastError = null;
@@ -281,10 +321,20 @@ class FactCheckManager {
                     lastError = error;
                     console.error(`Smart Agent attempt ${attempt} failed:`, error);
                     if (attempt < maxRetries) {
-                        ui.showToast(`Retrying... (${attempt}/${maxRetries})`, 'warning');
+                        // Update temp card status
+                        ui.updateCard(tempCardId, {
+                            verdict: 'CHECKING...',
+                            explanation: `Taking longer than usual... (Retrying ${attempt}/${maxRetries})`,
+                            sources: []
+                        });
                         await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
                     }
                 }
+            }
+
+            // Remove the temporary card - we will either replace it or show error
+            if (tempCardId) {
+                ui.removeCard(tempCardId);
             }
 
             if (!identifiedClaims) {
@@ -311,17 +361,11 @@ class FactCheckManager {
 
                 ui.showToast(`🧠 Found ${uncheckedClaims.length} new claims to check`, 'success');
 
-                // Check each claim individually, passing original text as context for Grok trigger detection
-                for (const claim of uncheckedClaims) {
-                    // Check stop flag
-                    if (this.abortRequested) {
-                        ui.showToast('⏹️ Stopped. Tokens used for completed checks are non-refundable.', 'warning');
-                        break;
-                    }
-
+                // Parallel processing with concurrency limit
+                await this.processWithConcurrency(uncheckedClaims, 5, async (claim) => {
                     // Pass original text as context so Grok can check triggers against it
                     await this.checkText(claim.trim(), text);
-                }
+                });
 
                 // Mark full text as processed only if we finished
                 if (!this.abortRequested) {
@@ -337,6 +381,7 @@ class FactCheckManager {
             this.isProcessing = false;
             ui.setCheckButtonMode('check');
         }
+
     }
 
     handleStop() {
@@ -397,8 +442,14 @@ class FactCheckManager {
             context = contextSentences.join(' ');
         }
 
-        // Check with context
-        this.checkText(lastSentence, context);
+        // Check if Smart Agent is enabled
+        if (this.smartAgent) {
+            // Use Smart Agent to identify and check claims for this sentence
+            this.handleSmartAgentCheck(lastSentence);
+        } else {
+            // Standard check with context
+            this.checkText(lastSentence, context);
+        }
     }
 
     async handleAutoCheck(chunkText) {

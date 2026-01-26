@@ -89,6 +89,24 @@ def add_tokens(email, amount):
         db_session.commit()
         print(f"✅ Added {amount} CP to {email}. New Balance: {user.token_balance.balance}")
 
+def cleanup_users(keep_email):
+    """Delete all users except the specified one."""
+    with app.app_context():
+        # user to keep
+        keeper = db_session.query(User).filter_by(email=keep_email).first()
+        if not keeper:
+            print(f"❌ User to keep not found: {keep_email}")
+            return
+            
+        # Delete others
+        deleted_count = db_session.query(User).filter(User.email != keep_email).delete()
+        
+        # Reset keeper's stats if needed, or just ensure they are clean. 
+        # For now, just deleting others.
+        
+        db_session.commit()
+        print(f"✅ Deleted {deleted_count} users. Kept: {keep_email}")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SatoriCheck Admin CLI")
     subparsers = parser.add_subparsers(dest='command')
@@ -106,6 +124,10 @@ if __name__ == "__main__":
     at_parser.add_argument('email', help='User email')
     at_parser.add_argument('amount', type=int, help='Amount to add')
 
+    # cleanup-users
+    cu_parser = subparsers.add_parser('cleanup-users', help='Delete all users except kept email')
+    cu_parser.add_argument('keep_email', help='Email of user to keep')
+
     args = parser.parse_args()
 
     if args.command == 'list-users':
@@ -114,5 +136,8 @@ if __name__ == "__main__":
         set_balance(args.email, args.amount)
     elif args.command == 'add-tokens':
         add_tokens(args.email, args.amount)
+    elif args.command == 'cleanup-users':
+        cleanup_users(args.keep_email)
     else:
         parser.print_help()
+

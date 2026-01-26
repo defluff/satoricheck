@@ -114,7 +114,7 @@ def analyze_claim():
             token_balance.balance += token_cost
             token_balance.unbilled_words = current_unbilled
             db_session.commit()
-            raise APIError('Analysis temporarily unavailable. Please try again.')
+            raise APIError('Analysis temporarily unavailable. Please try again.', status_code=503)
         
         # Calculate processing time
         processing_time = time.time() - start_time

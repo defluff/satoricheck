@@ -6,7 +6,7 @@
 const API_BASE = '/api';
 
 class APIClient {
-    async request(endpoint, options = {}) {
+    async request(endpoint, options = {}, retries = 5, delay = 1500) {
         try {
             const response = await fetch(`${API_BASE}${endpoint}`, {
                 ...options,
@@ -17,15 +17,41 @@ class APIClient {
                 credentials: 'include' // Include cookies for session
             });
 
-            const data = await response.json();
+            // Parse JSON response if possible
+            let data;
+            const contentType = response.headers.get("content-type");
+            if (contentType && contentType.indexOf("application/json") !== -1) {
+                data = await response.json();
+            } else {
+                // Handle non-JSON response (e.g. blobs)
+                if (response.ok) return response;
+                throw new Error(response.statusText || 'Request failed');
+            }
 
             if (!response.ok) {
-                throw new Error(data.error || 'Request failed');
+                // Attach status code to error object for retry logic
+                const error = new Error(data.error || 'Request failed');
+                error.status = response.status;
+                throw error;
             }
 
             return data;
         } catch (error) {
             console.error(`API Error (${endpoint}):`, error);
+
+            // Retry on 503 (Service Unavailable) or 429 (Rate Limit)
+            // Also retry if message explicitly says "temporarily unavailable" (legacy support)
+            const isTransient = error.status === 503 ||
+                error.status === 429 ||
+                (error.message && error.message.includes('temporarily unavailable'));
+
+            if (isTransient && retries > 0) {
+                console.warn(`Retrying API call to ${endpoint} in ${delay / 1000} seconds... (Status: ${error.status})`);
+                await new Promise(res => setTimeout(res, delay));
+                // Recursively call request with decremented retries and increased delay (exponential backoff)
+                return this.request(endpoint, options, retries - 1, delay * 2);
+            }
+
             throw error;
         }
     }

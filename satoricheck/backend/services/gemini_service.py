@@ -12,6 +12,16 @@ logger = logging.getLogger(__name__)
 class GeminiService:
     """Service for interacting with Google Gemini API."""
     
+    # Models
+    # Models
+    # all Gemini 3 Flash for now, smart model approach will be used in a later stage.
+    MODEL_SMART = "gemini-3-flash-preview"
+    MODEL_FAST = "gemini-3-flash-preview"
+    
+    # Timeouts (seconds)
+    TIMEOUT_SMART = 30
+    TIMEOUT_FAST = 30
+    
     def __init__(self):
         """Initialize Gemini service."""
         if not Config.GEMINI_API_KEY:
@@ -19,7 +29,10 @@ class GeminiService:
         else:
             logger.info(f"GEMINI_API_KEY loaded: {Config.GEMINI_API_KEY[:10]}...")
         self.api_key = Config.GEMINI_API_KEY
-        self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent?key={self.api_key}"
+    
+    def _get_api_url(self, model):
+        """Get API URL for a specific model."""
+        return f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
     
     def _validate_url(self, url):
         """Check if a URL is reachable (returns 200). Quick HEAD request with timeout."""
@@ -38,6 +51,7 @@ class GeminiService:
     
     def _validate_sources(self, sources):
         """Filter sources to only include live URLs. Enforces 1-5 sources."""
+        # Note: This method only does HTTP checks, so no model inference needed here.
         if not sources or not isinstance(sources, list):
             return []
         
@@ -52,7 +66,7 @@ class GeminiService:
     
     def analyze_claim(self, text):
         """
-        Analyze text for factual claims using Gemini API.
+        Analyze text for factual claims using Gemini API (Smart Model).
         
         Args:
             text: The text to analyze
@@ -106,10 +120,10 @@ class GeminiService:
                 
                 # Make REST API call
                 response = requests.post(
-                    self.api_url,
+                    self._get_api_url(self.MODEL_SMART),
                     json=payload,
                     headers={'Content-Type': 'application/json'},
-                    timeout=30
+                    timeout=self.TIMEOUT_SMART
                 )
                 response.raise_for_status()
                 response_data = response.json()
@@ -215,10 +229,14 @@ Response should include:
 - meta_truth_verdict: "FALSE" (because the US has engaged in many wars)
 - verdict: "FALSE" (matches meta_truth_verdict)
 
-TWO-LEVEL ANALYSIS FOR QUOTES:
+TWO-LEVEL ANALYSIS FOR QUOTES (CRITICAL):
 - LEVEL 1: Did the person actually say this? (quote_verified)
 - LEVEL 2: Is what they said TRUE in reality? (meta_truth_verdict)
-Your final "verdict" should reflect LEVEL 2 (the truth of the content, NOT whether someone said it).
+
+VERDICT RULES:
+1. IF LEVEL 1 is FALSE (they never said it) -> VERDICT MUST BE "FALSE" or "MISLEADING" (attribution error is a lie).
+2. IF LEVEL 1 is TRUE (they said it) -> VERDICT matches LEVEL 2 (is the content true?).
+3. Your final "verdict" must NOT be "TRUE" if the attribution is false.
 
 Text to analyze:
 "{text}"
@@ -370,8 +388,8 @@ If zero claims found, return: {{"claims": []}}"""
 
         try:
             payload = {"contents": [{"parts": [{"text": prompt}]}]}
-            response = requests.post(self.api_url, json=payload, 
-                                     headers={'Content-Type': 'application/json'}, timeout=25)
+            response = requests.post(self._get_api_url(self.MODEL_FAST), json=payload, 
+                                     headers={'Content-Type': 'application/json'}, timeout=self.TIMEOUT_FAST)
             response.raise_for_status()
             data = response.json()
             
@@ -457,10 +475,10 @@ RESPOND WITH JSON ONLY:
         try:
             payload = {"contents": [{"parts": [{"text": prompt}]}]}
             response = requests.post(
-                self.api_url, 
+                self._get_api_url(self.MODEL_FAST), 
                 json=payload, 
                 headers={'Content-Type': 'application/json'}, 
-                timeout=30
+                timeout=self.TIMEOUT_FAST
             )
             response.raise_for_status()
             data = response.json()

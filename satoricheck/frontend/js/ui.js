@@ -143,6 +143,10 @@ class UIManager {
         this.card.hideSelectionTooltip();
     }
 
+    removeCard(cardId) {
+        this.card.removeCard(cardId);
+    }
+
     escapeHtml(text) {
         return this.card.escapeHtml(text);
     }

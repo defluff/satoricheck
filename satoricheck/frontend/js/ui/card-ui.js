@@ -73,8 +73,8 @@ class CardUI {
             card.appendChild(detailsContainer);
         }
 
-        // Add Meta Analysis for Quote Claims
-        if (result.is_quote_claim && result.quote_attribution) {
+        // Add Meta Analysis for Quote Claims (Strict Check)
+        if (result.is_quote_claim === true && result.quote_attribution) {
             const metaTruthBox = document.createElement('div');
             metaTruthBox.className = 'meta-truth-box';
 
@@ -227,6 +227,13 @@ class CardUI {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    removeCard(cardId) {
+        const card = document.getElementById(cardId);
+        if (card) {
+            card.remove();
+        }
     }
 
     // AI Detection Card Methods
