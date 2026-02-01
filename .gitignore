@@ -51,3 +51,6 @@ wheels/
 # Private planning docs (keep local only)
 docs/
 
+# Agent configuration and rules
+.agent/
+
