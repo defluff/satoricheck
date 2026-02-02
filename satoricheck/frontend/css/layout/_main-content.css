@@ -1,0 +1,11 @@
+/* _main-content.css - Two-column grid layout for main workspace */
+
+.main-content {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: var(--spacing-xl);
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--spacing-xl);
+    min-height: calc(100vh - 100px);
+}

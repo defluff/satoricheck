@@ -1,0 +1,176 @@
+/* _mobile.css - Responsive breakpoints: 1024px, 768px, 480px */
+
+/* Tablet and below */
+@media (max-width: 1024px) {
+    .main-content {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Mobile landscape and below */
+@media (max-width: 768px) {
+    .header-content {
+        padding: var(--spacing-md);
+    }
+
+    .header-actions {
+        gap: var(--spacing-sm);
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+
+    .main-content {
+        padding: var(--spacing-md);
+    }
+
+    /* Feature Specific Mobile Overrides */
+    .token-balance,
+    .streak-display {
+        min-width: auto;
+        padding: var(--spacing-xs);
+    }
+
+    .user-menu {
+        gap: var(--spacing-xs);
+    }
+
+    .token-packages {
+        grid-template-columns: 1fr;
+    }
+
+    /* Editor & Feed Headers */
+    .editor-header,
+    .feed-section .section-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--spacing-sm);
+        height: auto;
+        min-height: auto;
+    }
+
+    .editor-controls {
+        width: 100%;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: var(--spacing-sm);
+    }
+
+    .feed-section .section-header {
+        position: relative;
+        gap: var(--spacing-sm);
+        padding-top: var(--spacing-md);
+    }
+
+    .feed-section .section-header h2 {
+        width: 100%;
+        margin-bottom: var(--spacing-xs);
+    }
+
+    .feed-section .section-header .analysis-mode-toggle {
+        width: auto;
+        align-self: flex-start;
+        margin-top: 0;
+        order: 2;
+    }
+
+    .feed-section .section-header #export-btn {
+        position: absolute;
+        top: var(--spacing-md);
+        right: var(--spacing-md);
+        margin: 0;
+        z-index: 10;
+        order: unset;
+        align-self: auto;
+    }
+
+    .streak-grid {
+        grid-template-columns: repeat(5, 1fr);
+        gap: 6px;
+        max-width: 100%;
+    }
+
+    /* Pitchdeck Responsive */
+    .pitchdeck-workspace {
+        padding: var(--spacing-md);
+        gap: var(--spacing-lg);
+    }
+
+    .pd-upload-zone {
+        padding: var(--spacing-lg) var(--spacing-md);
+    }
+
+    .pd-skeleton-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .module-nav-toggle {
+        order: -1;
+        margin-right: auto;
+    }
+}
+
+/* Mobile portrait */
+@media (max-width: 480px) {
+    .header-content {
+        flex-wrap: wrap;
+        gap: var(--spacing-sm);
+    }
+
+    .app-logo {
+        font-size: 1.25rem;
+    }
+
+    .logo-icon {
+        font-size: 1.4rem;
+    }
+
+    .header-actions {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .token-balance,
+    .streak-display {
+        padding: 4px 6px;
+    }
+
+    .token-count,
+    .streak-count {
+        font-size: 0.75rem;
+    }
+
+    .token-label {
+        font-size: 0.65rem;
+    }
+
+    #logout-btn {
+        padding: var(--spacing-xs) var(--spacing-sm);
+        font-size: 0.75rem;
+    }
+
+    .streak-grid {
+        grid-template-columns: repeat(5, 1fr);
+        gap: 4px;
+    }
+
+    .streak-day {
+        min-width: 36px;
+    }
+
+    .streak-count-large {
+        font-size: 2rem;
+    }
+
+    .streak-info-container h3 {
+        font-size: 1rem;
+    }
+
+    .module-nav-btn {
+        font-size: 0.7rem;
+        padding: var(--spacing-xs) var(--spacing-sm);
+    }
+
+    .pd-privacy-text {
+        font-size: 0.75rem;
+    }
+}

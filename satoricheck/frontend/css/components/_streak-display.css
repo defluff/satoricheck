@@ -1,0 +1,270 @@
+/* _streak-display.css - Streak counter, grid, milestones, rewards */
+
+/* Streak Display Header Widget */
+.streak-display {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-sm);
+    background: var(--color-surface-elevated);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--color-border);
+    cursor: pointer;
+    transition: all var(--transition-base);
+    min-width: 80px;
+    position: relative;
+    overflow: hidden;
+}
+
+.streak-display::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 100%;
+    height: 100%;
+    background: radial-gradient(circle, var(--bg-warning-subtle) 0%, transparent 70%);
+    opacity: 0.5;
+    transition: opacity var(--transition-base);
+    pointer-events: none;
+}
+
+.streak-display:hover::before {
+    opacity: 1;
+}
+
+.streak-display:hover {
+    border-color: var(--color-warning);
+    box-shadow: 0 0 10px var(--glow-warning);
+}
+
+.streak-icon {
+    font-size: 1rem;
+    filter: drop-shadow(0 0 2px var(--glow-warning-strong));
+}
+
+.streak-count {
+    font-weight: 700;
+    font-size: 0.875rem;
+    color: var(--color-text);
+}
+
+/* User Menu */
+.user-menu {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+/* Streak Roadmap */
+.streak-roadmap {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.milestone-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-sm);
+    border-radius: var(--radius-md);
+}
+
+.milestone-item.active {
+    background: var(--bg-primary-hover);
+}
+
+.milestone-number {
+    font-weight: 700;
+    color: var(--color-text-secondary);
+    min-width: 40px;
+}
+
+.milestone-name {
+    flex: 1;
+    color: var(--color-text);
+}
+
+.milestone-icon {
+    font-size: 1.25rem;
+}
+
+/* Streak Grid (Energy Theme) */
+.streak-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 8px;
+    margin-top: 1.5rem;
+    max-width: 450px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.streak-day {
+    aspect-ratio: 1;
+    background: var(--color-surface-elevated);
+    border: 2px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    font-size: 0.85rem;
+    transition: all 0.2s ease;
+    min-width: 56px;
+    min-height: 56px;
+}
+
+.streak-day.completed {
+    background: var(--bg-success-subtle);
+    border-color: var(--color-success);
+    color: var(--color-success);
+    box-shadow: 0 0 10px var(--glow-success);
+}
+
+.streak-day.completed.today {
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+    box-shadow: 0 0 15px var(--color-primary-glow);
+    animation: pulse-border 2s infinite;
+}
+
+.streak-day.reward-day {
+    border-color: var(--color-warning);
+    color: var(--color-warning);
+    background: var(--bg-warning-hover);
+}
+
+.streak-reward-icon {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    font-size: 1.5rem;
+    background: var(--color-surface);
+    border-radius: 50%;
+    padding: 2px;
+    margin-top: 2px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.2));
+    transition: transform var(--transition-base);
+}
+
+.streak-day.completed .streak-reward-icon {
+    transform: scale(1.1);
+}
+
+@keyframes pulse-border {
+    0% {
+        box-shadow: 0 0 0 0 var(--glow-primary);
+    }
+
+    70% {
+        box-shadow: 0 0 0 6px var(--glow-primary-zero);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 var(--glow-primary-zero);
+    }
+}
+
+.streak-info-container {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+.streak-count-large {
+    display: block;
+    font-size: 3rem;
+    font-weight: 800;
+    color: var(--color-text);
+    margin-bottom: 0.5rem;
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.streak-reward-icon.large {
+    font-size: 1.8rem;
+    color: #fff;
+    text-shadow: 0 0 10px rgba(245, 158, 11, 0.6);
+    top: -10px;
+    right: -10px;
+    padding: 3px;
+    z-index: 5;
+}
+
+.streak-day:hover .streak-reward-icon {
+    transform: scale(1.2);
+}
+
+.streak-day[data-tooltip] {
+    cursor: help;
+}
+
+.streak-day[data-tooltip]:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%) translateY(-5px);
+    background: rgba(0, 0, 0, 0.95);
+    color: white;
+    padding: 0.5rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    white-space: nowrap;
+    z-index: 1001;
+    box-shadow: var(--shadow-lg);
+    border: 1px solid var(--color-border);
+    animation: fadeIn 0.15s ease;
+    pointer-events: none;
+    font-weight: normal;
+}
+
+/* Legendary Theme */
+.streak-day.legendary.completed {
+    background: var(--bg-primary-subtle);
+    border-color: #3b82f6;
+    color: #3b82f6;
+    box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+}
+
+.streak-day.legendary.completed.today {
+    border-color: #60a5fa;
+    color: #60a5fa;
+    box-shadow: 0 0 15px #3b82f6;
+    animation: pulse-border-blue 2s infinite;
+}
+
+.streak-count-large.legendary {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+}
+
+.legendary-badge {
+    font-size: 1.5rem;
+    vertical-align: middle;
+    margin-left: 0.5rem;
+    filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.5));
+}
+
+@keyframes pulse-border-blue {
+    0% {
+        box-shadow: 0 0 0 0 var(--glow-primary);
+    }
+
+    70% {
+        box-shadow: 0 0 0 6px rgba(59, 130, 246, 0);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+    }
+}

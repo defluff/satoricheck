@@ -1,0 +1,203 @@
+/* _live-pro.css - Live Pro mode, transcription selector, mic controls */
+
+.transcription-mode-selector {
+    display: flex;
+    background: var(--color-surface-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    overflow: hidden;
+    height: 28px;
+}
+
+.mode-btn {
+    padding: 0 10px;
+    background: transparent;
+    border: none;
+    color: var(--color-text-muted);
+    font-size: 0.7rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-base);
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.mode-btn:hover {
+    background: var(--color-surface);
+    color: var(--color-text);
+}
+
+.mode-btn.active {
+    background: var(--color-primary);
+    color: white;
+}
+
+.mode-btn.mode-pro.active {
+    background: linear-gradient(135deg, #f59e0b, #eab308);
+    color: #1a1a1a;
+    font-weight: 700;
+}
+
+.live-pro-indicator {
+    background: linear-gradient(135deg, #f59e0b, #eab308);
+    color: #1a1a1a;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 700;
+    animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+
+    0%,
+    100% {
+        box-shadow: 0 0 5px rgba(245, 158, 11, 0.5);
+    }
+
+    50% {
+        box-shadow: 0 0 20px rgba(245, 158, 11, 0.8);
+    }
+}
+
+.btn-icon.live-pro-active {
+    background: linear-gradient(135deg, #f59e0b, #eab308);
+    color: #1a1a1a;
+    border-color: #f59e0b;
+}
+
+.btn-icon.live-pro-active:hover {
+    background: linear-gradient(135deg, #d97706, #ca8a04);
+}
+
+.live-pro-benefits {
+    background: var(--color-surface-elevated);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    margin: var(--spacing-md) 0;
+    list-style: none;
+}
+
+.live-pro-benefits li {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-xs) 0;
+    color: var(--color-text);
+    font-size: 0.9rem;
+}
+
+.live-pro-benefits li::before {
+    content: '✓';
+    color: var(--color-success);
+    font-weight: 700;
+}
+
+.live-pro-cost {
+    text-align: center;
+    padding: var(--spacing-md);
+    background: var(--bg-warning-subtle);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: var(--radius-md);
+    margin: var(--spacing-md) 0;
+}
+
+.live-pro-cost strong {
+    font-size: 1.25rem;
+    color: var(--color-warning);
+}
+
+/* Live Pro Modal */
+.live-pro-modal-content {
+    max-width: 400px;
+    text-align: center;
+}
+
+.live-pro-modal-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-lg);
+}
+
+.live-pro-modal-header .live-pro-icon {
+    font-size: 2.5rem;
+    animation: pulse-glow 2s ease-in-out infinite;
+    background: linear-gradient(135deg, #f59e0b, #fbbf24);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.live-pro-modal-header h2 {
+    margin: 0;
+    font-size: 1.5rem;
+    background: linear-gradient(135deg, #f59e0b, #fbbf24);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.live-pro-modal-content .live-pro-benefits {
+    text-align: left;
+}
+
+.live-pro-modal-content .live-pro-benefits li::before {
+    display: none;
+}
+
+.benefit-check {
+    color: var(--color-success);
+    font-weight: 700;
+    font-size: 1rem;
+}
+
+.hide-modal-checkbox {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-sm);
+    margin: var(--spacing-lg) 0;
+    cursor: pointer;
+    color: var(--color-text-secondary);
+    font-size: 0.875rem;
+}
+
+.hide-modal-checkbox input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--color-primary);
+}
+
+.live-pro-activate {
+    background: linear-gradient(135deg, #f59e0b, #eab308) !important;
+    color: #1a1a1a !important;
+    border: none !important;
+    font-weight: 600;
+    padding: 12px 24px !important;
+    transition: transform 0.1s ease, box-shadow 0.2s ease;
+}
+
+.live-pro-activate:hover {
+    transform: scale(1.02);
+    box-shadow: 0 4px 20px rgba(245, 158, 11, 0.4);
+}
+
+/* Mic Select Row */
+.mic-select-row {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: center;
+}
+
+.mic-select-row .form-control {
+    flex: 1;
+}
+
+.mic-select-row .btn-compact {
+    white-space: nowrap;
+    flex-shrink: 0;
+}

@@ -1,0 +1,38 @@
+/* _analysis-mode.css - Analysis mode toggle and AI detect results */
+
+.analysis-mode-toggle {
+    display: flex;
+    gap: 2px;
+    background: var(--color-surface-elevated);
+    border-radius: var(--radius-md);
+    padding: 2px;
+    border: 1px solid var(--color-border);
+}
+
+.analysis-mode-btn {
+    padding: 4px 10px;
+    border: none;
+    background: transparent;
+    color: var(--color-text-muted);
+    font-size: 0.7rem;
+    font-weight: 500;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+}
+
+.analysis-mode-btn:hover:not(.active) {
+    color: var(--color-text);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.analysis-mode-btn.active {
+    background: var(--color-primary);
+    color: white;
+    box-shadow: var(--shadow-sm);
+}
+
+.analysis-mode-btn[data-mode="aidetect"].active {
+    background: linear-gradient(135deg, #9333ea, #7c3aed);
+}

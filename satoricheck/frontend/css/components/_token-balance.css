@@ -1,0 +1,81 @@
+/* _token-balance.css - Token balance widget with battery icon */
+
+.token-balance {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-sm);
+    background: var(--color-surface-elevated);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--color-border);
+    cursor: pointer;
+    transition: all var(--transition-base);
+    min-width: 120px;
+    position: relative;
+    overflow: hidden;
+}
+
+.token-balance::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 100%;
+    height: 100%;
+    background: radial-gradient(circle, var(--bg-primary-subtle) 0%, transparent 70%);
+    opacity: 0.5;
+    transition: opacity var(--transition-base);
+    pointer-events: none;
+}
+
+.token-balance:hover::before {
+    opacity: 1;
+}
+
+.token-balance:hover {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 10px var(--glow-primary-light);
+}
+
+.battery-icon {
+    width: 20px;
+    height: 12px;
+    border: 1.5px solid var(--color-primary);
+    border-radius: 2px;
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.battery-icon::after {
+    content: '';
+    position: absolute;
+    right: -2px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 2px;
+    height: 6px;
+    background: var(--color-primary);
+    border-radius: 0 1px 1px 0;
+}
+
+.battery-level {
+    height: 100%;
+    background: var(--gradient-primary);
+    transition: width var(--transition-slow);
+}
+
+.token-count {
+    font-weight: 700;
+    font-size: 0.875rem;
+    color: var(--color-text);
+}
+
+.token-label {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+    font-weight: 600;
+    text-transform: uppercase;
+}

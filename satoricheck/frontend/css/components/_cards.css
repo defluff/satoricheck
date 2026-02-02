@@ -1,0 +1,325 @@
+/* _cards.css - Fact-check cards, AI detect cards, package cards */
+
+/* Fact Check Card */
+.fact-check-card {
+    background: var(--color-surface-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    transition: all var(--transition-base);
+    animation: slideIn 0.3s ease;
+    cursor: pointer;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateX(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.fact-check-card.pending {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.fact-check-card:not(.pending):hover {
+    border-color: var(--color-primary);
+    box-shadow: var(--shadow-md);
+}
+
+.fact-check-card.expanded {
+    cursor: default;
+}
+
+.card-details {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+}
+
+.fact-check-card.expanded .card-details {
+    max-height: 1000px;
+    margin-top: var(--spacing-md);
+}
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: var(--spacing-md);
+}
+
+.card-meta {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}
+
+.claim-text {
+    color: var(--color-text);
+    line-height: 1.6;
+    margin-bottom: var(--spacing-md);
+    font-style: italic;
+}
+
+.explanation-text {
+    color: var(--color-text-secondary);
+    line-height: 1.6;
+    margin-bottom: var(--spacing-md);
+}
+
+.fallacy-tag {
+    display: inline-block;
+    background: var(--bg-error-subtle);
+    color: var(--color-error);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-bottom: var(--spacing-sm);
+}
+
+/* AI Detect Card */
+.ai-detect-card {
+    background: var(--color-surface-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    transition: all var(--transition-base);
+    animation: slideIn 0.3s ease;
+    cursor: pointer;
+}
+
+.ai-detect-card.pending {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.ai-detect-card:not(.pending):hover {
+    border-color: #9333ea;
+    box-shadow: 0 0 10px rgba(147, 51, 234, 0.2);
+}
+
+.ai-result {
+    margin-top: var(--spacing-md);
+}
+
+.ai-probability-container {
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+}
+
+.ai-probability-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-sm);
+}
+
+.ai-probability-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+}
+
+.ai-probability-label {
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+}
+
+.ai-confidence {
+    margin-left: auto;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.65rem;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--color-text-muted);
+}
+
+.ai-probability-bar {
+    height: 8px;
+    background: var(--color-surface-elevated);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.ai-probability-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s ease;
+}
+
+.ai-probability-container.ai-low .ai-probability-value {
+    color: var(--color-success);
+}
+
+.ai-probability-container.ai-low .ai-probability-fill {
+    background: var(--gradient-success);
+}
+
+.ai-probability-container.ai-medium .ai-probability-value {
+    color: var(--color-warning);
+}
+
+.ai-probability-container.ai-medium .ai-probability-fill {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+}
+
+.ai-probability-container.ai-high .ai-probability-value {
+    color: var(--color-error);
+}
+
+.ai-probability-container.ai-high .ai-probability-fill {
+    background: var(--gradient-error);
+}
+
+.ai-explanation {
+    margin-top: var(--spacing-md);
+    padding: var(--spacing-md);
+    background: var(--color-surface);
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: var(--color-text-secondary);
+}
+
+.ai-indicators,
+.human-indicators {
+    margin-top: var(--spacing-md);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    font-size: 0.8rem;
+}
+
+.ai-indicators {
+    background: rgba(239, 68, 68, 0.1);
+    border-left: 3px solid var(--color-error);
+}
+
+.human-indicators {
+    background: rgba(16, 185, 129, 0.1);
+    border-left: 3px solid var(--color-success);
+}
+
+.ai-indicators strong,
+.human-indicators strong {
+    display: block;
+    margin-bottom: var(--spacing-sm);
+    color: var(--color-text);
+}
+
+.ai-indicators ul,
+.human-indicators ul {
+    list-style: disc;
+    padding-left: var(--spacing-lg);
+    color: var(--color-text-secondary);
+}
+
+.ai-indicators li,
+.human-indicators li {
+    margin-bottom: var(--spacing-xs);
+}
+
+/* Expandable AI card */
+.ai-detect-card .ai-explanation,
+.ai-detect-card .ai-indicators,
+.ai-detect-card .human-indicators {
+    max-height: 0;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: all 0.3s ease;
+}
+
+.ai-detect-card.expanded .ai-explanation,
+.ai-detect-card.expanded .ai-indicators,
+.ai-detect-card.expanded .human-indicators {
+    max-height: 500px;
+    padding: var(--spacing-md);
+    margin-top: var(--spacing-md);
+    opacity: 1;
+}
+
+/* Package Card */
+.package-card {
+    background: var(--color-surface-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    text-align: center;
+    transition: all var(--transition-base);
+    position: relative;
+    overflow: hidden;
+}
+
+.package-card:hover {
+    border-color: var(--color-primary);
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg);
+}
+
+.package-popular {
+    border-color: var(--color-primary);
+}
+
+.package-premium {
+    border-color: var(--color-warning);
+}
+
+.package-badge {
+    position: absolute;
+    top: var(--spacing-md);
+    right: var(--spacing-md);
+    background: var(--gradient-primary);
+    color: white;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.package-icon {
+    font-size: 3rem;
+    margin-bottom: var(--spacing-md);
+}
+
+.package-card h3 {
+    font-size: 1.125rem;
+    margin-bottom: var(--spacing-sm);
+    color: var(--color-text);
+}
+
+.package-tokens {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--color-primary);
+    margin-bottom: var(--spacing-xs);
+}
+
+.package-duration {
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+    margin-bottom: var(--spacing-sm);
+}
+
+.package-price {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--color-text);
+    margin-bottom: var(--spacing-md);
+}
+
+/* Token Packages Grid */
+.token-packages {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--spacing-md);
+    margin-top: var(--spacing-lg);
+}

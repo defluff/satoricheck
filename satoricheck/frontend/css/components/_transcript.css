@@ -1,0 +1,71 @@
+/* _transcript.css - Transcript editor container and text styles */
+
+.transcript-container {
+    flex: 1;
+    padding: var(--spacing-xl);
+    overflow-y: auto;
+    position: relative;
+    outline: none;
+    min-height: 200px;
+}
+
+.transcript-container:focus {
+    outline: 2px solid var(--color-primary);
+    outline-offset: -2px;
+    border-radius: var(--radius-md);
+}
+
+.transcript-placeholder {
+    color: var(--color-text-muted);
+    text-align: center;
+    padding: var(--spacing-xl);
+    pointer-events: none;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 80%;
+}
+
+.transcript-container:focus .transcript-placeholder,
+.transcript-container:not(:empty) .transcript-placeholder {
+    display: none;
+}
+
+.transcript-container:empty:not(:focus) .transcript-placeholder {
+    display: block;
+}
+
+.transcript-text {
+    line-height: 1.8;
+    color: var(--color-text);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.transcript-text.interim {
+    color: var(--color-text-secondary);
+    font-style: italic;
+}
+
+.processed-text {
+    position: relative;
+    display: inline;
+}
+
+.processed-text.success {
+    background: var(--bg-success-hover);
+    border-bottom: 2px solid var(--color-success);
+}
+
+.processed-text.error {
+    background: var(--bg-error-subtle);
+    border-bottom: 2px solid var(--color-error);
+}
+
+.checkmark {
+    display: inline-block;
+    margin-left: var(--spacing-xs);
+    color: var(--color-success);
+    font-weight: 700;
+}

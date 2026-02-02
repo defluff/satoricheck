@@ -1,0 +1,84 @@
+/* _intro.css - Introduction modal, features, pricing box */
+
+.intro-content {
+    max-width: 700px;
+    text-align: center;
+}
+
+.intro-content h2 {
+    font-size: 1.75rem;
+    margin-bottom: var(--spacing-lg);
+}
+
+.intro-features {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-xl);
+    text-align: left;
+}
+
+.intro-feature {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md);
+    background: var(--color-surface);
+    border-radius: var(--radius-md);
+}
+
+.intro-icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+
+.intro-feature strong {
+    color: var(--color-text);
+    display: block;
+    margin-bottom: var(--spacing-xs);
+}
+
+.intro-feature p {
+    color: var(--color-text-secondary);
+    font-size: 0.85rem;
+    margin: 0;
+}
+
+.intro-pricing {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
+    border: 1px solid var(--color-primary);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    margin-bottom: var(--spacing-lg);
+}
+
+.intro-pricing p {
+    color: var(--color-text);
+    font-size: 0.9rem;
+    margin: var(--spacing-xs) 0;
+}
+
+.intro-content .btn-primary {
+    width: 100%;
+    padding: var(--spacing-md);
+    font-size: 1rem;
+}
+
+.intro-disclaimer {
+    background: var(--bg-error-subtle);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    margin-bottom: var(--spacing-lg);
+}
+
+.intro-disclaimer p {
+    color: var(--color-text-secondary);
+    font-size: 0.75rem;
+    margin: 0;
+    line-height: 1.4;
+}
+
+.intro-disclaimer strong {
+    color: var(--color-warning);
+}

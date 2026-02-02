@@ -1,0 +1,53 @@
+/* ==========================================================================
+   SatoriCheck - CSS Architecture (7-1 Pattern)
+   
+   Import order is critical for cascade correctness.
+   Do not reorder without understanding specificity implications.
+   ========================================================================== */
+
+/* 1. Abstracts - Variables & Design Tokens */
+@import 'abstracts/_variables.css';
+
+/* 2. Base - Reset, Typography, Global */
+@import 'base/_reset.css';
+@import 'base/_typography.css';
+@import 'base/_scrollbar.css';
+
+/* 3. Layout - Major Structural */
+@import 'layout/_header.css';
+@import 'layout/_main-content.css';
+@import 'layout/_sections.css';
+
+/* 4. Components - Reusable UI (A-Z) */
+@import 'components/_badges.css';
+@import 'components/_buttons.css';
+@import 'components/_cards.css';
+@import 'components/_forms.css';
+@import 'components/_meta-truth.css';
+@import 'components/_modals.css';
+@import 'components/_selection-tooltip.css';
+@import 'components/_share.css';
+@import 'components/_social-context.css';
+@import 'components/_spinner.css';
+@import 'components/_streak-display.css';
+@import 'components/_toasts.css';
+@import 'components/_toggle-switch.css';
+@import 'components/_token-balance.css';
+@import 'components/_tooltips.css';
+@import 'components/_transcript.css';
+
+/* 5. Pages - Page-specific styles */
+@import 'pages/_analysis-mode.css';
+@import 'pages/_auth.css';
+@import 'pages/_billing.css';
+@import 'pages/_help.css';
+@import 'pages/_intro.css';
+@import 'pages/_live-pro.css';
+@import 'pages/_pitchdeck.css';
+@import 'pages/_settings.css';
+
+/* 6. Utilities - Helper classes (last for high specificity) */
+@import 'utilities/_helpers.css';
+
+/* 7. Responsive - Media queries consolidated by breakpoint */
+@import 'responsive/_mobile.css';
