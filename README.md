@@ -1,16 +1,20 @@
 # SatoriCheck
 
-Fully vibecoded, AI-powered fact-checking app with live audio transcription, Meta Analysis for quote claims, and Stripe billing, using antigravity IDE
+Fully vibecoded, AI-powered fact-checking app with live audio transcription, Meta Analysis for quote claims, Pitch Deck verification, and Stripe billing, using antigravity IDE.
+
+**Status:** In Production, Active Users.
+**Mission:** Provide instant, credible verification of claims using advanced AI and source grounding.
 
 ## ✨ Features
 
 - 🎤 **Standard Mode** — Free browser-based speech recognition
 - 🎙️ **Live Pro** — Premium Deepgram transcription (1 CP/minute)
+- 📊 **Pitch Deck Check** — Verify claims in startup pitch decks (Gemini 3 Pro)
 - 🤖 **AI Fact-Checking** — Google Gemini with web search grounding
 - 🧠 **Smart Agent** — Auto-separates multiple claims for individual verification
 - 🔍 **Meta Analysis** — Distinguishes between "X said Y" (quote) and whether Y is actually true
-- � **Social Sharing** — Generate shareable cards for verified claims for X & Linkedin
-- �🔥 **Streak System** — Daily login rewards with CP bonuses
+- 🃏 **Social Sharing** — Generate shareable cards for verified claims for X & Linkedin (Privacy-first)
+- 🔥 **Streak System** — Daily login rewards with CP bonuses
 - ⚡ **Token Billing** — Stripe integration for Check Points (CP)
 - 🔐 **Google OAuth** — One-click sign-in
 - 🗑️ **Account Deletion** — GDPR-compliant data erasure with anti-abuse protection
@@ -46,14 +50,9 @@ Visit **http://127.0.0.1:8000**
 
 ### Optional (Production)
 
-| Variable | Description | Get From |
-|----------|-------------|----------|
-| `DEEPGRAM_API_KEY` | Live Pro transcription | [Deepgram Console](https://console.deepgram.com/) |
-| `STRIPE_SECRET_KEY` | Payment processing | [Stripe Dashboard](https://dashboard.stripe.com/apikeys) |
-| `STRIPE_PUBLISHABLE_KEY` | Frontend Stripe key | Stripe Dashboard |
-| `STRIPE_WEBHOOK_SECRET` | Webhook verification | Stripe Dashboard → Webhooks |
-| `GOOGLE_CLIENT_ID` | OAuth login | [Google Cloud Console](https://console.cloud.google.com/) |
-| `GOOGLE_CLIENT_SECRET` | OAuth secret | Google Cloud Console |
+Check `.env.example` for full configuration options including Stripe, Deepgram, and Google OAuth.
+
+
 
 ### Test Mode
 
@@ -74,16 +73,25 @@ satoricheck/
 │   │   ├── billing.py     # Stripe checkout + webhooks
 │   │   ├── factcheck.py   # AI analysis + Smart Agent
 │   │   ├── live_pro.py    # Deepgram session management
+│   │   ├── pitchdeck.py   # Pitch deck processing & verification
 │   │   ├── tokens.py      # Balance + streak
 │   │   ├── export.py      # CSV export
 │   │   └── analytics.py   # Social sharing stats
 │   └── services/
-│       ├── gemini_service.py    # Fact-checking AI
+│       ├── gemini_service.py    # Fact-checking AI (Gemini 3)
 │       ├── deepgram_service.py  # Audio transcription
 │       └── streak.py            # Streak logic
 ├── frontend/
 │   ├── index.html         # Main app
-│   ├── css/style.css      # Styling
+│   ├── css/               # Modular CSS
+│   │   ├── main.css       # Manifest
+│   │   ├── abstracts/     # Mixins & variables
+│   │   ├── base/          # Resets & typography
+│   │   ├── components/    # Buttons, cards, modals
+│   │   ├── layout/        # Grid & structure
+│   │   ├── pages/         # Page-specific styles
+│   │   ├── responsive/    # Mobile-first overrides
+│   │   └── utilities/     # Helper classes
 │   └── js/
 │       ├── app.js         # Main controller
 │       ├── api.js         # Backend communication
@@ -93,21 +101,11 @@ satoricheck/
 │       ├── audio.js       # Browser speech
 │       ├── selection.js   # Text selection
 │       ├── share.js       # Social image generation
+│       ├── pitchdeck.js   # Pitch deck UI handler
 │       └── ui.js          # UI updates
 ```
 
-## 💰 Token Economics
 
-| Package | Price (CHF) | Check Points |
-|---------|-------------|--------------|
-| Small Battery | 5.90 | 86 CP |
-| Medium Battery | 24.00 | 486 CP |
-| Large Battery | 99.00 | 2,222 CP |
-| Wizard | 890.00 | 1,000 CP/month × 5 years |
-
-**Usage:**
-- Text fact-checking: 1 CP per ~1,250 words
-- Live Pro: 1 CP per minute
 
 ## 🚢 Deployment
 
@@ -128,7 +126,7 @@ DATABASE_URL=postgresql://user:pass@host:5432/satoricheck
 
 ### Stripe Webhook
 
-Configure webhook endpoint: `https://yourdomain.com/api/billing/webhook`
+Configure webhook endpoint in your Stripe Dashboard to point to your deployed backend.
 
 Events to listen for:
 - `checkout.session.completed`
@@ -155,4 +153,4 @@ See [LICENSE](LICENSE) for details.
 
 ---
 
-Built with ❤️ in Switzerland by Andreas
+Built with ❤️ in Switzerland by Andreas, 100% vibecoded using antigravity IDE

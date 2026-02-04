@@ -50,7 +50,8 @@ wheels/
 
 # Private planning docs (keep local only)
 docs/
+**/docs/
+satoricheck/docs/
 
 # Agent configuration and rules
 .agent/
-
