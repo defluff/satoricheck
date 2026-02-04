@@ -27,7 +27,7 @@ class GeminiService:
         if not Config.GEMINI_API_KEY:
             logger.error("GEMINI_API_KEY is not set!")
         else:
-            logger.info(f"GEMINI_API_KEY loaded: {Config.GEMINI_API_KEY[:10]}...")
+            logger.info("✓ Gemini API key configured")
         self.api_key = Config.GEMINI_API_KEY
     
     def _get_api_url(self, model):
@@ -262,6 +262,156 @@ IMPORTANT RULES:
 - For quote claims, is_quote_claim MUST be true.
 
 Respond ONLY with valid JSON, no additional text."""
+
+    def analyze_claims_batch(self, claims):
+        """
+        Analyze multiple claims in a single API call (Batch Mode).
+        
+        Args:
+            claims: List of strings (claims) to analyze
+            
+        Returns:
+            List of dicts (analysis results), one for each claim in order
+        """
+        if not claims:
+            return []
+            
+        # Call API with Retries
+        max_retries = 3
+        retry_delay = 1
+        last_exception = None
+
+        prompt = self._build_batch_fact_check_prompt(claims)
+
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Sending BATCH fact-check request (attempt {attempt + 1}) for {len(claims)} claims...")
+                
+                payload = {
+                    "contents": [{
+                        "parts": [{"text": prompt}]
+                    }],
+                    "tools": [{"google_search": {}}]
+                }
+                
+                response = requests.post(
+                    self._get_api_url(self.MODEL_SMART),
+                    json=payload,
+                    headers={'Content-Type': 'application/json'},
+                    timeout=self.TIMEOUT_SMART * 2  # Double timeout for batch
+                )
+                response.raise_for_status()
+                response_data = response.json()
+                
+                # Parse Batch Response
+                results = self._parse_batch_response(response_data, len(claims))
+                
+                logger.info(f"Batch fact-check completed. Got {len(results)} results.")
+                return results
+                
+            except Exception as e:
+                # Same retry logic as single check
+                error_msg = f"Batch API error (Attempt {attempt + 1}): {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                last_exception = str(e)
+                
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+
+        # Retries exhausted
+        raise Exception(f"Batch fact-check failed: {last_exception}")
+
+    def _build_batch_fact_check_prompt(self, claims):
+        """Build the batch fact-checking prompt."""
+        
+        claims_list = "\n".join([f"CLAIM #{i+1}: {claim}" for i, claim in enumerate(claims)])
+        
+        return f"""You are an elite, impartial fact-checker.
+Analyze the following list of {len(claims)} claims with extreme skepticism.
+
+CLAIMS TO CHECK:
+{claims_list}
+
+INSTRUCTIONS:
+For EACH claim, provide a full analysis following the same strict rules as individual checks:
+- Detect QUOTE CLAIMS (attribution verification vs meta-truth).
+- Provide a VERDICT (TRUE, FALSE, MISLEADING, COULD_NOT_VERIFY).
+- Provide an EXPLANATION (Max 3 sentences).
+- Provide SOURCES (1-3 reliable URLs).
+
+REQUIRED JSON RESPONSE FORMAT:
+Respond ONLY with a JSON OBJECT containing a "results" array. The array must preserve the exact order of claims.
+
+{{
+  "results": [
+    {{
+      "claim_index": 1,
+      "is_claim": true,
+      "verdict": "FALSE",
+      "explanation": "Brief explanation...",
+      "sources": ["url1", "url2"],
+      "source_reliability": "HIGH",
+      "is_quote_claim": false,
+      "quote_attribution": null,
+      "meta_truth_verdict": null
+    }},
+    ... results for all {len(claims)} claims ...
+  ]
+}}
+
+CRITICAL:
+- You MUST return a result for EVERY claim in the list.
+- Use valid JSON.
+"""
+
+    def _parse_batch_response(self, response_data, expected_count):
+        """Parse batch response."""
+        try:
+            # Basic extraction (same as single)
+            if 'candidates' not in response_data or not response_data['candidates']:
+                raise ValueError("No candidates")
+                
+            content = response_data['candidates'][0]['content']['parts'][0]['text'].strip()
+            
+            # Clean markdown
+            if content.startswith('```json'): content = content[7:]
+            if content.startswith('```'): content = content[3:]
+            if content.endswith('```'): content = content[:-3]
+            
+            data = json.loads(content.strip())
+            results = data.get('results', [])
+            
+            # Normalize and validate each result
+            normalized_results = []
+            for i in range(min(len(results), expected_count)):
+                res = results[i]
+                # Apply defaults
+                if 'verdict' not in res: res['verdict'] = 'COULD_NOT_VERIFY'
+                if 'explanation' not in res: res['explanation'] = 'Analysis failed.'
+                if 'sources' not in res: res['sources'] = []
+                
+                # Validate sources
+                if res.get('sources'):
+                     res['sources'] = self._validate_sources(res['sources'])
+                
+                normalized_results.append(res)
+                
+            # If AI missed some claims, pad with errors
+            while len(normalized_results) < expected_count:
+                normalized_results.append({
+                    "verdict": "COULD_NOT_VERIFY",
+                    "explanation": "Batch processing incomplete.",
+                    "sources": [],
+                    "is_claim": True
+                })
+                
+            return normalized_results
+            
+        except Exception as e:
+            logger.error(f"Batch parse error: {e}")
+            raise
     
     def _parse_response(self, response_data):
         """Parse Gemini REST API response into structured format."""

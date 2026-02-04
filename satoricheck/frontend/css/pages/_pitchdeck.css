@@ -247,44 +247,6 @@
     }
 }
 
-/* Action Section */
-.pd-action-section {
-    display: flex;
-    justify-content: center;
-    padding: var(--spacing-md) 0;
-}
-
-.pd-deep-dive-btn {
-    padding: var(--spacing-md) var(--spacing-xl);
-    font-size: 1rem;
-    min-width: 200px;
-}
-
-.pd-deep-dive-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
-    box-shadow: none;
-}
-
-.pd-deep-dive-btn.analyzing {
-    pointer-events: none;
-    background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
-    animation: pulse-glow 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse-glow {
-
-    0%,
-    100% {
-        opacity: 0.8;
-    }
-
-    50% {
-        opacity: 1;
-    }
-}
-
 /* Loading State */
 .pd-loading {
     display: flex;
@@ -396,11 +358,7 @@
     opacity: 0.8;
 }
 
-/* Notable Findings Card (legacy) */
-.pd-findings-card {
-    border-left: 3px solid var(--color-primary);
-}
-
+/* Separator (used in Industry/Sector display) */
 .pd-separator {
     color: var(--color-text-muted);
     margin: 0 0.5em;
@@ -432,8 +390,11 @@
     align-items: center;
 }
 
-.pd-claims-header .pd-card-header {
+.pd-claims-header h3 {
     margin: 0;
+    font-size: inherit;
+    font-weight: inherit;
+    color: inherit;
 }
 
 .pd-check-all-btn {
@@ -461,12 +422,17 @@
 .pd-claim-category-header {
     font-size: 0.75rem;
     font-weight: 600;
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin-bottom: var(--spacing-sm);
-    padding-bottom: var(--spacing-xs);
-    border-bottom: 1px solid var(--color-border);
+
+    /* "Darker header" styling */
+    background: var(--color-surface-elevated);
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--color-border);
+
     display: flex;
     align-items: center;
     gap: var(--spacing-xs);
@@ -511,14 +477,21 @@
 }
 
 .pd-claim-check-btn:disabled {
-    opacity: 0.5;
+    opacity: 0.7;
     cursor: not-allowed;
     transform: none;
+    background: var(--color-surface-elevated);
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
 }
 
 .pd-claim-check-btn.loading {
     pointer-events: none;
-    opacity: 0.7;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-left: 8px;
+    padding-right: 12px;
 }
 
 .pd-claim-text {
@@ -562,69 +535,6 @@
 }
 
 .pd-claim-sources a:hover {
-    opacity: 0.8;
-    text-decoration: underline;
-}
-
-/* Legacy findings styles */
-.pd-findings-placeholder {
-    color: var(--color-text-muted);
-    font-size: 0.85rem;
-    font-style: italic;
-    padding: var(--spacing-sm) 0;
-}
-
-.pd-findings-results {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-md);
-}
-
-.pd-finding-item {
-    padding: var(--spacing-sm);
-    background: var(--color-surface);
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--color-border);
-}
-
-.pd-finding-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: var(--spacing-xs);
-}
-
-.pd-finding-type {
-    font-size: 0.75rem;
-    color: var(--color-text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-
-.pd-finding-claim {
-    font-size: 0.9rem;
-    color: var(--color-text);
-    margin-bottom: var(--spacing-xs);
-}
-
-.pd-finding-explanation {
-    font-size: 0.8rem;
-    color: var(--color-text-muted);
-    line-height: 1.4;
-    margin-bottom: var(--spacing-xs);
-}
-
-.pd-finding-sources {
-    font-size: 0.75rem;
-}
-
-.pd-finding-sources a {
-    color: var(--color-primary);
-    text-decoration: none;
-    transition: opacity 0.2s ease;
-}
-
-.pd-finding-sources a:hover {
     opacity: 0.8;
     text-decoration: underline;
 }

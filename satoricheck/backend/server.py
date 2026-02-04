@@ -53,15 +53,9 @@ CORS(app, supports_credentials=True, origins=[
 ])
 
 # Rate limiting to prevent abuse
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
+from backend.extensions import limiter
 
-limiter = Limiter(
-    get_remote_address,
-    app=app,
-    default_limits=["200 per day", "50 per hour"],
-    storage_uri="memory://",  # Use Redis in production if multi-instance
-)
+limiter.init_app(app)
 logger.info("✓ Rate limiter initialized")
 
 @app.before_request
@@ -173,6 +167,15 @@ app.register_blueprint(live_pro_bp)
 # Import and register Analytics blueprint (share tracking)
 from backend.routes.analytics import analytics_bp
 app.register_blueprint(analytics_bp)
+
+# Import and register Feedback blueprint (feature voting)
+from backend.routes.feedback import feedback_bp
+app.register_blueprint(feedback_bp)
+
+# Import and register Pitchdeck blueprint (PDF analysis)
+from backend.routes.pitchdeck import pitchdeck_bp
+app.register_blueprint(pitchdeck_bp)
+
 
 # Initialize WebSocket proxy for Live Pro (keeps Deepgram key server-side)
 from backend.services.websocket_proxy import init_websocket_proxy

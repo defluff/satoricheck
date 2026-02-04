@@ -361,11 +361,62 @@ class FactCheckManager {
 
                 ui.showToast(`🧠 Found ${uncheckedClaims.length} new claims to check`, 'success');
 
-                // Parallel processing with concurrency limit
-                await this.processWithConcurrency(uncheckedClaims, 5, async (claim) => {
-                    // Pass original text as context so Grok can check triggers against it
-                    await this.checkText(claim.trim(), text);
+                // 2a. Create pending cards for ALL claims first
+                const cardMap = new Map(); // claim text -> cardId
+
+                uncheckedClaims.forEach(claim => {
+                    const cardId = ui.createCard(claim.trim(), true);
+                    cardMap.set(claim.trim(), cardId);
+                    this.checkedTexts.add(claim.trim()); // Optimistically mark as checked
                 });
+
+                // 2b. Call Batch API
+                try {
+                    const response = await api.analyzeBatch(uncheckedClaims, text); // Pass original text as context
+
+                    if (response.success && response.results) {
+                        // Update balance once
+                        if (response.new_balance !== undefined) {
+                            ui.updateBalance(response.new_balance);
+                        }
+
+                        // Update cards with results
+                        let resultCount = 0;
+                        response.results.forEach(res => {
+                            // Find matching card (using index matches the order of uncheckedClaims)
+                            // The API returns results in the same order as claims sent
+                            // But let's verify if we can map by index or text. 
+                            // API has 'claim_text' in DB but here result might filter fields.
+
+                            // safest is by index since uncheckedClaims is the source of truth
+                            const originalClaim = uncheckedClaims[resultCount];
+                            if (originalClaim) {
+                                const cardId = cardMap.get(originalClaim.trim());
+                                if (cardId) {
+                                    ui.updateCard(cardId, {
+                                        ...res,
+                                        isSmartAgentMode: true
+                                    });
+                                }
+                            }
+                            resultCount++;
+                        });
+
+                        ui.showToast(`Batch complete: verified ${resultCount} claims`, 'success');
+                    }
+                } catch (error) {
+                    console.error("Batch check failed:", error);
+                    ui.showToast(`Batch check failed: ${error.message}`, 'error');
+
+                    // Mark all cards as error
+                    cardMap.forEach((cardId) => {
+                        ui.updateCard(cardId, {
+                            verdict: 'ERROR',
+                            explanation: "Batch processing failed. " + error.message,
+                            sources: []
+                        });
+                    });
+                }
 
                 // Mark full text as processed only if we finished
                 if (!this.abortRequested) {

@@ -194,6 +194,189 @@ def analyze_claim():
         raise APIError('Failed to analyze claim')
 
 
+
+@factcheck_bp.route('/analyze-batch', methods=['POST'])
+@login_required
+def analyze_batch_claims():
+    """Analyze multiple claims in a batch with caching."""
+    start_time = time.time()
+    
+    try:
+        data = request.get_json()
+        if not data or 'claims' not in data:
+            raise APIError('No claims provided')
+            
+        claims = data['claims']
+        if not isinstance(claims, list) or not claims:
+            raise APIError('Claims must be a non-empty list')
+            
+        user = request.current_user
+        context = data.get('context')
+        
+        # 1. Cache Lookup
+        # We look for RECENT exact matches to avoid stale checks if world events change
+        # But for now, simple exact match on text is a good start.
+        
+        results = []  # Final list of results (cached + new)
+        claims_to_process = [] # (original_index, claim_text)
+        
+        # Helper to find cache
+        from sqlalchemy import and_
+        
+        for i, claim_text in enumerate(claims):
+            if not claim_text or not claim_text.strip():
+                continue
+                
+            clean_text = claim_text.strip()
+            
+            # Check cache
+            cached = db_session.query(FactCheck).filter(
+                and_(
+                    FactCheck.claim_text == clean_text,
+                    # Optional: Filter by recency? e.g. last 7 days. 
+                    # For now, let's assume facts don't change that fast or user wants same result.
+                )
+            ).order_by(FactCheck.timestamp.desc()).first()
+            
+            if cached:
+                logger.info(f"Batch Cache HIT: {clean_text[:30]}...")
+                results.append({
+                    'index': i,
+                    'is_cached': True,
+                    'result': {
+                        'id': cached.id,
+                        'is_claim': cached.is_claim,
+                        'verdict': cached.verdict,
+                        'explanation': cached.explanation,
+                        'fallacy': cached.fallacy,
+                        'sources': json.loads(cached.sources) if cached.sources else [],
+                        'source_reliability': cached.source_reliability,
+                        'tokens_used': 0 # Cached results are free!
+                    }
+                })
+            else:
+                claims_to_process.append((i, clean_text))
+        
+        # 2. Process New Claims
+        if claims_to_process:
+            logger.info(f"Batch processing {len(claims_to_process)} new claims")
+            
+            # Calculate cost ONLY for new claims
+            texts_to_analyze = [c[1] for c in claims_to_process]
+            total_word_count = sum(len(t.split()) for t in texts_to_analyze)
+            
+            # Token Balance Check
+            token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
+            if not token_balance:
+                raise APIError('No token balance found', status_code=403)
+                
+            current_unbilled = token_balance.unbilled_words or 0
+            total_unbilled = current_unbilled + total_word_count
+            
+            # Cost calculation
+            token_cost = (total_unbilled // Config.WORDS_PER_CP) * Config.TOKENS_PER_CP_UNIT
+            remainder_words = total_unbilled % Config.WORDS_PER_CP
+            
+            # Smart Agent multiplier (Batch is implicitly smart agent verified)
+            token_cost *= 2 
+            token_cost = max(1, token_cost) if token_cost > 0 else 0
+            
+            if token_balance.balance < token_cost:
+                 raise APIError(f'Insufficient tokens. Need {token_cost} CP', status_code=403)
+                 
+            # Deduct
+            token_balance.balance -= token_cost
+            token_balance.unbilled_words = remainder_words
+            token_balance.last_updated = datetime.utcnow()
+            
+            # Call API
+            gemini_service = get_gemini_service()
+            try:
+                # Add context if provided (appended to first claim or all? 
+                # Better to let Gemini handle context in prompt construction if needed, 
+                # but currently gemini_service just takes list of strings)
+                # We'll pass raw claims.
+                
+                api_results = gemini_service.analyze_claims_batch(texts_to_analyze)
+                
+            except Exception as e:
+                # Refund
+                token_balance.balance += token_cost
+                token_balance.unbilled_words = current_unbilled
+                db_session.commit()
+                logger.error(f"Batch analysis failed: {e}")
+                raise APIError("Batch analysis service unavailable")
+
+            # Process API Results
+            # Distribute cost roughly evenly for recording purposes? 
+            # Or just assign to the batch. We store individual records.
+            # We'll assign cost proportional to word count or just split evenly? 
+            # Let's split evenly for simplicity, it's metadata only.
+            cost_per_item = token_cost / len(api_results) if api_results else 0
+            
+            for idx, res in enumerate(api_results):
+                original_index = claims_to_process[idx][0]
+                text = claims_to_process[idx][1]
+                
+                # Save to DB
+                fact_check = FactCheck(
+                    user_id=user.id,
+                    claim_text=text,
+                    word_count=len(text.split()),
+                    tokens_used=cost_per_item, 
+                    is_claim=res.get('is_claim', True),
+                    verdict=res.get('verdict', 'COULD_NOT_VERIFY'),
+                    explanation=res.get('explanation', ''),
+                    fallacy=res.get('fallacy'),
+                    sources=json.dumps(res.get('sources', [])),
+                    source_reliability=res.get('source_reliability', 'MEDIUM'),
+                    timestamp=datetime.utcnow(),
+                    processing_time=(time.time() - start_time) / len(api_results)
+                )
+                db_session.add(fact_check)
+                db_session.flush() # Get ID
+                
+                results.append({
+                    'index': original_index,
+                    'is_cached': False,
+                    'result': {
+                        'id': fact_check.id,
+                        'is_claim': fact_check.is_claim,
+                        'verdict': fact_check.verdict,
+                        'explanation': fact_check.explanation,
+                        'fallacy': fact_check.fallacy,
+                        'sources': res.get('sources', []),
+                        'tokens_used': cost_per_item,
+                         # Meta-Truth fields
+                        'is_quote_claim': res.get('is_quote_claim', False),
+                        'quote_attribution': res.get('quote_attribution'),
+                        'meta_truth_verdict': res.get('meta_truth_verdict'),
+                    }
+                })
+                
+            db_session.commit()
+            
+        # Re-sort results to match original order
+        results.sort(key=lambda x: x['index'])
+        
+        # Extract just the result objects
+        final_results = [r['result'] for r in results]
+        
+        return jsonify({
+            'success': True,
+            'results': final_results,
+            'new_balance': db_session.query(TokenBalance).filter_by(user_id=user.id).first().balance
+        })
+
+    except APIError:
+        db_session.rollback()
+        raise
+    except Exception as e:
+        db_session.rollback()
+        logger.error(f"Batch error: {e}", exc_info=True)
+        raise APIError('Batch analysis failed')
+
+
 @factcheck_bp.route('/history', methods=['GET'])
 @login_required
 def get_fact_check_history():

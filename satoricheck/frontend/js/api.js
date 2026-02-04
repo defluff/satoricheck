@@ -172,6 +172,16 @@ class APIClient {
         });
     }
 
+    async analyzeBatch(claims, context = null) {
+        const payload = { claims };
+        if (context) payload.context = context;
+
+        return this.request('/factcheck/analyze-batch', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+    }
+
     async identifyClaims(text) {
         return this.request('/factcheck/identify-claims', {
             method: 'POST',
@@ -203,6 +213,14 @@ class APIClient {
 
         const blob = await response.blob();
         return blob;
+    }
+
+    // Feature voting (user research)
+    async recordFeatureVote(featureName) {
+        return this.request('/feedback/feature-vote', {
+            method: 'POST',
+            body: JSON.stringify({ feature: featureName })
+        });
     }
 }
 

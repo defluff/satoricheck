@@ -7,10 +7,10 @@
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-lg), var(--shadow-glow);
     z-index: 1000;
-    animation: fadeIn 0.2s ease;
+    animation: tooltipFadeIn 0.2s ease;
 }
 
-@keyframes fadeIn {
+@keyframes tooltipFadeIn {
     from {
         opacity: 0;
         transform: translateY(-5px);

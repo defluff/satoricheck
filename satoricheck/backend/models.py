@@ -195,3 +195,25 @@ class ShareStats(Base):
     
     def __repr__(self):
         return f'<ShareStats platform={self.platform}>'
+
+
+class FeatureVote(Base):
+    """User feedback feature voting.
+    
+    Tracks which features users want to see next.
+    """
+    __tablename__ = 'feature_votes'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    feature = Column(String(50), nullable=False)  # e.g., 'video_check'
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Prevent multiple votes for same feature by same user
+    __table_args__ = (
+        Index('ix_vote_user_feature', 'user_id', 'feature', unique=True),
+    )
+
+    def __repr__(self):
+        return f'<FeatureVote user={self.user_id} feature={self.feature}>'
+

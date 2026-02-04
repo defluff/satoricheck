@@ -19,11 +19,11 @@
     z-index: 1000;
     box-shadow: var(--shadow-lg);
     border: 1px solid var(--color-border);
-    animation: fadeIn 0.15s ease;
+    animation: hoverTooltipFadeIn 0.15s ease;
     pointer-events: none;
 }
 
-@keyframes fadeIn {
+@keyframes hoverTooltipFadeIn {
     from {
         opacity: 0;
         transform: translateX(-50%) translateY(15px);

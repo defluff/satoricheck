@@ -17,10 +17,10 @@
     padding: var(--spacing-md) var(--spacing-lg);
     box-shadow: var(--shadow-xl);
     min-width: 300px;
-    animation: slideInRight 0.3s ease;
+    animation: toastSlideIn 0.3s ease;
 }
 
-@keyframes slideInRight {
+@keyframes toastSlideIn {
     from {
         opacity: 0;
         transform: translateX(100px);

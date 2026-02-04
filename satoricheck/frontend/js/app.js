@@ -10,6 +10,7 @@ import factcheck from './factcheck.js';
 import selection from './selection.js';
 import api from './api.js';
 import livepro from './livepro.js';
+import pitchdeck from './pitchdeck.js';
 
 class App {
     constructor() {
@@ -27,6 +28,9 @@ class App {
 
         // Initialize selection handler
         selection.init();
+
+        // Initialize Pitch Deck module
+        pitchdeck.init();
 
         // Set up audio result handler for auto-check (Standard mode)
         audio.onResult((transcript) => {
@@ -322,6 +326,63 @@ class App {
             });
         }
 
+        // Video Check button - shows coming soon modal (first time only)
+        const navVideoBtn = document.getElementById('nav-video-btn');
+        if (navVideoBtn) {
+            navVideoBtn.addEventListener('click', () => {
+                // Check if user has already seen the modal
+                const hasSeenVideoModal = localStorage.getItem('hasSeenVideoModal');
+
+                if (!hasSeenVideoModal) {
+                    // First time - show the modal
+                    localStorage.setItem('hasSeenVideoModal', 'true');
+                    ui.showModal('feature-vote-modal');
+
+                    // Check if already voted
+                    const hasVoted = localStorage.getItem('videoFeatureVoted');
+                    if (hasVoted) {
+                        this.showVotedState();
+                    }
+                }
+                // After first view, button does nothing (stays inactive)
+            });
+        }
+
+        // Close Feature Vote modal
+        const closeFeatureVoteModal = document.getElementById('close-feature-vote-modal');
+        if (closeFeatureVoteModal) {
+            closeFeatureVoteModal.addEventListener('click', () => {
+                ui.hideModal('feature-vote-modal');
+            });
+        }
+
+        // Feature Vote button - vote for video feature
+        const featureVoteBtn = document.getElementById('feature-vote-btn');
+        if (featureVoteBtn) {
+            // Check if already voted on page load
+            const hasVoted = localStorage.getItem('videoFeatureVoted');
+            if (hasVoted) {
+                this.showVotedState();
+            }
+
+            featureVoteBtn.addEventListener('click', async () => {
+                // Record the vote
+                localStorage.setItem('videoFeatureVoted', 'true');
+
+                // Send vote to backend (fire and forget)
+                try {
+                    await api.recordFeatureVote('video_check');
+                } catch (e) {
+                    // Silent fail - vote is recorded locally
+                    console.log('[App] Feature vote recorded locally');
+                }
+
+                // Update UI
+                this.showVotedState();
+                ui.showToast('Thanks for your feedback! ⚡', 'success');
+            });
+        }
+
         // Handle token package purchases (Event Delegation)
         document.body.addEventListener('click', async (e) => {
             const purchaseBtn = e.target.closest('.package-card button');
@@ -393,6 +454,22 @@ class App {
         modeLivePro?.classList.add('active');
         modeStandard?.classList.remove('active');
         // Toast removed to avoid confusion (Live Pro isn't 'Active' until Mic is clicked)
+    }
+
+    /**
+     * Update UI to show voted state for feature vote modal
+     */
+    showVotedState() {
+        const featureVoteBtn = document.getElementById('feature-vote-btn');
+        const featureVoteThanks = document.getElementById('feature-vote-thanks');
+
+        if (featureVoteBtn) {
+            featureVoteBtn.classList.add('voted');
+            featureVoteBtn.innerHTML = '<span class="vote-icon">✓</span><span class="vote-text">Voted!</span>';
+        }
+        if (featureVoteThanks) {
+            featureVoteThanks.classList.remove('hidden');
+        }
     }
 
     async handlePurchase(packageType) {
