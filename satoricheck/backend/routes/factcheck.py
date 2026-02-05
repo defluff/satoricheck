@@ -340,6 +340,20 @@ def analyze_batch_claims():
                 db_session.add(fact_check)
                 db_session.flush() # Get ID
                 
+                # Grok Logic for Batch (Graceful Degradation)
+                grok_result = None
+                if Config.GROK_ENABLED:
+                    try:
+                        # Check triggers just like in single analysis
+                        # We use the individual claim text for triggers
+                        from backend.services.grok_service import should_fire_grok, get_grok_service
+                        if should_fire_grok(text, res):
+                            grok_service = get_grok_service()
+                            grok_result = grok_service.search_social(text)
+                            logger.info(f"Batch Grok search for claim {idx}: found={grok_result.get('found', False)}")
+                    except Exception as e:
+                        logger.warning(f"Batch Grok check failed for claim {idx}: {e}")
+
                 results.append({
                     'index': original_index,
                     'is_cached': False,
@@ -351,10 +365,14 @@ def analyze_batch_claims():
                         'fallacy': fact_check.fallacy,
                         'sources': res.get('sources', []),
                         'tokens_used': cost_per_item,
-                         # Meta-Truth fields
+                        # Meta-Truth fields
                         'is_quote_claim': res.get('is_quote_claim', False),
                         'quote_attribution': res.get('quote_attribution'),
+                        'quote_verified': res.get('quote_verified'),
+                        'quote_source': res.get('quote_source'),
                         'meta_truth_verdict': res.get('meta_truth_verdict'),
+                        # Social context
+                        'social': grok_result,
                     }
                 })
                 

@@ -342,6 +342,8 @@ For EACH claim, provide a full analysis following the same strict rules as indiv
 - Provide an EXPLANATION (Max 3 sentences).
 - Provide SOURCES (1-3 reliable URLs).
 
+- Provide SOURCES (1-3 reliable URLs).
+
 REQUIRED JSON RESPONSE FORMAT:
 Respond ONLY with a JSON OBJECT containing a "results" array. The array must preserve the exact order of claims.
 
@@ -356,15 +358,29 @@ Respond ONLY with a JSON OBJECT containing a "results" array. The array must pre
       "source_reliability": "HIGH",
       "is_quote_claim": false,
       "quote_attribution": null,
+      "quote_verified": null,
       "meta_truth_verdict": null
     }},
-    ... results for all {len(claims)} claims ...
+    {{
+      "claim_index": 2,
+      "is_claim": true,
+      "verdict": "FALSE",
+      "explanation": "Brief explanation...",
+      "sources": ["url1", "url2"],
+      "source_reliability": "HIGH",
+      "is_quote_claim": true,
+      "quote_attribution": "Donald Trump",
+      "quote_verified": true,
+      "meta_truth_verdict": "FALSE"
+    }}
   ]
 }}
 
-CRITICAL:
-- You MUST return a result for EVERY claim in the list.
-- Use valid JSON.
+CRITICAL RULES:
+1. You MUST return a result for EVERY claim in the list.
+2. Use valid JSON.
+3. QUOTE CLAIMS: If "is_quote_claim" is true, "quote_verified" MUST be either true (they said it) or false (they didn't). Do not return null.
+4. VERDICT CONSISTENCY: If quote_verified is FALSE, the overall verdict MUST be FALSE or MISLEADING.
 """
 
     def _parse_batch_response(self, response_data, expected_count):
