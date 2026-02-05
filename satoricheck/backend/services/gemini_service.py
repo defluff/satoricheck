@@ -496,13 +496,63 @@ CRITICAL:
             logger.error(f"Error parsing Gemini response: {e}")
             raise
     
-    def identify_claims(self, text):
-        """Smart Agent: Identify distinct claims in text with full context."""
-        prompt = f"""You are a meticulous fact-checker assistant. Your job is to extract EVERY verifiable factual claim from this text.
+    def _chunk_text(self, text, chunk_size=4000, overlap=500):
+        """Split text into overlapping chunks to preserve context."""
+        if len(text) <= chunk_size:
+            return [text]
+            
+        chunks = []
+        start = 0
+        text_len = len(text)
+        
+        while start < text_len:
+            end = min(start + chunk_size, text_len)
+            
+            # If we are not at the end, try to break at a sentence or word boundary
+            if end < text_len:
+                # Look back from 'end' to find a period or space
+                # Look in the last 100 chars of the chunk
+                lookback = 100
+                search_start = max(start, end - lookback)
+                search_text = text[search_start:end]
+                
+                # Priority 1: Sentence break
+                last_period = search_text.rfind('.')
+                if last_period != -1:
+                    end = search_start + last_period + 1
+                else:
+                    # Priority 2: Space break
+                    last_space = search_text.rfind(' ')
+                    if last_space != -1:
+                        end = search_start + last_space
 
-TEXT TO ANALYZE:
+            chunks.append(text[start:end])
+            
+            if end >= text_len:
+                break
+                
+            # Move start forward, backing up by overlap amount
+            # But ensure we effectively move forward (start + chunk_size - overlap > start)
+            start = end - overlap
+            
+        return chunks
+
+    def identify_claims(self, text):
+        """Smart Agent: Identify distinct claims in text with full context using chunking."""
+        
+        # 1. Chunk the text
+        chunks = self._chunk_text(text)
+        logger.info(f"Smart Agent potentially processing {len(chunks)} chunks for text length {len(text)}")
+        
+        all_claims = set() # Use set for deduplication
+        
+        for i, chunk in enumerate(chunks):
+            # Prompt updated to allow more claims per chunk
+            prompt = f"""You are a meticulous fact-checker assistant. Your job is to extract EVERY verifiable factual claim from this text.
+
+TEXT TO ANALYZE (Part {i+1}/{len(chunks)}):
 \"\"\"
-{text}
+{chunk}
 \"\"\"
 
 YOUR TASK:
@@ -531,37 +581,47 @@ EXTRACTION RULES:
    - Questions ("what is pop()?")
    - Commands/instructions ("click the button")
 
-RESPOND WITH JSON ONLY - extract up to 10 claims:
+RESPOND WITH JSON ONLY - extract up to 15 claims per chunk:
 {{"claims": ["claim 1", "claim 2", "claim 3", ...]}}
 
 If zero claims found, return: {{"claims": []}}"""
 
-        try:
-            payload = {"contents": [{"parts": [{"text": prompt}]}]}
-            response = requests.post(self._get_api_url(self.MODEL_FAST), json=payload, 
-                                     headers={'Content-Type': 'application/json'}, timeout=self.TIMEOUT_FAST)
-            response.raise_for_status()
-            data = response.json()
-            
-            if 'candidates' not in data or not data['candidates']:
-                return []
-            
-            content = data['candidates'][0]['content']['parts'][0]['text'].strip()
-            # Clean markdown code blocks
-            if content.startswith('```json'):
-                content = content[7:]
-            elif content.startswith('```'):
-                content = content[3:]
-            if content.endswith('```'):
-                content = content[:-3]
-            
-            result = json.loads(content.strip())
-            claims = result.get('claims', [])
-            logger.info(f"Smart Agent identified {len(claims)} claims: {claims}")
-            return claims
-        except Exception as e:
-            logger.warning(f"Smart Agent failed: {e}", exc_info=True)
-            return []
+            try:
+                payload = {"contents": [{"parts": [{"text": prompt}]}]}
+                response = requests.post(self._get_api_url(self.MODEL_FAST), json=payload, 
+                                         headers={'Content-Type': 'application/json'}, timeout=self.TIMEOUT_FAST)
+                response.raise_for_status()
+                data = response.json()
+                
+                if 'candidates' not in data or not data['candidates']:
+                    continue
+                
+                content = data['candidates'][0]['content']['parts'][0]['text'].strip()
+                # Clean markdown code blocks
+                if content.startswith('```json'):
+                    content = content[7:]
+                elif content.startswith('```'):
+                    content = content[3:]
+                if content.endswith('```'):
+                    content = content[:-3]
+                
+                result = json.loads(content.strip())
+                claims = result.get('claims', [])
+                
+                # Add to set (deduplication)
+                for claim in claims:
+                    if claim and isinstance(claim, str) and len(claim.strip()) > 5:
+                        all_claims.add(claim.strip())
+                        
+                logger.info(f"Chunk {i+1}: Found {len(claims)} claims")
+                
+            except Exception as e:
+                logger.warning(f"Smart Agent chunk {i+1} failed: {e}", exc_info=True)
+                # Continue to next chunk even if one fails
+        
+        final_claims = list(all_claims)
+        logger.info(f"Smart Agent total distinct claims found: {len(final_claims)}")
+        return final_claims
 
     def analyze_ai_content(self, text):
         """
