@@ -60,51 +60,7 @@ Set `TEST_MODE=true` to skip API key validation and use a test user.
 
 ## 🏗️ Architecture
 
-```
-satoricheck/
-├── backend/
-│   ├── server.py          # Flask app entry point
-│   ├── config.py          # Environment config + pricing
-│   ├── models.py          # SQLAlchemy models
-│   ├── database.py        # DB connection
-│   ├── jwt_utils.py       # Token authentication
-│   ├── routes/
-│   │   ├── auth.py        # Login, signup, OAuth, delete account
-│   │   ├── billing.py     # Stripe checkout + webhooks
-│   │   ├── factcheck.py   # AI analysis + Smart Agent
-│   │   ├── live_pro.py    # Deepgram session management
-│   │   ├── pitchdeck.py   # Pitch deck processing & verification
-│   │   ├── tokens.py      # Balance + streak
-│   │   ├── export.py      # CSV export
-│   │   └── analytics.py   # Social sharing stats
-│   └── services/
-│       ├── gemini_service.py    # Fact-checking AI (Gemini 3)
-│       ├── deepgram_service.py  # Audio transcription
-│       └── streak.py            # Streak logic
-├── frontend/
-│   ├── index.html         # Main app
-│   ├── css/               # Modular CSS
-│   │   ├── main.css       # Manifest
-│   │   ├── abstracts/     # Mixins & variables
-│   │   ├── base/          # Resets & typography
-│   │   ├── components/    # Buttons, cards, modals
-│   │   ├── layout/        # Grid & structure
-│   │   ├── pages/         # Page-specific styles
-│   │   ├── responsive/    # Mobile-first overrides
-│   │   └── utilities/     # Helper classes
-│   └── js/
-│       ├── app.js         # Main controller
-│       ├── api.js         # Backend communication
-│       ├── auth.js        # Authentication
-│       ├── factcheck.js   # Fact-check logic
-│       ├── livepro.js     # Live Pro WebSocket
-│       ├── audio.js       # Browser speech
-│       ├── selection.js   # Text selection
-│       ├── share.js       # Social image generation
-│       ├── pitchdeck.js   # Pitch deck UI handler
-│       └── ui.js          # UI updates
-```
-
+<img width="4741" height="6516" alt="Gemini API Services Flow-2026-02-04-235943" src="https://github.com/user-attachments/assets/ad3fe0dc-0828-464d-b367-4ee54d23ab8b" />
 
 
 ## 🚢 Deployment
