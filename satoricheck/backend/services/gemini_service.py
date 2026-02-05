@@ -246,7 +246,7 @@ REQUIRED JSON RESPONSE FORMAT:
     "is_claim": true,
     "is_quote_claim": true or false,
     "quote_attribution": "Name of person or null",
-    "quote_verified": true or false or null,
+    "quote_verified": true or false (MUST BE BOOLEAN, never null. Did they say it?),
     "quote_source": "Where/when they said it or null",
     "meta_truth_verdict": "TRUE" or "FALSE" or "MISLEADING" or "COULD_NOT_VERIFY",
     "verdict": "TRUE" or "FALSE" or "MISLEADING" or "COULD_NOT_VERIFY" or "NOT_A_CLAIM",
@@ -259,7 +259,8 @@ REQUIRED JSON RESPONSE FORMAT:
 IMPORTANT RULES:
 - SOURCES: You MUST provide at least 1 and up to 5 real, authoritative URLs that support your verdict. NEVER return empty sources.
 - EXPLANATION: Maximum 5 sentences. State your verdict first, then the key facts. Be precise and direct.
-- For quote claims, is_quote_claim MUST be true.
+- QUOTE CLAIMS: If "is_quote_claim" is true, "quote_verified" MUST be either true (they said it) or false (they didn't). Do not return null.
+- VERDICT CONSISTENCY: If quote_verified is FALSE, the overall verdict MUST be FALSE or MISLEADING.
 
 Respond ONLY with valid JSON, no additional text."""
 
