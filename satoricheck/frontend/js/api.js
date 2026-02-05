@@ -173,13 +173,59 @@ class APIClient {
     }
 
     async analyzeBatch(claims, context = null) {
-        const payload = { claims };
-        if (context) payload.context = context;
+        // Chunking logic to prevent timeouts on large batches
+        const CHUNK_SIZE = 5;
+        const allResults = [];
+        let totalCost = 0;
+        let newBalance = null;
 
-        return this.request('/factcheck/analyze-batch', {
-            method: 'POST',
-            body: JSON.stringify(payload)
-        });
+        // Process in chunks
+        for (let i = 0; i < claims.length; i += CHUNK_SIZE) {
+            const chunk = claims.slice(i, i + CHUNK_SIZE);
+            const payload = { claims: chunk };
+            if (context) payload.context = context;
+
+            try {
+                // Send chunk request
+                const response = await this.request('/factcheck/analyze-batch', {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.success && response.results) {
+                    allResults.push(...response.results);
+
+                    // Update balance from latest successful response
+                    if (response.new_balance !== undefined) {
+                        newBalance = response.new_balance;
+                    }
+                }
+            } catch (error) {
+                console.error(`Batch chunk ${i} failed:`, error);
+
+                // If a chunk fails, we still want to return results for others if possible
+                // Fill failed chunk with error placeholders
+                for (let j = 0; j < chunk.length; j++) {
+                    allResults.push({
+                        verdict: 'ERROR',
+                        explanation: `Batch processing failed for this item: ${error.message}`,
+                        sources: [],
+                        is_claim: true
+                    });
+                }
+
+                // If it's a 403 (insufficient funds) or 401, we should probably stop
+                if (error.status === 403 || error.status === 401) {
+                    throw error;
+                }
+            }
+        }
+
+        return {
+            success: true,
+            results: allResults,
+            new_balance: newBalance
+        };
     }
 
     async identifyClaims(text) {

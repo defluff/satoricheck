@@ -210,6 +210,10 @@ def analyze_batch_claims():
         if not isinstance(claims, list) or not claims:
             raise APIError('Claims must be a non-empty list')
             
+        # Hard limit processing size per request to prevent timeouts
+        if len(claims) > 20:
+             raise APIError('Batch size too large. Maximum 20 claims per request.')
+            
         user = request.current_user
         context = data.get('context')
         
