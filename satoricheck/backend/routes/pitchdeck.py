@@ -141,9 +141,10 @@ def verify_market_claims():
         market_size = data.get('market_size')
         competition = data.get('competition', [])
         industry = data.get('industry')
+        cache_name = data.get('cache_name') # New: Context Cache ID
         
         # Debug: Log what we received
-        logger.info(f"[Pitchdeck] Verify request - claims: {len(verifiable_claims)}, market_size: {bool(market_size)}, competition: {len(competition)}")
+        logger.info(f"[Pitchdeck] Verify request - claims: {len(verifiable_claims)}, cache: {bool(cache_name)}")
         
         # Validate at least one claim to verify
         if not verifiable_claims and not market_size and not competition:
@@ -155,7 +156,8 @@ def verify_market_claims():
             verifiable_claims=verifiable_claims,
             market_size=market_size,
             competition=competition,
-            industry=industry
+            industry=industry,
+            cache_name=cache_name
         )
         
         user = request.current_user

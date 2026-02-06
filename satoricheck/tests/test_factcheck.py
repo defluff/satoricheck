@@ -66,5 +66,5 @@ class TestRateLimiting:
         from backend.server import limiter
         
         assert limiter is not None
-        # Rate limiter should have limits configured
-        assert limiter._default_limits is not None
+        # Rate limiter should be enabled
+        assert limiter.enabled is True

@@ -87,12 +87,12 @@ class CardUI {
                     <div class="meta-level level-1">
                         <span class="level-label">Level 1: Quote</span>
                         <span class="level-result">${quoteStatus}</span>
-                        ${result.quote_source ? `<span class="level-detail">${result.quote_attribution} — ${result.quote_source}</span>` : `<span class="level-detail">${result.quote_attribution}</span>`}
+                        ${result.quote_source ? `<span class="level-detail">${this.escapeHtml(result.quote_attribution)} — ${this.escapeHtml(result.quote_source)}</span>` : `<span class="level-detail">${this.escapeHtml(result.quote_attribution)}</span>`}
                     </div>
                     <div class="meta-arrow">→</div>
                     <div class="meta-level level-2">
                         <span class="level-label">Level 2: Statement</span>
-                        <span class="level-result verdict-${metaVerdictClass}">${result.meta_truth_verdict || result.verdict}</span>
+                        <span class="level-result verdict-${metaVerdictClass}">${this.escapeHtml(result.meta_truth_verdict || result.verdict)}</span>
                         <span class="level-detail">Is the content of the quote true?</span>
                     </div>
                 </div>

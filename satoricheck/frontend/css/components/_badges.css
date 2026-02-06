@@ -33,6 +33,11 @@
     --verdict-rgb: 107, 114, 128;
 }
 
+.verdict-badge.FUTURE_PROJECTION {
+    --verdict-rgb: 6, 182, 212;
+    /* Cyan-500 */
+}
+
 .verdict-badge.PENDING {
     --verdict-rgb: 139, 92, 246;
 }

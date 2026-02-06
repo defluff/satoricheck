@@ -138,6 +138,40 @@ class PitchdeckService:
         # =================================================================
         
         result = self._parse_vision_response(raw_result)
+        
+        # --- NEW: Context Caching ---
+        # Create a cache of the entire deck context for subsequent queries
+        try:
+            # Import gemini service
+            from backend.services import get_gemini_service
+            gemini_svc = get_gemini_service()
+            
+            # Synthesize context content
+            deck_content = f"""
+PITCH DECK CONTEXT CACHE
+Company: {result.get('company_name')}
+Summary: {result.get('summary')}
+Industry: {result.get('industry')} / {result.get('sector')}
+Competition: {', '.join(result.get('competition', []))}
+USP: {result.get('usp')}
+
+EXTRACTED CLAIMS:
+{json.dumps(result.get('verifiable_claims', []), indent=2)}
+
+RAW VISION OUTPUT (Full Text):
+{json.dumps(raw_result, indent=2) if raw_result else 'No raw data'}
+            """
+            
+            cache_name = gemini_svc.create_cache(deck_content, ttl_minutes=10)
+            result['cache_name'] = cache_name
+            logger.info(f"[Pitchdeck] Created context cache: {cache_name}")
+            
+        except Exception as e:
+            logger.warning(f"[Pitchdeck] Failed to create context cache: {e}")
+            result['cache_name'] = None
+            
+        # ----------------------------
+
         result = self._sanitize_output(result)
         
         return result
@@ -227,7 +261,12 @@ Respond ONLY with valid JSON, no additional text."""
                         "text": prompt
                     }
                 ]
-            }]
+            }],
+            "generationConfig": {
+                "thinkingConfig": {
+                    "includeThoughts": True
+                }
+            }
         }
         
         url = self._get_api_url(self.MODEL_VISION)
@@ -255,16 +294,25 @@ Respond ONLY with valid JSON, no additional text."""
             if 'content' not in candidate or 'parts' not in candidate['content']:
                 raise ValueError("Malformed response structure")
             
-            text = candidate['content']['parts'][0].get('text', '')
+            text = ""
+            for part in candidate['content']['parts']:
+                # Skip thought parts if present (Thinking Mode)
+                if part.get('thought'):
+                    logger.info(f"[Pitchdeck] 🧠 Vision Thought: {part.get('text', '')[:100]}...")
+                    continue
+                    
+                text += part.get('text', '')
             
             # Clean markdown code blocks
             text = text.strip()
-            if text.startswith('```json'):
+            if text.startswith('```json'): # Common start with markdown
                 text = text[7:]
             elif text.startswith('```'):
                 text = text[3:]
-            if text.endswith('```'):
+            
+            if text.endswith('```'): # Handle end of block
                 text = text[:-3]
+            
             text = text.strip()
             
             result = json.loads(text)
@@ -338,7 +386,8 @@ Respond ONLY with valid JSON, no additional text."""
         verifiable_claims: Optional[list] = None,
         market_size: Optional[str] = None,
         competition: Optional[list] = None,
-        industry: Optional[str] = None
+        industry: Optional[str] = None,
+        cache_name: Optional[str] = None
     ) -> list:
         """
         Fact-check claims using existing GeminiService.
@@ -364,7 +413,7 @@ Respond ONLY with valid JSON, no additional text."""
             logger.info(f"[Pitchdeck] Processing {len(verifiable_claims)} verifiable claims")
             # Limit to 5 claims to avoid rate limits and long waits
             for i, claim_obj in enumerate(verifiable_claims[:5]):
-                logger.info(f"[Pitchdeck] Claim {i}: type={type(claim_obj)}, value={str(claim_obj)[:100]}")
+                # logger.info(f"[Pitchdeck] Claim {i}: type={type(claim_obj)}, value={str(claim_obj)[:100]}")
                 if not isinstance(claim_obj, dict):
                     logger.warning(f"[Pitchdeck] Skipping claim {i}: not a dict")
                     continue
@@ -372,8 +421,10 @@ Respond ONLY with valid JSON, no additional text."""
                 claim_text = claim_obj.get("claim", "")
                 category = claim_obj.get("category", "other")
                 source_cited = claim_obj.get("source_cited")
+                # NEW: Extract context to help the agent
+                claim_context = claim_obj.get("context", "")
                 
-                logger.info(f"[Pitchdeck] Claim {i}: text='{claim_text[:50]}...', len={len(claim_text)}")
+                logger.info(f"[Pitchdeck] Claim {i}: text='{claim_text[:50]}...', context='{claim_context[:50]}...'")
                 
                 if not claim_text or len(claim_text) < 5:
                     logger.warning(f"[Pitchdeck] Skipping claim {i}: too short")
@@ -382,7 +433,21 @@ Respond ONLY with valid JSON, no additional text."""
                 try:
                     logger.info(f"[Pitchdeck] Verifying claim ({category}): {claim_text[:60]}...")
                     
-                    result = gemini_svc.analyze_claim(claim_text)
+                    # Construct rich input for the agent so it has full context
+                    # This solves the issue of "single claim lacking context"
+                    analysis_payload = f"""Claim: "{claim_text}"
+Context from Deck: {claim_context}
+Source Cited in Deck: {source_cited or 'None'}
+Industry: {industry_ctx}"""
+
+                    # ENABLE SMART AGENT OR CACHE
+                    # Unified call: always use analyze_claim with smart_agent=True
+                    # Pass cache_name if available - backend handles mixing Thinking + Cache
+                    result = gemini_svc.analyze_claim(
+                        analysis_payload, 
+                        smart_agent=True, 
+                        cache_name=cache_name
+                    )
                     
                     findings.append({
                         "claim_type": category,
@@ -412,7 +477,11 @@ Respond ONLY with valid JSON, no additional text."""
                 claim = f"The {industry_ctx} market size is {market_size}"
                 logger.info(f"[Pitchdeck] Verifying market size: {claim[:80]}...")
                 
-                result = gemini_svc.analyze_claim(claim)
+                if cache_name:
+                    prompt = f"Claim: {claim}\nContext: Validate this market size claim against the deck context."
+                    result = gemini_svc.analyze_claim(prompt, smart_agent=True, cache_name=cache_name)
+                else:
+                    result = gemini_svc.analyze_claim(claim, smart_agent=True)
                 
                 findings.append({
                     "claim_type": "market_size",

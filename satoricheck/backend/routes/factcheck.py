@@ -105,9 +105,15 @@ def analyze_claim():
         # Record start time
         start_time = time.time()
         
-        # Analyze with Gemini
+        # Analyze with Gemini (Agentic or Standard)
         try:
-            result = gemini_service.analyze_claim(analysis_text)
+            # Pass smart_agent flag to enable Agentic Loop if requested
+            result = gemini_service.analyze_claim(analysis_text, smart_agent=smart_agent)
+            
+            # If agentic mode was used, 'social' might be in the result already
+            # or integrated into the explanation. Check if we need to structure it.
+            grok_result = result.get('social_context') # New field from agent?
+            
         except Exception as e:
             # Refund tokens if analysis fails
             logger.error(f"Gemini analysis failed: {e}", exc_info=True)
@@ -118,25 +124,6 @@ def analyze_claim():
         
         # Calculate processing time
         processing_time = time.time() - start_time
-        
-        # Grok social context (Smart Mode only, with graceful degradation)
-        # NOTE: Check triggers on BOTH the processed text AND the original (analysis_text may contain context with triggers)
-        grok_result = None
-        logger.info(f"Grok check: smart_agent={smart_agent}, GROK_ENABLED={Config.GROK_ENABLED}")
-        if smart_agent and Config.GROK_ENABLED:
-            from backend.services.grok_service import should_fire_grok, get_grok_service
-            # Check triggers on both the direct claim AND the full analysis text (may include original with @handles etc)
-            trigger = should_fire_grok(text, result) or should_fire_grok(analysis_text, result)
-            logger.info(f"Grok trigger check: {trigger} for text: {text[:50]}...")
-            if trigger:
-                try:
-                    grok_service = get_grok_service()
-                    # Search using the direct claim text for better relevance
-                    grok_result = grok_service.search_social(text)
-                    logger.info(f"Grok social search: found={grok_result.get('found', False)}")
-                except Exception as e:
-                    logger.warning(f"Grok API failed (graceful degradation): {e}")
-                    # Continue with Gemini-only result - user still gets value
         
         # Save fact check to database
         fact_check = FactCheck(

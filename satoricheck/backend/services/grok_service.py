@@ -210,6 +210,24 @@ If no relevant social content found, return: {"found": false, "context": "reason
         return response
 
 
+    @staticmethod
+    def get_tool_definition() -> dict:
+        """Get Gemini Function Declaration for this tool."""
+        return {
+            "name": "search_social",
+            "description": "Search X (formerly Twitter) for real-time social context, verify quotes by specific authors, or check for breaking news events related to a claim. Use this when you see claims about 'breaking news', specific tweets, or quotes that need attribution verification.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "query": {
+                        "type": "STRING",
+                        "description": "The search query. optimized for finding the specific quote or event (e.g., 'from:ElonMusk about aliens' or 'breaking news earthquake California')"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+
 # Singleton instance
 _grok_service = None
 

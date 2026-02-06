@@ -64,7 +64,212 @@ class GeminiService:
         
         return valid_sources
     
-    def analyze_claim(self, text):
+    
+    def _analyze_claim_safe(self, text, smart_agent=False, cache_name=None):
+        """
+        Thread-safe wrapper for analyze_claim.
+        Ensures database session is removed after execution.
+        """
+        try:
+            return self.analyze_claim(text, smart_agent, cache_name)
+        finally:
+            # Critical: Remove thread-local session to prevent connection leaks
+            from backend.database import db_session
+            db_session.remove()
+
+    def analyze_claim(self, text, smart_agent=False, cache_name=None):
+        """
+        Public entry point for claim analysis.
+        Args:
+            text: The text to analyze
+            smart_agent: If True, uses Agentic Loop with Thinking Mode.
+            cache_name: Optional resource name of a Gemini Context Cache.
+        """
+        if smart_agent:
+            return self._analyze_claim_agentic(text, cache_name)
+        return self._analyze_claim_standard(text)
+
+    def _analyze_claim_agentic(self, text, cache_name=None):
+        """
+        Agentic analysis loop with Thinking Mode and Tool Use.
+        Includes internal retries for robustness.
+        Supports Context Caching if cache_name is provided.
+        """
+        try:
+            from backend.services.grok_service import get_grok_service
+            grok = get_grok_service()
+            tools = [grok.get_tool_definition()]
+            
+            tool_config = {"function_declarations": tools}
+            
+            # Context Caching: If cache_name is provided, backend uses it for context
+            
+            prompt = self._build_fact_check_prompt(text, agentic=True)
+            
+            conversation_history = [
+                {"role": "user", "parts": [{"text": prompt}]}
+            ]
+            
+            max_turns = 5 
+            current_turn = 0
+            
+            log_prefix = f"AGENTIC (Thinking{' + Cache' if cache_name else ''})"
+            logger.info(f"Starting {log_prefix} analysis for: {text[:50]}...")
+            
+            while current_turn < max_turns:
+                current_turn += 1
+                
+                # Payload with Thinking Config AND Optional Cache
+                payload = {
+                    "contents": conversation_history,
+                    "tools": [tool_config],
+                    "generationConfig": {
+                        # Enable Thinking Mode
+                        "thinkingConfig": {
+                            "includeThoughts": True
+                        }
+                    } 
+                }
+                
+                if cache_name:
+                    payload["cachedContent"] = cache_name
+                
+                # INTERNAL RETRY LOOP for this specific turn
+                # This prevents the whole chain from breaking due to a single 503 or Timeout
+                turn_response = None
+                turn_exception = None
+                
+                for attempt in range(2): # Try twice
+                    try:
+                        response = requests.post(
+                            self._get_api_url(self.MODEL_SMART),
+                            json=payload,
+                            headers={'Content-Type': 'application/json'},
+                            timeout=self.TIMEOUT_SMART
+                        )
+                        response.raise_for_status()
+                        turn_response = response.json()
+                        break # Success
+                    except Exception as e:
+                        logger.warning(f"Agentic turn {current_turn} failed (attempt {attempt+1}): {e}")
+                        turn_exception = e
+                        import time
+                        time.sleep(1) # Brief pause
+                
+                if not turn_response:
+                    raise turn_exception or Exception("Agentic turn failed after retries")
+
+                data = turn_response
+                
+                if 'candidates' not in data or not data['candidates']:
+                    raise ValueError("No candidates in response")
+                    
+                candidate = data['candidates'][0]
+                content = candidate.get('content', {})
+                parts = content.get('parts', [])
+                
+                model_reply_parts = []
+                function_calls = []
+                final_json_text = ""
+                
+                # Parse constraints & Thoughts
+                for part in parts:
+                    # Log Thoughts
+                    if part.get('thought'): 
+                        # logger.debug(f"🤖 THOUGHT: {part.get('text')}") 
+                        pass # Keep logs clean unless debugging
+                    
+                    # Capture Text
+                    if 'text' in part:
+                        # Accumulate all text, we will extract JSON block later
+                        text_val = part['text']
+                        if not part.get('thought'): # Don't add thoughts to final text
+                            final_json_text += text_val
+                    
+                    # Capture Function Calls
+                    if 'functionCall' in part:
+                        function_calls.append(part['functionCall'])
+                    
+                    # Add strictly to history to maintain state
+                    model_reply_parts.append(part)
+
+                conversation_history.append({
+                    "role": "model",
+                    "parts": model_reply_parts
+                })
+                
+                # 1. Execute Tools
+                if function_calls:
+                    logger.info(f"Agent decided to call {len(function_calls)} tools.")
+                    for fc in function_calls:
+                        fn_name = fc.get('name')
+                        fn_args = fc.get('args', {})
+                        
+                        tool_result = {}
+                        if fn_name == 'search_social':
+                            query = fn_args.get('query')
+                            logger.info(f"🛠️ Executing Tool: search_social(query='{query}')")
+                            tool_result = grok.search_social(query)
+                        else:
+                            tool_result = {"error": f"Unknown tool: {fn_name}"}
+                            
+                        # Add tool response
+                        conversation_history.append({
+                            "role": "function",
+                            "parts": [{
+                                "functionResponse": {
+                                    "name": fn_name,
+                                    "response": tool_result
+                                }
+                            }]
+                        })
+                    # Loop continues to let model see result and output next step
+                    continue
+
+                # 2. Final Result Extraction (Robust)
+                if final_json_text and "verdict" in final_json_text:
+                    # Robust extraction: Look for markdown code blocks first, then braces
+                    import re
+                    clean_json = final_json_text.strip()
+                    
+                    # 1. Try to extract from Markdown code blocks
+                    json_block_match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', clean_json, re.IGNORECASE)
+                    if json_block_match:
+                        clean_json = json_block_match.group(1)
+                    else:
+                        # 2. Fallback: Find outermost curly braces
+                        # This avoids cutting off if there are braces in the preamble text like "Here is the JSON { ... }"
+                        # We assume the LARGEST brace pair is the JSON object
+                        start_idx = clean_json.find('{')
+                        end_idx = clean_json.rfind('}')
+                        if start_idx != -1 and end_idx != -1:
+                            clean_json = clean_json[start_idx:end_idx+1]
+                    
+                    # Validate parsing logic
+                    try:
+                        # Check if it parses
+                        _ = json.loads(clean_json)
+                        # Synthesize final parsing payload
+                        dummy_response = {"candidates": [{"content": {"parts": [{"text": clean_json}]}}]}
+                        return self._parse_response(dummy_response)
+                    except json.JSONDecodeError:
+                        logger.warning(f"Agent emitted invalid JSON: {clean_json[:50]}...")
+                        # If parsing fails, we could force another turn or just fall through to fallback
+                
+                # 3. Fallback (Model stopped but no JSON and no Tool?)
+                logger.warning("Agent stopped without JSON or Tool call. Forcing another turn...")
+                if current_turn >= max_turns:
+                    break
+            
+            # If we exit loop without result
+            raise Exception("Agent exceeded max turns without final answer")
+
+        except Exception as e:
+            logger.error(f"Agentic loop error: {e}")
+            # Fallback to standard
+            return self._analyze_claim_standard(text)
+
+    def _analyze_claim_standard(self, text):
         """
         Analyze text for factual claims using Gemini API (Smart Model).
         
@@ -210,7 +415,94 @@ class GeminiService:
         # Generic error for user
         raise Exception("Fact-check service temporarily unavailable. Please try again.")
     
-    def _build_fact_check_prompt(self, text):
+    
+    def create_cache(self, content: str, ttl_minutes: int = 10) -> str:
+        """
+        Create a Context Cache for Gemini.
+        
+        Args:
+            content: The text content to cache
+            ttl_minutes: Time-to-live in minutes (default 10)
+            
+        Returns:
+            str: The resource name of the cache (e.g., 'cachedContents/123...')
+        """
+        url = "https://generativelanguage.googleapis.com/v1beta/cachedContents?key=" + self.api_key
+        
+        payload = {
+            "model": f"models/{self.MODEL_SMART}",
+            "contents": [{
+                "parts": [{"text": content}],
+                "role": "user"
+            }],
+            "ttl": f"{ttl_minutes * 60}s"
+        }
+        
+        try:
+            response = requests.post(
+                url,
+                json=payload,
+                headers={'Content-Type': 'application/json'},
+                timeout=30
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            # The 'name' field contains the resource ID
+            cache_name = data.get('name')
+            logger.info(f"Created Gemini Cache: {cache_name} (TTL: {ttl_minutes}m)")
+            return cache_name
+            
+        except Exception as e:
+            logger.error(f"Failed to create cache: {e}")
+            raise
+
+    def generate_with_cache(self, cache_name: str, prompt: str) -> dict:
+        """
+        Generate content referencing an existing Context Cache.
+        
+        Args:
+            cache_name: The resource name of the cache
+            prompt: The new user prompt
+            
+        Returns:
+            dict: Parsed response result
+        """
+        # Note: URL format for cached requests is slightly different or standard
+        # We target the model, but payload points to cache
+        url = self._get_api_url(self.MODEL_SMART)
+        
+        payload = {
+            "contents": [{
+                "parts": [{"text": prompt}],
+                "role": "user"
+            }],
+            "cachedContent": cache_name
+        }
+        
+        try:
+            response = requests.post(
+                url,
+                json=payload,
+                headers={'Content-Type': 'application/json'},
+                timeout=self.TIMEOUT_SMART
+            )
+            response.raise_for_status()
+            
+            # Parse result similarly to standard response
+            # But we just return a simple dict for this helper for now
+            data = response.json()
+            
+            if 'candidates' in data and data['candidates']:
+                text = data['candidates'][0]['content']['parts'][0]['text']
+                return {'text': text, 'raw': data}
+            return {'text': '', 'raw': data}
+            
+        except Exception as e:
+            logger.error(f"Failed to generate with cache: {e}")
+            raise
+
+    def _build_fact_check_prompt(self, text, agentic=False):
         """Build the fact-checking prompt with Meta-Truth awareness."""
         return f"""You are an elite, impartial fact-checker specializing in detecting misinformation and state propaganda.
 Analyze the following text with extreme skepticism.
@@ -237,6 +529,7 @@ VERDICT RULES:
 1. IF LEVEL 1 is FALSE (they never said it) -> VERDICT MUST BE "FALSE" or "MISLEADING" (attribution error is a lie).
 2. IF LEVEL 1 is TRUE (they said it) -> VERDICT matches LEVEL 2 (is the content true?).
 3. Your final "verdict" must NOT be "TRUE" if the attribution is false.
+4. IF claim is a prediction/projection about future events (dates in future or "will happen"), use VERDICT "FUTURE_PROJECTION".
 
 Text to analyze:
 "{text}"
@@ -249,7 +542,7 @@ REQUIRED JSON RESPONSE FORMAT:
     "quote_verified": true or false (MUST BE BOOLEAN, never null. Did they say it?),
     "quote_source": "Where/when they said it or null",
     "meta_truth_verdict": "TRUE" or "FALSE" or "MISLEADING" or "COULD_NOT_VERIFY",
-    "verdict": "TRUE" or "FALSE" or "MISLEADING" or "COULD_NOT_VERIFY" or "NOT_A_CLAIM",
+    "verdict": "TRUE" or "FALSE" or "MISLEADING" or "COULD_NOT_VERIFY" or "NOT_A_CLAIM" or "FUTURE_PROJECTION",
     "explanation": "Your verdict summary in MAX 5 sentences.",
     "fallacy": null or "fallacy name",
     "sources": ["https://authoritative-source-1.com/article", "https://authoritative-source-2.com/page"],
@@ -266,14 +559,137 @@ Respond ONLY with valid JSON, no additional text."""
 
     def analyze_claims_batch(self, claims):
         """
-        Analyze multiple claims in a single API call (Batch Mode).
+        Intelligent Batch Analysis (The Triage Router).
         
-        Args:
-            claims: List of strings (claims) to analyze
-            
-        Returns:
-            List of dicts (analysis results), one for each claim in order
+        Splits claims into:
+        1. STATIC: Simple claims processed in one fast batch call.
+        2. DYNAMIC: Complex/Social claims processed via parallel Agentic Loops.
         """
+        import concurrent.futures
+        
+        if not claims:
+            return []
+            
+        logger.info(f"Starting Intelligent Batch Analysis for {len(claims)} claims.")
+        
+        # 1. Triage Phase
+        try:
+            triage_results = self._triage_claims(claims)
+        except Exception as e:
+            logger.error(f"Triage failed: {e}. Falling back to standard batch.")
+            # Fallback: Treat all as static if triage fails
+            return self._analyze_batch_static(claims)
+
+        static_indices = []
+        static_claims = []
+        dynamic_indices = []
+        dynamic_claims = []
+        
+        for i, res in enumerate(triage_results):
+            if res.get('type') == 'dynamic':
+                dynamic_indices.append(i)
+                dynamic_claims.append(claims[i])
+            else:
+                static_indices.append(i)
+                static_claims.append(claims[i])
+                
+        logger.info(f"Triage Complete: {len(dynamic_claims)} Dynamic (Agentic), {len(static_claims)} Static (Fast)")
+        
+        # 2. Execution Phase
+        
+        # A. Static Batch (Fast)
+        static_results = []
+        if static_claims:
+            try:
+                static_results = self._analyze_batch_static(static_claims)
+            except Exception as e:
+                logger.error(f"Static batch failed: {e}")
+                # Fallback empty results
+                static_results = [{"verdict": "COULD_NOT_VERIFY", "explanation": "Batch error", "is_claim": True} for _ in static_claims]
+
+        # B. Dynamic Agents (Parallel)
+        dynamic_results = []
+        if dynamic_claims:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                # Map claims to agentic function
+                # We use the public analyze_claim with smart_agent=True
+                # WRAPPED in _analyze_claim_safe to ensure DB session cleanup
+                future_to_index = {
+                    executor.submit(self._analyze_claim_safe, claim, smart_agent=True): i 
+                    for i, claim in enumerate(dynamic_claims)
+                }
+                
+                # We need to collect results in order
+                # So we initialize a list of placeholders
+                dynamic_results_map = [None] * len(dynamic_claims)
+                
+                for future in concurrent.futures.as_completed(future_to_index):
+                    idx = future_to_index[future]
+                    try:
+                        res = future.result()
+                        dynamic_results_map[idx] = res
+                    except Exception as e:
+                        logger.error(f"Dynamic agent failed for claim {idx}: {e}")
+                        dynamic_results_map[idx] = {
+                            "verdict": "COULD_NOT_VERIFY",
+                            "explanation": "Agent error",
+                            "is_claim": True
+                        }
+                dynamic_results = dynamic_results_map
+
+        # 3. Merge Phase (Reconstruct Order)
+        final_results = [None] * len(claims)
+        
+        for i, original_idx in enumerate(static_indices):
+            final_results[original_idx] = static_results[i]
+            
+        for i, original_idx in enumerate(dynamic_indices):
+            final_results[original_idx] = dynamic_results[i]
+            
+        return final_results
+
+    def _triage_claims(self, claims):
+        """Ask Fast Model to categorize claims."""
+        prompt = f"""Review these claims. Identify which ones involve "Breaking News", "Recent Events (last 30 days)", "Specific Social Media Posts/Tweets", or "Viral Rumors".
+These require external tools and should be labeled "dynamic".
+All other historical facts, scientific claims, or general statements should be labeled "static".
+
+CLAIMS:
+{chr(10).join([f"{i+1}. {c}" for i, c in enumerate(claims)])}
+
+RESPOND ONLY WITH JSON:
+{{
+    "classification": [
+        {{"id": 1, "type": "static"}},
+        {{"id": 2, "type": "dynamic"}}
+    ]
+}}"""
+        try:
+            # Use Fast Model for Triage
+            payload = {"contents": [{"parts": [{"text": prompt}]}]}
+            response = requests.post(
+                self._get_api_url(self.MODEL_FAST),
+                json=payload,
+                headers={'Content-Type': 'application/json'},
+                timeout=10
+            )
+            data = response.json()
+            text = data['candidates'][0]['content']['parts'][0]['text']
+            
+             # Clean markdown
+            if text.startswith('```json'): text = text[7:]
+            if text.startswith('```'): text = text[3:]
+            if text.endswith('```'): text = text[:-3]
+            
+            result = json.loads(text.strip())
+            return result.get('classification', [])
+        except Exception as e:
+            logger.warning(f"Triage Model failed: {e}")
+            # Default to static
+            return [{"id": i+1, "type": "static"} for i in range(len(claims))]
+
+    def _analyze_batch_static(self, claims):
+        """Original Batch Logic (Renamed)."""
         if not claims:
             return []
             
@@ -286,7 +702,7 @@ Respond ONLY with valid JSON, no additional text."""
 
         for attempt in range(max_retries):
             try:
-                logger.info(f"Sending BATCH fact-check request (attempt {attempt + 1}) for {len(claims)} claims...")
+                logger.info(f"Sending STATIC batch request (attempt {attempt + 1}) for {len(claims)} claims...")
                 
                 payload = {
                     "contents": [{
@@ -306,8 +722,6 @@ Respond ONLY with valid JSON, no additional text."""
                 
                 # Parse Batch Response
                 results = self._parse_batch_response(response_data, len(claims))
-                
-                logger.info(f"Batch fact-check completed. Got {len(results)} results.")
                 return results
                 
             except Exception as e:
@@ -338,10 +752,8 @@ CLAIMS TO CHECK:
 INSTRUCTIONS:
 For EACH claim, provide a full analysis following the same strict rules as individual checks:
 - Detect QUOTE CLAIMS (attribution verification vs meta-truth).
-- Provide a VERDICT (TRUE, FALSE, MISLEADING, COULD_NOT_VERIFY).
+- Provide a VERDICT (TRUE, FALSE, MISLEADING, COULD_NOT_VERIFY, FUTURE_PROJECTION).
 - Provide an EXPLANATION (Max 3 sentences).
-- Provide SOURCES (1-3 reliable URLs).
-
 - Provide SOURCES (1-3 reliable URLs).
 
 REQUIRED JSON RESPONSE FORMAT:

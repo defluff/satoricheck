@@ -7,17 +7,17 @@ Fully vibecoded, AI-powered fact-checking app with live audio transcription, Met
 
 ## ✨ Features
 
-- 🎤 **Standard Mode** — Free browser-based speech recognition
-- 🎙️ **Live Pro** — Premium Deepgram transcription (1 CP/minute)
-- 📊 **Pitch Deck Check** — Verify claims in startup pitch decks (Gemini 3 Pro)
-- 🤖 **AI Fact-Checking** — Google Gemini with web search grounding
-- 🧠 **Smart Agent** — Auto-separates multiple claims for individual verification
-- 🔍 **Meta Analysis** — Distinguishes between "X said Y" (quote) and whether Y is actually true
-- 🃏 **Social Sharing** — Generate shareable cards for verified claims for X & Linkedin (Privacy-first)
-- 🔥 **Streak System** — Daily login rewards with CP bonuses
-- ⚡ **Token Billing** — Stripe integration for Check Points (CP)
-- 🔐 **Google OAuth** — One-click sign-in
-- 🗑️ **Account Deletion** — GDPR-compliant data erasure with anti-abuse protection
+🎤 Live audio with Standard (browser-based speech recognition) or Pro (Deepgram transcription) (1 CP/minute)
+📊 Pitch Deck Check — Verify claims in startup pitch decks (Gemini 3)
+🤖 AI Fact-Checking — Google Gemini with web search grounding
+🧠 Smart Agent — Auto-separates multiple claims for individual verification
+🔍 Meta Analysis — Distinguishes between "X said Y" (quote) and whether Y is actually true
+🃏 Social Sharing — Generate shareable cards for verified claims for X & Linkedin (Privacy-first)
+🔥 Streak System — Daily login rewards with CP bonuses
+⚡ Token Billing — Stripe integration for Check Points (CP)
+🔐 Google OAuth — One-click sign-in
+🗑️ Account Deletion — GDPR-compliant data erasure with anti-abuse protection
+
 
 ## 🚀 Quick Start
 
@@ -60,7 +60,88 @@ Set `TEST_MODE=true` to skip API key validation and use a test user.
 
 ## 🏗️ Architecture
 
-<img width="4741" height="6516" alt="Gemini API Services Flow-2026-02-04-235943" src="https://github.com/user-attachments/assets/ad3fe0dc-0828-464d-b367-4ee54d23ab8b" />
+```mermaid
+flowchart TB
+ subgraph Client["Frontend Client"]
+        Browser["User Browser<br>Vanilla JS / HTML5"]
+  end
+ subgraph API["API Routes"]
+        AuthBP["Auth BP"]
+        BillingBP["Billing BP"]
+        FactBP["FactCheck BP"]
+        LiveBP["Live Pro BP<br>WebSocket"]
+        PitchBP["PitchDeck BP"]
+  end
+ subgraph Logic["Business Logic Layer"]
+    direction TB
+        GrokSvc["Grok Service"]
+        DeepgramSvc["Deepgram Service"]
+        PitchSvc["PitchDeck Service"]
+        GeminiSvc["Gemini Service"]
+        StreakSvc["Streak Service"]
+  end
+ subgraph CloudRun["Cloud Run Container"]
+        API
+        Logic
+        ORM["SQLAlchemy ORM"]
+  end
+ subgraph Data["Storage"]
+        DB[("Cloud SQL<br>PostgreSQL")]
+  end
+ subgraph GCP["Google Cloud Platform"]
+        CloudRun
+        Data
+  end
+ subgraph ExternalServices["External Integrations"]
+        OAuth["Google OAuth"]
+        StripeAPI["Stripe Payments"]
+        GrokAPI["xAI Grok API"]
+        DeepgramAPI["Deepgram API"]
+        GeminiAPI["Google Gemini API"]
+  end
+    Browser -- HTTP/REST --> AuthBP & BillingBP & FactBP & PitchBP
+    Browser -- WS / WebSocket --> LiveBP
+    FactBP --> GeminiSvc
+    PitchBP --> PitchSvc
+    LiveBP --> DeepgramSvc & GeminiSvc
+    BillingBP --> StreakSvc
+    PitchSvc -- Extract Claims --> GeminiSvc
+    GeminiSvc -- Tool Call (Social) --> GrokSvc
+    AuthBP -- Verify Token --> OAuth
+    BillingBP -- Webhooks --> StripeAPI
+    PitchSvc -- "1. Vision + Thinking<br>(Multimodal)" --> GeminiAPI
+    GeminiSvc -- "2. Agentic Verification<br>(Thinking Loop)" --> GeminiAPI
+    GrokSvc -- Social Context --> GrokAPI
+    DeepgramSvc -- Audio Stream --> DeepgramAPI
+    API --> ORM
+    Logic --> ORM
+    ORM <--> DB
+
+     Browser:::client
+     AuthBP:::route
+     BillingBP:::route
+     FactBP:::route
+     LiveBP:::route
+     PitchBP:::route
+     GrokSvc:::service
+     DeepgramSvc:::service
+     PitchSvc:::service
+     GeminiSvc:::service
+     StreakSvc:::service
+     ORM:::route
+     DB:::db
+     OAuth:::external
+     StripeAPI:::external
+     GrokAPI:::external
+     DeepgramAPI:::external
+     GeminiAPI:::external
+    classDef client fill:#e0f2fe,stroke:#0284c7,stroke-width:2px
+    classDef container fill:#f8fafc,stroke:#64748b,stroke-width:2px
+    classDef route fill:#ffedd5,stroke:#f97316,stroke-width:2px
+    classDef service fill:#ffe4e6,stroke:#e11d48,stroke-width:2px
+    classDef db fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    classDef external fill:#f3e8ff,stroke:#9333ea,stroke-width:2px,stroke-dasharray: 5 5
+```
 
 
 ## 🚢 Deployment
@@ -109,4 +190,4 @@ See [LICENSE](LICENSE) for details.
 
 ---
 
-Built with ❤️ in Switzerland by Andreas, 100% vibecoded using antigravity IDE
+Built with ☕️ in Switzerland by Andreas

@@ -279,6 +279,15 @@ class PitchdeckModule {
             competitionList.appendChild(li);
         }
 
+        // Store global context for claim verification
+        this.globalDeckContext = {
+            company: result.company_name || 'Unknown Company',
+            industry: result.industry || 'Unknown Industry',
+            sector: result.sector || 'Unknown Sector',
+            summary: result.summary || 'No summary available.',
+            cache_name: result.cache_name || null // Store Cache ID
+        };
+
         // Display extracted claims (no auto-verification)
         this.displayClaims(result);
     }
@@ -461,14 +470,41 @@ class PitchdeckModule {
         }
 
         try {
-            // Call API with Smart Agent enabled (true) and Context if available
-            const context = claim.context || null;
-            const response = await api.analyzeText(claim.claim, context, true);
+            // New: Usage of Context Caching via specific endpoint
+            // We use the batch endpoint '/verify-market' effectively as a single-claim verifier here
+            // to leverage the backend caching logic we just added.
 
-            if (response.success && response.result) {
+            const payload = {
+                verifiable_claims: [{
+                    claim: claim.claim,
+                    category: claim.category,
+                    source_cited: claim.source_cited,
+                    context: claim.context
+                }],
+                industry: this.globalDeckContext?.industry,
+                cache_name: this.globalDeckContext?.cache_name
+            };
+
+            const response = await fetch('/api/pitchdeck/verify-market', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.message || `Verification failed (${response.status})`);
+            }
+
+            const data = await response.json();
+
+            if (data.success && data.findings && data.findings.length > 0) {
                 // Store result
-                claim.verificationResult = response.result;
-                this.displayClaimResult(claimIndex, response.result);
+                const finding = data.findings[0];
+                claim.verificationResult = finding;
+                this.displayClaimResult(claimIndex, finding);
             } else {
                 throw new Error('Invalid API response');
             }
