@@ -55,3 +55,16 @@ satoricheck/docs/
 
 # Agent configuration and rules
 .agent/
+
+# User Content (Pitch Decks & Exports - Local Only)
+*.pdf
+*.csv
+*.xlsx
+*.pptx
+
+# Security Keys (Future-proofing)
+*.pem
+*.key
+*.p12
+gcp-key.json
+google-services.json
