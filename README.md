@@ -7,16 +7,16 @@ Fully vibecoded, AI-powered fact-checking app with live audio transcription, Met
 
 ## ✨ Features
 
-🎤 Live audio with Standard (browser-based speech recognition) or Pro (Deepgram transcription) (1 CP/minute)
-📊 Pitch Deck Check — Verify claims in startup pitch decks (Gemini 3)
-🤖 AI Fact-Checking — Google Gemini with web search grounding
-🧠 Smart Agent — Auto-separates multiple claims for individual verification
-🔍 Meta Analysis — Distinguishes between "X said Y" (quote) and whether Y is actually true
-🃏 Social Sharing — Generate shareable cards for verified claims for X & Linkedin (Privacy-first)
-🔥 Streak System — Daily login rewards with CP bonuses
-⚡ Token Billing — Stripe integration for Check Points (CP)
-🔐 Google OAuth — One-click sign-in
-🗑️ Account Deletion — GDPR-compliant data erasure with anti-abuse protection
+- 🎤 Live audio with Standard (browser-based speech recognition) or Pro (Deepgram transcription) (1 CP/minute)
+- 📊 Pitch Deck Check — Verify claims in startup pitch decks (Gemini 3)
+- 🤖 AI Fact-Checking — Google Gemini with web search grounding
+- 🧠 Smart Agent — Auto-separates multiple claims for individual verification
+- 🔍 Meta Analysis — Distinguishes between "X said Y" (quote) and whether Y is actually true
+- 🃏 Social Sharing — Generate shareable cards for verified claims for X & Linkedin (Privacy-first)
+- 🔥 Streak System — Daily login rewards with CP bonuses
+- ⚡ Token Billing — Stripe integration for Check Points (CP)
+- 🔐 Google OAuth — One-click sign-in
+- 🗑️ Account Deletion — GDPR-compliant data erasure with anti-abuse protection
 
 
 ## 🚀 Quick Start
@@ -77,8 +77,11 @@ flowchart TB
         GrokSvc["Grok Service"]
         DeepgramSvc["Deepgram Service"]
         PitchSvc["PitchDeck Service"]
-        GeminiSvc["Gemini Service"]
+        GeminiSvc["Gemini Service<br/>(Agentic Loop)"]
+        AgentLoop["🤖 Agent Decision:<br/>Tool Selection<br/>Multi-turn Reasoning"]
         StreakSvc["Streak Service"]
+        GeminiSvc -.-> AgentLoop
+        AgentLoop -.-> GeminiSvc
   end
  subgraph CloudRun["Cloud Run Container"]
         API
@@ -106,7 +109,7 @@ flowchart TB
     LiveBP --> DeepgramSvc & GeminiSvc
     BillingBP --> StreakSvc
     PitchSvc -- Verify Claims --> GeminiSvc
-    GeminiSvc -- Tool Call (Social) --> GrokSvc
+    GeminiSvc -. "Agent decides:<br/>Social Context" .-> GrokSvc
     AuthBP -- Verify Token --> OAuth
     BillingBP -- Webhooks --> StripeAPI
     PitchSvc -- "1. Vision + Thinking<br>(Multimodal)" --> GeminiAPI
