@@ -1,11 +1,15 @@
 Copyright (c) 2026 Andreas Rüegger. All Rights Reserved.
 
-The source code in this repository is proprietary and confidential. 
-
+This repository is Source Available. 
 Permission is granted to view the code for educational, portfolio, and evaluation purposes only.
 
 You are NOT allowed to:
-- Copy, modify, or distribute this code.
-- Use this code for commercial purposes.
-- Use this code to run a competing service.
-- Sublicense or grant these rights to others.
+- Redistribute, modify, or replicate this code for any use outside of personal evaluation
+- Use this code for commercial purposes
+- Use this code to run a competing service
+- Sublicense or grant these rights to others
+
+No Warranty The software is provided "as is", without warranty of any kind.
+
+Future Roadmap: 
+I am evaluating different Open Source licenses (like MIT or AGPL) or Business Source License (BUSL)for a potential transition later.
