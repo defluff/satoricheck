@@ -13,12 +13,25 @@ logger = logging.getLogger(__name__)
 
 # Create database engine with Cloud Run optimized settings
 if 'sqlite' in Config.DATABASE_URL:
-    # SQLite: file-based, no connection pooling needed
+    # SQLite: file-based, enable WAL mode for better concurrent access
     engine = create_engine(
         Config.DATABASE_URL,
         echo=False,
-        connect_args={'check_same_thread': False}
+        connect_args={
+            'check_same_thread': False,
+            'timeout': 30  # Wait up to 30 seconds if DB is locked
+        }
     )
+    
+    # Enable WAL mode for better concurrent read/write handling
+    from sqlalchemy import event
+    
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=30000")  # 30 seconds
+        cursor.close()
 else:
     # PostgreSQL/MySQL: Optimized for Cloud Run
     engine = create_engine(

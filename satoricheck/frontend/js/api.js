@@ -173,13 +173,13 @@ class APIClient {
     }
 
     async analyzeBatch(claims, context = null) {
-        // Chunking logic to prevent timeouts on large batches
-        const CHUNK_SIZE = 5;
+        // Progressive micro-batches: smaller chunks = faster user feedback
+        // 3 claims per batch balances speed vs API efficiency
+        const CHUNK_SIZE = 3;
         const allResults = [];
-        let totalCost = 0;
         let newBalance = null;
 
-        // Process in chunks
+        // Process in chunks - user sees results progressively
         for (let i = 0; i < claims.length; i += CHUNK_SIZE) {
             const chunk = claims.slice(i, i + CHUNK_SIZE);
             const payload = { claims: chunk };

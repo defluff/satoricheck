@@ -280,15 +280,10 @@ def analyze_batch_claims():
             token_balance.unbilled_words = remainder_words
             token_balance.last_updated = datetime.utcnow()
             
-            # Call API
+            # Call API with Context
             gemini_service = get_gemini_service()
             try:
-                # Add context if provided (appended to first claim or all? 
-                # Better to let Gemini handle context in prompt construction if needed, 
-                # but currently gemini_service just takes list of strings)
-                # We'll pass raw claims.
-                
-                api_results = gemini_service.analyze_claims_batch(texts_to_analyze)
+                api_results = gemini_service.analyze_claims_batch(texts_to_analyze, context=context)
                 
             except Exception as e:
                 # Refund
@@ -327,19 +322,10 @@ def analyze_batch_claims():
                 db_session.add(fact_check)
                 db_session.flush() # Get ID
                 
-                # Grok Logic for Batch (Graceful Degradation)
-                grok_result = None
-                if Config.GROK_ENABLED:
-                    try:
-                        # Check triggers just like in single analysis
-                        # We use the individual claim text for triggers
-                        from backend.services.grok_service import should_fire_grok, get_grok_service
-                        if should_fire_grok(text, res):
-                            grok_service = get_grok_service()
-                            grok_result = grok_service.search_social(text)
-                            logger.info(f"Batch Grok search for claim {idx}: found={grok_result.get('found', False)}")
-                    except Exception as e:
-                        logger.warning(f"Batch Grok check failed for claim {idx}: {e}")
+                # NOTE: Grok/social search is now handled INSIDE the agentic loop via
+                # the search_social tool. The agent decides when to call it based on
+                # claim type (viral, breaking news, quotes). No sequential post-processing.
+                # Social context is embedded in the explanation if agent used the tool.
 
                 results.append({
                     'index': original_index,
@@ -358,8 +344,8 @@ def analyze_batch_claims():
                         'quote_verified': res.get('quote_verified'),
                         'quote_source': res.get('quote_source'),
                         'meta_truth_verdict': res.get('meta_truth_verdict'),
-                        # Social context
-                        'social': grok_result,
+                        # Social context embedded in explanation if agent used search_social
+                        'social': res.get('social_context'),
                     }
                 })
                 

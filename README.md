@@ -105,7 +105,7 @@ flowchart TB
     PitchBP --> PitchSvc
     LiveBP --> DeepgramSvc & GeminiSvc
     BillingBP --> StreakSvc
-    PitchSvc -- Extract Claims --> GeminiSvc
+    PitchSvc -- Verify Claims --> GeminiSvc
     GeminiSvc -- Tool Call (Social) --> GrokSvc
     AuthBP -- Verify Token --> OAuth
     BillingBP -- Webhooks --> StripeAPI

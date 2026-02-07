@@ -361,7 +361,7 @@ class FactCheckManager {
 
                 ui.showToast(`🧠 Found ${uncheckedClaims.length} new claims to check`, 'success');
 
-                // 2a. Create pending cards for ALL claims first
+                // 2a. Create pending cards for ALL claims first (user sees what's coming)
                 const cardMap = new Map(); // claim text -> cardId
 
                 uncheckedClaims.forEach(claim => {
@@ -370,53 +370,79 @@ class FactCheckManager {
                     this.checkedTexts.add(claim.trim()); // Optimistically mark as checked
                 });
 
-                // 2b. Call Batch API
-                try {
-                    const response = await api.analyzeBatch(uncheckedClaims, text); // Pass original text as context
+                // 2b. Progressive Micro-Batches: Process 3 claims at a time for faster feedback
+                const MICRO_BATCH_SIZE = 3;
+                let processedCount = 0;
 
-                    if (response.success && response.results) {
-                        // Update balance once
-                        if (response.new_balance !== undefined) {
-                            ui.updateBalance(response.new_balance);
-                        }
-
-                        // Update cards with results
-                        let resultCount = 0;
-                        response.results.forEach(res => {
-                            // Find matching card (using index matches the order of uncheckedClaims)
-                            // The API returns results in the same order as claims sent
-                            // But let's verify if we can map by index or text. 
-                            // API has 'claim_text' in DB but here result might filter fields.
-
-                            // safest is by index since uncheckedClaims is the source of truth
-                            const originalClaim = uncheckedClaims[resultCount];
-                            if (originalClaim) {
-                                const cardId = cardMap.get(originalClaim.trim());
-                                if (cardId) {
-                                    ui.updateCard(cardId, {
-                                        ...res,
-                                        isSmartAgentMode: true
-                                    });
-                                }
-                            }
-                            resultCount++;
-                        });
-
-                        ui.showToast(`Batch complete: verified ${resultCount} claims`, 'success');
+                for (let i = 0; i < uncheckedClaims.length; i += MICRO_BATCH_SIZE) {
+                    // Check for abort
+                    if (this.abortRequested) {
+                        ui.showToast('⏹️ Stopped. Completed checks are saved.', 'warning');
+                        break;
                     }
-                } catch (error) {
-                    console.error("Batch check failed:", error);
-                    ui.showToast(`Batch check failed: ${error.message}`, 'error');
 
-                    // Mark all cards as error
-                    cardMap.forEach((cardId) => {
-                        ui.updateCard(cardId, {
-                            verdict: 'ERROR',
-                            explanation: "Batch processing failed. " + error.message,
-                            sources: []
+                    const chunk = uncheckedClaims.slice(i, i + MICRO_BATCH_SIZE);
+                    const batchNum = Math.floor(i / MICRO_BATCH_SIZE) + 1;
+                    const totalBatches = Math.ceil(uncheckedClaims.length / MICRO_BATCH_SIZE);
+
+                    try {
+                        // Call batch API for this micro-batch
+                        const response = await api.request('/factcheck/analyze-batch', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                claims: chunk,
+                                context: text  // Pass original text as context
+                            })
                         });
-                    });
+
+                        if (response.success && response.results) {
+                            // Update balance
+                            if (response.new_balance !== undefined) {
+                                ui.updateBalance(response.new_balance);
+                            }
+
+                            // Update cards IMMEDIATELY as results come in
+                            response.results.forEach((res, idx) => {
+                                const originalClaim = chunk[idx];
+                                if (originalClaim) {
+                                    const cardId = cardMap.get(originalClaim.trim());
+                                    if (cardId) {
+                                        ui.updateCard(cardId, {
+                                            ...res,
+                                            isSmartAgentMode: true
+                                        });
+                                    }
+                                }
+                                processedCount++;
+                            });
+
+                            // Show progress
+                            ui.showToast(`✓ Batch ${batchNum}/${totalBatches} complete`, 'success');
+                        }
+                    } catch (error) {
+                        console.error(`Micro-batch ${batchNum} failed:`, error);
+
+                        // Mark this chunk's cards as error but continue with remaining
+                        chunk.forEach(claim => {
+                            const cardId = cardMap.get(claim.trim());
+                            if (cardId) {
+                                ui.updateCard(cardId, {
+                                    verdict: 'ERROR',
+                                    explanation: `Batch failed: ${error.message}`,
+                                    sources: []
+                                });
+                            }
+                        });
+
+                        // Stop on auth/payment errors
+                        if (error.status === 403 || error.status === 401) {
+                            ui.showToast('Insufficient tokens. Purchase more to continue.', 'error');
+                            break;
+                        }
+                    }
                 }
+
+                ui.showToast(`Verified ${processedCount} claims`, 'success');
 
                 // Mark full text as processed only if we finished
                 if (!this.abortRequested) {
