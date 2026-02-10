@@ -182,6 +182,35 @@ def analyze_claim():
 
 
 
+@factcheck_bp.route('/create-context-cache', methods=['POST'])
+@login_required
+def create_context_cache():
+    """Pre-create a Gemini context cache for reuse across micro-batches."""
+    try:
+        data = request.get_json()
+        if not data or not data.get('text'):
+            raise APIError('No text provided')
+        
+        text = data['text'].strip()
+        
+        # Only cache if text is large enough (>4KB)
+        if len(text) <= 4000:
+            return jsonify({'success': True, 'cache_name': None})
+        
+        gemini_service = get_gemini_service()
+        cache_name = gemini_service.create_cache(text, ttl_minutes=5)
+        
+        logger.info(f"Pre-created context cache: {cache_name}")
+        return jsonify({'success': True, 'cache_name': cache_name})
+        
+    except APIError:
+        raise
+    except Exception as e:
+        logger.error(f"Cache creation error: {e}", exc_info=True)
+        # Non-fatal: frontend can proceed without cache
+        return jsonify({'success': True, 'cache_name': None})
+
+
 @factcheck_bp.route('/analyze-batch', methods=['POST'])
 @login_required
 def analyze_batch_claims():
@@ -203,6 +232,7 @@ def analyze_batch_claims():
             
         user = request.current_user
         context = data.get('context')
+        cache_name = data.get('cache_name')  # Pre-created cache from /create-context-cache
         
         # 1. Cache Lookup
         # We look for RECENT exact matches to avoid stale checks if world events change
@@ -280,10 +310,12 @@ def analyze_batch_claims():
             token_balance.unbilled_words = remainder_words
             token_balance.last_updated = datetime.utcnow()
             
-            # Call API with Context
+            # Call API with Context (reuse cache_name if pre-created)
             gemini_service = get_gemini_service()
             try:
-                api_results = gemini_service.analyze_claims_batch(texts_to_analyze, context=context)
+                api_results = gemini_service.analyze_claims_batch(
+                    texts_to_analyze, context=context, cache_name=cache_name
+                )
                 
             except Exception as e:
                 # Refund

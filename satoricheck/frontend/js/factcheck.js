@@ -370,7 +370,24 @@ class FactCheckManager {
                     this.checkedTexts.add(claim.trim()); // Optimistically mark as checked
                 });
 
-                // 2b. Progressive Micro-Batches: Process 3 claims at a time for faster feedback
+                // 2b. Pre-create context cache once (avoids redundant creation per micro-batch)
+                let cacheName = null;
+                if (text.length > 4000) {
+                    try {
+                        const cacheResponse = await api.request('/factcheck/create-context-cache', {
+                            method: 'POST',
+                            body: JSON.stringify({ text })
+                        });
+                        cacheName = cacheResponse.cache_name;
+                        if (cacheName) {
+                            logger.info?.(`Pre-created context cache: ${cacheName}`);
+                        }
+                    } catch (cacheError) {
+                        console.warn('Cache pre-creation failed, proceeding without:', cacheError);
+                    }
+                }
+
+                // 2c. Progressive Micro-Batches: Process 3 claims at a time for faster feedback
                 const MICRO_BATCH_SIZE = 3;
                 let processedCount = 0;
 
@@ -386,13 +403,18 @@ class FactCheckManager {
                     const totalBatches = Math.ceil(uncheckedClaims.length / MICRO_BATCH_SIZE);
 
                     try {
-                        // Call batch API for this micro-batch
+                        // Call batch API with pre-created cache_name
+                        const batchBody = {
+                            claims: chunk,
+                            context: text  // Pass original text as context
+                        };
+                        if (cacheName) {
+                            batchBody.cache_name = cacheName;
+                        }
+
                         const response = await api.request('/factcheck/analyze-batch', {
                             method: 'POST',
-                            body: JSON.stringify({
-                                claims: chunk,
-                                context: text  // Pass original text as context
-                            })
+                            body: JSON.stringify(batchBody)
                         });
 
                         if (response.success && response.results) {

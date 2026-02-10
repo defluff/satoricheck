@@ -1,9 +1,10 @@
 """
 Google Gemini API integration service.
 """
-import requests
 import json
 import logging
+import re
+import requests
 from enum import Enum
 from backend.config import Config
 
@@ -28,14 +29,17 @@ class GeminiService:
     """Service for interacting with Google Gemini API."""
     
     # Models
-    # Models
-    # all Gemini 3 Flash for now, smart model approach will be used in a later stage.
     MODEL_SMART = "gemini-3-flash-preview"
     MODEL_FAST = "gemini-3-flash-preview"
+    MODEL_TRIAGE = "gemini-3-flash-preview"  # Fast triage with low token budget
     
     # Timeouts (seconds)
     TIMEOUT_SMART = 30
     TIMEOUT_FAST = 30
+    TIMEOUT_TRIAGE = 10  # Triage should be quick
+    
+    # Batch sizing: conservative limit to stay within maxOutputTokens (8192)
+    MAX_CLAIMS_PER_PROMPT = 8
     
     def __init__(self):
         """Initialize Gemini service."""
@@ -244,7 +248,7 @@ class GeminiService:
                 # 2. Final Result Extraction (Robust)
                 if final_json_text and "verdict" in final_json_text:
                     # Robust extraction: Look for markdown code blocks first, then braces
-                    import re
+
                     clean_json = final_json_text.strip()
                     
                     # 1. Try to extract from Markdown code blocks
@@ -572,34 +576,81 @@ IMPORTANT RULES:
 
 Respond ONLY with valid JSON, no additional text."""
 
-    def analyze_claims_batch(self, claims, context=None):
+    def analyze_claims_batch(self, claims, context=None, cache_name=None):
         """
-        Agentic Batch Analysis with Thinking Mode + Tool Calling.
+        Agentic Batch Analysis with Flash Triage + Thinking Mode + Tool Calling.
+        
+        Flow:
+        1. Fast triage (Flash-Lite) to categorize claims by priority
+        2. SKIP claims → return immediately (no API call)
+        3. NORMAL/IMMEDIATE → full agentic verification (sub-batched if needed)
+        4. Merge results in original order
         
         The agent can use:
         - google_search: For general fact verification
-        - search_social: For social context, breaking news, viral claims, meta-analysis
+        - search_social: For social context, breaking news, viral claims
         
         Context is cached (if large enough) or injected inline.
+        If cache_name is provided, reuses existing cache (avoids redundant creation).
         """
         if not claims:
             return []
-            
-        logger.info(f"Starting Agentic Batch Analysis for {len(claims)} claims.")
         
-        # 1. Initialize Grok service for social search
+        logger.info(f"Starting Batch Analysis for {len(claims)} claims.")
+        
+        # =====================================================================
+        # STEP 1: Fast Triage (Flash-Lite) - categorize claims by priority
+        # Skip triage for tiny batches (≤2 claims) — overhead not worth it
+        # =====================================================================
+        if len(claims) <= 2:
+            triaged = [
+                {"claim": c, "index": i, "priority": ClaimPriority.NORMAL, "strategy": "SEARCH_VERIFY"}
+                for i, c in enumerate(claims)
+            ]
+        else:
+            # Pass full context to triage for better routing decisions
+            context_hint = context if isinstance(context, str) else None
+            triaged = self.triage_for_stream(claims, stream_context=context_hint)
+        
+        # Separate claims by priority
+        skip_indices = [t["index"] for t in triaged if t["priority"] == ClaimPriority.SKIP]
+        verify_items = [t for t in triaged if t["priority"] != ClaimPriority.SKIP]
+        
+        # Prepare results array (will fill in order)
+        results = [None] * len(claims)
+        
+        # Handle SKIP claims immediately (no API call needed)
+        for idx in skip_indices:
+            results[idx] = {
+                "is_claim": False,
+                "verdict": "NOT_A_CLAIM",
+                "explanation": "This appears to be an opinion, trivial statement, or not a verifiable claim.",
+                "sources": []
+            }
+        
+        if not verify_items:
+            logger.info("All claims triaged as SKIP - no verification needed.")
+            return results
+        
+        logger.info(f"Verifying {len(verify_items)} claims (skipped {len(skip_indices)})")
+        
+        # =====================================================================
+        # STEP 2: Setup for agentic verification
+        # =====================================================================
         from backend.services.grok_service import get_grok_service
         grok = get_grok_service()
         
-        # 2. Cache context if large enough (>4KB = ~1024 tokens)
-        cache_name = None
+        # Cache context if large enough (>4KB = ~1024 tokens)
+        # If cache_name was already provided (pre-created by caller), reuse it
         inline_context = None
         
-        if context:
+        if cache_name:
+            logger.info(f"Reusing pre-created Context Cache: {cache_name}")
+        elif context:
             if len(context) > 4000:
                 try:
                     cache_name = self.create_cache(context, ttl_minutes=5)
-                    logger.info(f"Using Context Cache: {cache_name}")
+                    logger.info(f"Created Context Cache: {cache_name}")
                 except Exception as e:
                     logger.warning(f"Cache creation failed, using inline: {e}")
                     inline_context = context
@@ -607,10 +658,53 @@ Respond ONLY with valid JSON, no additional text."""
                 logger.info("Context too short for cache, injecting inline.")
                 inline_context = context
         
-        # 3. Build the agentic prompt with tool instructions
-        prompt = self._build_agentic_batch_prompt(claims, inline_context)
+        # Build list of claims that need verification
+        claims_to_verify = [v["claim"] for v in verify_items]
         
-        # 4. Define available tools
+        # =====================================================================
+        # STEP 3: Sub-batch if too many claims for a single prompt
+        # This prevents output-token overflow and model "forgetting" later claims
+        # =====================================================================
+        if len(claims_to_verify) <= self.MAX_CLAIMS_PER_PROMPT:
+            sub_batches = [(verify_items, claims_to_verify)]
+        else:
+            sub_batches = []
+            for i in range(0, len(verify_items), self.MAX_CLAIMS_PER_PROMPT):
+                chunk_items = verify_items[i:i + self.MAX_CLAIMS_PER_PROMPT]
+                chunk_claims = [v["claim"] for v in chunk_items]
+                sub_batches.append((chunk_items, chunk_claims))
+            logger.info(f"Split {len(claims_to_verify)} claims into {len(sub_batches)} sub-batches")
+        
+        # =====================================================================
+        # STEP 4: Process each sub-batch through agentic loop
+        # =====================================================================
+        for batch_items, batch_claims in sub_batches:
+            strategy_hints = {i + 1: v["strategy"] for i, v in enumerate(batch_items)}
+            prompt = self._build_agentic_batch_prompt(batch_claims, inline_context, strategy_hints)
+            batch_results = self._run_agentic_batch(
+                prompt, batch_claims, grok, cache_name
+            )
+            
+            # Merge back into results array at original indices
+            for i, item in enumerate(batch_items):
+                original_idx = item["index"]
+                if i < len(batch_results):
+                    results[original_idx] = batch_results[i]
+                else:
+                    results[original_idx] = {
+                        "is_claim": True,
+                        "verdict": "COULD_NOT_VERIFY",
+                        "explanation": "Result missing from verification",
+                        "sources": []
+                    }
+        
+        return results
+    
+    def _run_agentic_batch(self, prompt, claims_to_verify, grok, cache_name=None):
+        """
+        Execute the agentic loop for a single batch of claims.
+        Extracted to support sub-batching for large claim lists.
+        """
         tools = {
             "function_declarations": [
                 {
@@ -631,7 +725,6 @@ Respond ONLY with valid JSON, no additional text."""
             ]
         }
         
-        # 5. Construct initial payload
         conversation = [{"role": "user", "parts": [{"text": prompt}]}]
         
         payload = {
@@ -646,7 +739,6 @@ Respond ONLY with valid JSON, no additional text."""
         if cache_name:
             payload["cachedContent"] = cache_name
         
-        # 6. Agentic loop (max 3 turns to handle tool calls)
         max_turns = 3
         url = self._get_api_url(self.MODEL_SMART)
         
@@ -716,7 +808,7 @@ Respond ONLY with valid JSON, no additional text."""
                 
                 # No function calls = final response
                 if final_text:
-                    return self._parse_thinking_batch_response(data, len(claims))
+                    return self._parse_thinking_batch_response(data, len(claims_to_verify))
                     
             except Exception as e:
                 logger.error(f"Agentic turn {turn + 1} failed: {e}")
@@ -725,18 +817,27 @@ Respond ONLY with valid JSON, no additional text."""
                 import time
                 time.sleep(1)
         
-        # Fallback: return error for all claims
-        logger.error("Agentic batch failed after all turns")
+        # Fallback: return error for all claims in this sub-batch
+        logger.error("Agentic sub-batch failed after all turns")
         return [{
             "is_claim": True,
             "verdict": "COULD_NOT_VERIFY",
             "explanation": "Agentic analysis failed",
             "sources": []
-        } for _ in claims]
+        } for _ in claims_to_verify]
     
-    def _build_agentic_batch_prompt(self, claims, inline_context=None):
-        """Build agentic prompt with economic strategy selection."""
-        claims_str = "\n".join([f"{i+1}. {c}" for i, c in enumerate(claims)])
+    def _build_agentic_batch_prompt(self, claims, inline_context=None, strategy_hints=None):
+        """Build agentic prompt with economic strategy selection and triage hints."""
+        # Build claims list with strategy hints from triage
+        if strategy_hints:
+            claims_lines = []
+            for i, c in enumerate(claims):
+                hint = strategy_hints.get(i + 1, "")
+                hint_str = f" [SUGGESTED: {hint}]" if hint else ""
+                claims_lines.append(f"{i+1}. {c}{hint_str}")
+            claims_str = "\n".join(claims_lines)
+        else:
+            claims_str = "\n".join([f"{i+1}. {c}" for i, c in enumerate(claims)])
         
         context_block = ""
         if inline_context:
@@ -805,7 +906,7 @@ CRITICAL: Every claim MUST have at least 1 source URL. No exceptions."""
                     text += part['text']
             
             # Clean and parse JSON
-            import re
+
             clean_text = text.strip()
             
             # Try to extract JSON from markdown code block
@@ -864,51 +965,133 @@ CRITICAL: Every claim MUST have at least 1 source URL. No exceptions."""
                 "sources": []
             } for _ in range(expected_count)]
 
-    # =========================================================================
-    # LEGACY CODE REMOVED
-    # =========================================================================
-    # The following methods were removed as dead code (never called externally):
-    # - analyze_claims_batch_legacy() - superseded by analyze_claims_batch()
-    # - _triage_claims() - only used by legacy method
-    # - _analyze_batch_static() - only used by legacy method  
-    # - _analyze_batch_static_chunk() - only used by above
-    # - _build_batch_fact_check_prompt() - only used by static batch
-    # - _parse_batch_response() - only used by static batch
-    # Total: ~300 lines removed for cleaner codebase
-    # =========================================================================
+
 
     # =========================================================================
-    # FUNNEL ARCHITECTURE (stub for future streaming expansion)
+    # FLASH TRIAGE - Fast classification before expensive verification
     # =========================================================================
     def triage_for_stream(self, claims: list, stream_context: str = None) -> list:
         """
-        Agent-driven triage for streaming scenarios (video/audio).
+        Fast triage using Flash-Lite to categorize claims by priority and strategy.
         
-        Returns claims annotated with priority and suggested strategy.
-        This is a STUB for future expansion - currently returns all as NORMAL.
-        
-        Future implementation will use the agent to:
-        - Detect duplicate/similar claims
-        - Prioritize high-virality or breaking news claims
-        - Defer low-priority claims for batch processing after stream ends
+        Makes a SINGLE cheap API call to classify all claims before expensive
+        agentic verification. This reduces overall latency by routing simple
+        claims to fast paths and skipping trivial/opinion claims entirely.
         
         Args:
-            claims: List of claim strings extracted from stream
-            stream_context: Optional context about the stream source
+            claims: List of claim strings to triage
+            stream_context: Optional context about the source (e.g., stream title)
             
         Returns:
-            List of dicts with claim, priority, and suggested strategy
+            List of dicts with: claim, priority (ClaimPriority), strategy, index
         """
-        # For now, return all claims as NORMAL priority with SEARCH_VERIFY strategy
-        # Future: Let agent analyze and prioritize based on content and context
-        return [
-            {
-                "claim": c,
-                "priority": ClaimPriority.NORMAL,
-                "strategy": "SEARCH_VERIFY"
+        if not claims:
+            return []
+        
+        # Build compact triage prompt
+        claims_str = "\n".join([f"{i+1}. {c}" for i, c in enumerate(claims)])
+        
+        context_hint = ""
+        if stream_context:
+            context_hint = f"\nSOURCE CONTEXT: {stream_context[:200]}"
+        
+        prompt = f"""Categorize each claim for fact-check priority.
+
+CLAIMS:
+{claims_str}
+{context_hint}
+
+For each claim, classify:
+- priority: SKIP (opinion/trivial), IMMEDIATE (breaking/viral), NORMAL (standard), DEFERRED (low-priority)
+- strategy: KNOWLEDGE_CHECK (well-known fact), SEARCH_VERIFY (needs sources), SOCIAL_VERIFY (viral/social)
+
+Return ONLY a JSON array, one object per claim:
+[{{"index": 1, "priority": "NORMAL", "strategy": "SEARCH_VERIFY"}}, ...]"""
+
+        try:
+            response = requests.post(
+                self._get_api_url(self.MODEL_TRIAGE),
+                json={
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {"temperature": 0.1, "maxOutputTokens": 1024}
+                },
+                headers={'Content-Type': 'application/json'},
+                timeout=self.TIMEOUT_TRIAGE
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            # Parse response
+            if 'candidates' not in data or not data['candidates']:
+                raise ValueError("No candidates in triage response")
+            
+            text = data['candidates'][0]['content']['parts'][0]['text']
+            
+            # Extract JSON array
+
+            clean_text = text.strip()
+            # Try markdown code block first
+            json_match = re.search(r'```(?:json)?\s*(\[[\s\S]*?\])\s*```', clean_text, re.IGNORECASE)
+            if json_match:
+                clean_text = json_match.group(1)
+            else:
+                # Fallback: find array brackets
+                start = clean_text.find('[')
+                end = clean_text.rfind(']')
+                if start != -1 and end != -1:
+                    clean_text = clean_text[start:end+1]
+            
+            triage_results = json.loads(clean_text)
+            
+            # Map to output format with ClaimPriority enum
+            priority_map = {
+                "skip": ClaimPriority.SKIP,
+                "immediate": ClaimPriority.IMMEDIATE,
+                "normal": ClaimPriority.NORMAL,
+                "deferred": ClaimPriority.DEFERRED
             }
-            for c in claims
-        ]
+            
+            results = []
+            for i, claim in enumerate(claims):
+                # Find triage result for this claim (1-indexed in response)
+                triage = next((t for t in triage_results if t.get('index') == i + 1), None)
+                
+                if triage:
+                    priority_str = triage.get('priority', 'normal').lower()
+                    results.append({
+                        "claim": claim,
+                        "index": i,
+                        "priority": priority_map.get(priority_str, ClaimPriority.NORMAL),
+                        "strategy": triage.get('strategy', 'SEARCH_VERIFY')
+                    })
+                else:
+                    # Missing result, default to NORMAL
+                    results.append({
+                        "claim": claim,
+                        "index": i,
+                        "priority": ClaimPriority.NORMAL,
+                        "strategy": "SEARCH_VERIFY"
+                    })
+            
+            # Log triage summary
+            skip_count = sum(1 for r in results if r["priority"] == ClaimPriority.SKIP)
+            immediate_count = sum(1 for r in results if r["priority"] == ClaimPriority.IMMEDIATE)
+            logger.info(f"📊 Triage: {len(claims)} claims → {skip_count} SKIP, {immediate_count} IMMEDIATE, {len(claims) - skip_count - immediate_count} NORMAL/DEFERRED")
+            
+            return results
+            
+        except Exception as e:
+            logger.warning(f"Triage failed, defaulting all to NORMAL: {e}")
+            # Fallback: all claims as NORMAL priority
+            return [
+                {
+                    "claim": c,
+                    "index": i,
+                    "priority": ClaimPriority.NORMAL,
+                    "strategy": "SEARCH_VERIFY"
+                }
+                for i, c in enumerate(claims)
+            ]
 
     def _parse_response(self, response_data):
         """Parse Gemini REST API response into structured format."""
@@ -1034,6 +1217,52 @@ CRITICAL: Every claim MUST have at least 1 source URL. No exceptions."""
             
         return chunks
 
+    def _generate_context_summary(self, text):
+        """
+        Generate a short summary of the text for cross-chunk context.
+        Used by identify_claims to give each chunk awareness of the full text.
+        """
+        # Take first ~6000 chars (enough to capture topic, speakers, key entities)
+        sample = text[:6000]
+        prompt = f"""Summarize this text in 2-3 sentences. Focus on: who is speaking/writing,
+what the main topic is, and any key entities (people, organizations, numbers) mentioned.
+
+TEXT:
+\"\"\"
+{sample}
+\"\"\"
+
+Respond with ONLY the summary, no JSON."""
+        
+        try:
+            response = requests.post(
+                self._get_api_url(self.MODEL_FAST),
+                json={"contents": [{"parts": [{"text": prompt}]}]},
+                headers={'Content-Type': 'application/json'},
+                timeout=self.TIMEOUT_FAST
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            if 'candidates' in data and data['candidates']:
+                summary = data['candidates'][0]['content']['parts'][0]['text'].strip()
+                logger.info(f"Generated context summary: {summary[:80]}...")
+                return summary
+        except Exception as e:
+            logger.warning(f"Context summary generation failed: {e}")
+        
+        return None
+
+    @staticmethod
+    def _normalize_claim_text(claim):
+        """Normalize claim text for deduplication. Lowercases and strips punctuation."""
+        normalized = claim.strip().lower()
+        # Remove trailing punctuation that doesn't change meaning
+        normalized = normalized.rstrip('.!?')
+        # Collapse whitespace
+        normalized = re.sub(r'\s+', ' ', normalized)
+        return normalized
+
     def identify_claims(self, text):
         """Smart Agent: Identify distinct claims in text with full context using chunking."""
         
@@ -1041,13 +1270,30 @@ CRITICAL: Every claim MUST have at least 1 source URL. No exceptions."""
         chunks = self._chunk_text(text)
         logger.info(f"Smart Agent potentially processing {len(chunks)} chunks for text length {len(text)}")
         
-        all_claims = set() # Use set for deduplication
+        # 2. Generate a global context summary for multi-chunk texts
+        # This prevents cross-chunk context loss (e.g. pronoun resolution)
+        context_summary = None
+        if len(chunks) > 1:
+            context_summary = self._generate_context_summary(text)
+        
+        # claim_text -> normalized_key for dedup
+        seen_normalized = {}  # normalized_key -> original claim text
         
         for i, chunk in enumerate(chunks):
-            # Prompt updated to allow more claims per chunk
+            # Build context preamble for multi-chunk texts
+            preamble = ""
+            if context_summary:
+                preamble = f"""GLOBAL CONTEXT (this is part {i+1} of {len(chunks)} from a longer text):
+{context_summary}
+
+Use this context to resolve pronouns and references. For example, if the context
+mentions "Biden" and this chunk says "He", replace "He" with "Biden".
+
+"""
+            
             prompt = f"""You are a meticulous fact-checker assistant. Your job is to extract EVERY verifiable factual claim from this text.
 
-TEXT TO ANALYZE (Part {i+1}/{len(chunks)}):
+{preamble}TEXT TO ANALYZE (Part {i+1}/{len(chunks)}):
 \"\"\"
 {chunk}
 \"\"\"
@@ -1105,10 +1351,13 @@ If zero claims found, return: {{"claims": []}}"""
                 result = json.loads(content.strip())
                 claims = result.get('claims', [])
                 
-                # Add to set (deduplication)
+                # Add with normalized dedup
                 for claim in claims:
                     if claim and isinstance(claim, str) and len(claim.strip()) > 5:
-                        all_claims.add(claim.strip())
+                        clean = claim.strip()
+                        normalized = self._normalize_claim_text(clean)
+                        if normalized not in seen_normalized:
+                            seen_normalized[normalized] = clean
                         
                 logger.info(f"Chunk {i+1}: Found {len(claims)} claims")
                 
@@ -1116,7 +1365,7 @@ If zero claims found, return: {{"claims": []}}"""
                 logger.warning(f"Smart Agent chunk {i+1} failed: {e}", exc_info=True)
                 # Continue to next chunk even if one fails
         
-        final_claims = list(all_claims)
+        final_claims = list(seen_normalized.values())
         logger.info(f"Smart Agent total distinct claims found: {len(final_claims)}")
         return final_claims
 
@@ -1247,213 +1496,3 @@ RESPOND WITH JSON ONLY:
                 'human_indicators': [],
                 'explanation': f'Analysis failed: {str(e)}'
             }
-
-
-    def _analyze_agentic_batch(self, claims, cache_name=None, context_text=None):
-        """
-        Unified Agentic Batch Analysis.
-        
-        Processes a list of claims in a SINGLE Agentic Loop using Thinking Mode.
-        Uses Context Cache to understand the relationship between claims and source text.
-        """
-        if not claims:
-            return []
-            
-        try:
-            from backend.services.grok_service import get_grok_service
-            grok = get_grok_service()
-            
-            # Tools: Google Search (Standard) + Grok (Social)
-            tools = [
-                {"google_search": {}},
-                grok.get_tool_definition()
-            ]
-            
-            tool_config = {"function_declarations": tools}
-            
-            # Construct Prompt with Agentic Decision Logic
-            claims_list_str = "\n".join([f"{i+1}. {c}" for i, c in enumerate(claims)])
-            
-            # Determine Context Instruction
-            if cache_name:
-                context_instruction = "You have access to a Context Cache containing the source document."
-            elif context_text:
-                context_instruction = f"Here is the source document context:\\n\\n{context_text}"
-            else:
-                context_instruction = "No source document provided. You must rely on Google Search or Social Search."
-            
-            prompt = f"""You are an elite, impartial fact-checker.
-You are processing a BATCH of {len(claims)} claims.
-
-CLAIMS TO ANALYZE:
-{claims_list_str}
-
-CONTEXT:
-{context_instruction}
-
-TASK:
-1. PHASE 1 (ANALYSIS): Use your "Thinking Mode" to analyze the relationship between these claims and the Context.
-   - For each claim, determine if it is intrinsic to the provided Context Cache or an external fact.
-   - DECIDE which verification method is appropriate:
-     * Internal Context Check (if claim is about the text itself)
-     * External Google Search (if claim is a general fact)
-     * Social Search (if claim is viral/breaking news)
-
-2. PHASE 2 (VERIFICATON): Verify EACH claim based on your decision.
-   - Be precise.
-   - If a claim is "True in Context" but "False in Reality", specify that.
-
-OUTPUT FORMAT:
-Return a JSON object with a list of results in the EXACT same order as the input claims.
-{{
-  "results": [
-    {{
-      "claim_index": 1,
-      "verdict": "TRUE/FALSE/etc",
-      "explanation": "Brief explanation...",
-      "sources": ["url1", "url2"],
-      "method": "context_check OR external_search" 
-    }},
-    ...
-  ]
-}}
-"""
-            
-            conversation_history = [
-                {"role": "user", "parts": [{"text": prompt}]}
-            ]
-            
-            # Config with Thinking Level (Gemini 3)
-            payload = {
-                "contents": conversation_history,
-                "tools": [tool_config],
-                "generationConfig": {
-                    "thinkingConfig": {
-                        "includeThoughts": True
-                    }
-                }
-            }
-            
-            if cache_name:
-                payload["cachedContent"] = cache_name
-                
-            return self._execute_agentic_batch_loop(payload, tool_config, grok, len(claims))
-            
-        except Exception as e:
-            logger.error(f"Agentic Batch failed: {e}")
-            # Return error results for all claims (fallback)
-            return [{
-                "is_claim": True,
-                "verdict": "COULD_NOT_VERIFY",
-                "explanation": "Batch analysis failed. Please try again.",
-                "sources": []
-            } for _ in claims]
-
-    def _execute_agentic_batch_loop(self, payload, tool_config, grok, expected_count):
-        """Helper to run the agentic loop for a batch."""
-        max_turns = 5
-        current_turn = 0
-        conversation_history = payload["contents"]
-        
-        # Use existing _get_api_url method
-        url = self._get_api_url(self.MODEL_SMART)
-
-        while current_turn < max_turns:
-            current_turn += 1
-            
-            try:
-                # Make Request
-                response = requests.post(
-                    url,
-                    json=payload,
-                    headers={'Content-Type': 'application/json'},
-                    timeout=120 # Much Longer timeout for batch thinking
-                )
-                response.raise_for_status()
-                data = response.json()
-            except Exception as e:
-                logger.warning(f"Batch Agent turn {current_turn} failed: {e}")
-                if current_turn >= max_turns:
-                     raise
-                import time
-                time.sleep(1)
-                continue
-            
-            if 'candidates' not in data or not data['candidates']:
-                raise ValueError("No candidates in response")
-
-            candidate = data['candidates'][0]
-            content = candidate.get('content', {})
-            parts = content.get('parts', [])
-            
-            model_reply_parts = []
-            function_calls = []
-            final_json_text = ""
-            
-            for part in parts:
-                # Log thoughts if present
-                if part.get('thought'):
-                    # logger.info(f"🧠 BATCH THOUGHT: {part.get('text')[:100]}...")
-                    pass
-                    
-                if 'text' in part and not part.get('thought'):
-                     final_json_text += part['text']
-                     
-                if 'functionCall' in part:
-                    function_calls.append(part['functionCall'])
-                    
-                model_reply_parts.append(part)
-                
-            conversation_history.append({"role": "model", "parts": model_reply_parts})
-            
-            if function_calls:
-                 logger.info(f"Batch Agent calling {len(function_calls)} tools")
-                 # Execute tools
-                 for fc in function_calls:
-                    fn_name = fc.get('name')
-                    fn_args = fc.get('args', {})
-                    
-                    tool_result = {}
-                    if fn_name == 'search_social':
-                        logger.info(f"🛠️ Tool: search_social({fn_args.get('query')})")
-                        tool_result = grok.search_social(fn_args.get('query'))
-                    elif fn_name == 'google_search': 
-                        pass 
-                    else:
-                        tool_result = {"error": f"Unknown tool: {fn_name}"}
-
-                    if fn_name != 'google_search': 
-                        conversation_history.append({
-                            "role": "function", 
-                            "parts": [{"functionResponse": {"name": fn_name, "response": tool_result}}]
-                        })
-                 continue
-            
-            # If no tools, try to parse JSON
-            if final_json_text:
-                import re
-                try:
-                    # Clean markdown
-                    clean_json = final_json_text.strip()
-                    json_match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', clean_json, re.IGNORECASE)
-                    if json_match:
-                        clean_json = json_match.group(1)
-                    else:
-                         # Fallback for list/object
-                        start = clean_json.find('{')
-                        end = clean_json.rfind('}')
-                        if start != -1 and end != -1:
-                            clean_json = clean_json[start:end+1]
-                            
-                    result_data = json.loads(clean_json)
-                    if "results" in result_data and isinstance(result_data["results"], list):
-                        results = result_data["results"]
-                        return results
-                    elif isinstance(result_data, list): # Agent might return just the list
-                         return result_data
-                        
-                except Exception:
-                    pass # Continue loop if not valid JSON
-
-            if current_turn >= max_turns:
-                raise Exception("Max turns reached without batch results")
