@@ -380,7 +380,7 @@ class FactCheckManager {
                         });
                         cacheName = cacheResponse.cache_name;
                         if (cacheName) {
-                            logger.info?.(`Pre-created context cache: ${cacheName}`);
+                            console.info(`Pre-created context cache: ${cacheName}`);
                         }
                     } catch (cacheError) {
                         console.warn('Cache pre-creation failed, proceeding without:', cacheError);

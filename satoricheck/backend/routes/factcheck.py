@@ -27,8 +27,6 @@ factcheck_bp = Blueprint('factcheck', __name__, url_prefix='/api/factcheck')
 @login_required
 def analyze_claim():
     """Analyze text for factual claims."""
-    start_time = time.time()
-    
     try:
         data = request.get_json()
         
@@ -442,7 +440,12 @@ def get_fact_check_history():
 @factcheck_bp.route('/identify-claims', methods=['POST'])
 @login_required
 def identify_claims():
-    """Smart Agent: Identify distinct claims in text before fact-checking."""
+    """Smart Agent: Identify distinct claims in text before fact-checking.
+    
+    Note: This endpoint is unmetered because the 2x Smart Agent multiplier
+    on /analyze-batch covers the extra API calls. A balance guard prevents
+    abuse by users who call identify without ever proceeding to batch.
+    """
     try:
         data = request.get_json()
         
@@ -452,11 +455,16 @@ def identify_claims():
         text = data['text'].strip()
         user = request.current_user
         
+        # Guard: User must have at least 1 CP to use Smart Agent pipeline
+        token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
+        if not token_balance or token_balance.balance < 1:
+            raise APIError('Insufficient tokens to use Smart Agent', status_code=403)
+        
         # Get global Gemini service
         gemini_service = get_gemini_service()
         
         # Identify claims
-        logger.info(f"Smart Agent identifying claims for user {user.email}: {text[:100]}...")
+        logger.info(f"Smart Agent identifying claims for user {user.id}: {text[:100]}...")
         claims = gemini_service.identify_claims(text)
         
         logger.info(f"Smart Agent found {len(claims)} claims")

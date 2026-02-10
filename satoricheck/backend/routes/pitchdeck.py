@@ -93,8 +93,6 @@ def analyze_pitch_deck():
         service = PitchdeckService()
         result = service.analyze_pitch_deck(pdf_bytes)
         
-        result = service.analyze_pitch_deck(pdf_bytes)
-        
         # Privacy: Log ID instead of email
         logger.info(f"[Pitchdeck] Analysis complete for user {user.id}. Cost: {cost} CP")
         
@@ -141,31 +139,52 @@ def verify_market_claims():
         market_size = data.get('market_size')
         competition = data.get('competition', [])
         industry = data.get('industry')
-        cache_name = data.get('cache_name') # New: Context Cache ID
-        
-        # Debug: Log what we received
-        logger.info(f"[Pitchdeck] Verify request - claims: {len(verifiable_claims)}, cache: {bool(cache_name)}")
+        cache_name = data.get('cache_name')
         
         # Validate at least one claim to verify
         if not verifiable_claims and not market_size and not competition:
             raise APIError('No claims to verify', status_code=400)
         
-        # Verify claims using service
-        service = PitchdeckService()
-        findings = service.verify_market_claims(
-            verifiable_claims=verifiable_claims,
-            market_size=market_size,
-            competition=competition,
-            industry=industry,
-            cache_name=cache_name
-        )
-        
         user = request.current_user
-        logger.info(f"[Pitchdeck] Verification complete for user {user.email}: {len(findings)} findings")
+        logger.info(f"[Pitchdeck] Verify request - claims: {len(verifiable_claims)}, cache: {bool(cache_name)}")
+        
+        # --- PRICING: 1 CP flat per market verification ---
+        from backend.database import db_session
+        from backend.models import TokenBalance
+        
+        token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
+        if not token_balance:
+            raise APIError('No token balance found', status_code=403)
+        
+        cost = 1  # Flat rate: 1 CP per verification call
+        if token_balance.balance < cost:
+            raise APIError(f'Insufficient tokens. Verification requires {cost} CP.', status_code=403)
+        
+        token_balance.balance -= cost
+        db_session.commit()
+        
+        # Verify claims using service
+        try:
+            service = PitchdeckService()
+            findings = service.verify_market_claims(
+                verifiable_claims=verifiable_claims,
+                market_size=market_size,
+                competition=competition,
+                industry=industry,
+                cache_name=cache_name
+            )
+        except Exception as e:
+            # Refund on service failure
+            token_balance.balance += cost
+            db_session.commit()
+            raise
+        
+        logger.info(f"[Pitchdeck] Verification complete for user {user.id}: {len(findings)} findings. Cost: {cost} CP")
         
         return jsonify({
             'success': True,
-            'findings': findings
+            'findings': findings,
+            'new_balance': token_balance.balance
         })
         
     except APIError:
