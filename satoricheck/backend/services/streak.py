@@ -143,3 +143,46 @@ def get_streak_info(streak_count):
         'days_until_next': next_count - streak_count if next_count else 0
     }
 
+def handle_login_streak(user_id, db_session):
+    """
+    Unified handler for login streaks and rewards.
+    Encapsulates streak update + reward granting into a single call.
+    
+    Args:
+        user_id: User's database ID
+        db_session: Database session
+        
+    Returns:
+        Dict with streak info and reward results
+    """
+    from backend.models import Streak
+    
+    streak = db_session.query(Streak).filter_by(user_id=user_id).first()
+    
+    if not streak:
+        # Initial streak setup
+        streak = Streak(
+            user_id=user_id,
+            current_streak=1,
+            longest_streak=1,
+            last_active_date=datetime.utcnow()
+        )
+        db_session.add(streak)
+        db_session.flush() # Ensure object has ID if needed
+        return {
+            "streak_count": 1,
+            "reward_granted": 0,
+            "reward_message": None
+        }
+    
+    # Update streak count
+    current_count = update_streak(streak, streak.last_active_date)
+    
+    # Check for rewards
+    reward_amount, reward_message = check_and_grant_streak_reward(user_id, current_count, db_session)
+    
+    return {
+        "streak_count": current_count,
+        "reward_granted": reward_amount,
+        "reward_message": reward_message
+    }

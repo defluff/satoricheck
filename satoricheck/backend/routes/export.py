@@ -26,15 +26,16 @@ def export_fact_checks():
     try:
         user = request.current_user
         
-        # Get format (default to csv)
+        # Get filters
         format_type = request.args.get('format', 'csv').lower()
+        source_filter = request.args.get('source')
         
         # Get fact checks
-        fact_checks = db_session.query(FactCheck).filter_by(
-            user_id=user.id
-        ).order_by(
-            FactCheck.timestamp.desc()
-        ).all()
+        query = db_session.query(FactCheck).filter_by(user_id=user.id)
+        if source_filter:
+            query = query.filter_by(source=source_filter)
+            
+        fact_checks = query.order_by(FactCheck.timestamp.desc()).all()
         
         if format_type == 'csv':
             # Create CSV
@@ -45,35 +46,54 @@ def export_fact_checks():
             writer.writerow([
                 'ID',
                 'Date',
+                'Source',
+                'Source ID',
                 'Claim Text',
                 'Verdict',
                 'Explanation',
                 'Fallacy',
                 'Sources',
-                            ])
+            ])
 
             # Write data
             for fc in fact_checks:
-                sources = json.loads(fc.sources) if fc.sources else []
-                sources_str = '; '.join(sources)
+                # Handle sources formatting
+                sources_data = fc.sources
+                if isinstance(sources_data, str) and (sources_data.startswith('[') or sources_data.startswith('{')):
+                    try:
+                        sources_list = json.loads(sources_data)
+                        sources_str = '; '.join(sources_list) if isinstance(sources_list, list) else str(sources_list)
+                    except:
+                        sources_str = sources_data
+                elif isinstance(sources_data, list):
+                    sources_str = '; '.join(sources_data)
+                else:
+                    sources_str = str(sources_data) if sources_data else ""
 
                 writer.writerow([
                     fc.id,
                     fc.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+                    getattr(fc, 'source', 'factcheck'),
+                    fc.source_id or '',
                     fc.claim_text,
                     fc.verdict,
                     fc.explanation,
                     fc.fallacy or '',
                     sources_str
                 ])
+                
             # Create response
             output.seek(0)
+            
+            filename = f"satoricheck_export_{datetime.utcnow().strftime('%Y%m%d')}.csv"
+            if source_filter:
+                filename = f"satoricheck_{source_filter}_{datetime.utcnow().strftime('%Y%m%d')}.csv"
+                
             response = make_response(output.getvalue())
             response.headers['Content-Type'] = 'text/csv'
-            response.headers['Content-Disposition'] = f'attachment; filename=satoricheck_factchecks_{datetime.utcnow().strftime("%Y%m%d")}.csv'
+            response.headers['Content-Disposition'] = f'attachment; filename={filename}'
             
             logger.info(f"Exported {len(fact_checks)} fact checks as CSV for user {user.email}")
-            
             return response
         
         else:

@@ -118,6 +118,10 @@ class FactCheck(Base):
     sources = Column(Text)  # JSON array of URLs
     source_reliability = Column(String(20))  # 'HIGH', 'MEDIUM', 'LOW'
     
+    # Metadata for filtering and session tracking
+    source = Column(String(50), default='factcheck', index=True)  # 'factcheck', 'pitchdeck'
+    source_id = Column(String(100), index=True)  # Links to a session or document ID
+    
     # Metadata
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
     processing_time = Column(Float)  # in seconds
@@ -126,7 +130,7 @@ class FactCheck(Base):
     
     # Composite index for efficient history queries
     __table_args__ = (
-        Index('ix_factcheck_user_timestamp', 'user_id', 'timestamp'),
+        Index('ix_factcheck_user_source_timestamp', 'user_id', 'source', 'timestamp'),
     )
     
     def __repr__(self):

@@ -1,16 +1,15 @@
-"""
-Token management routes.
-Handles token balance, deductions, and transaction history.
-"""
-from flask import Blueprint, request, jsonify
 import logging
+import json
 from datetime import datetime
+
+from flask import Blueprint, request, jsonify
 
 from backend.database import db_session
 from backend.models import TokenBalance, Transaction, Streak
 from backend.routes.auth import login_required
 from backend.error_handlers import APIError
 from backend.services.streak import get_streak_info
+from backend.extensions import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +18,7 @@ tokens_bp = Blueprint('tokens', __name__, url_prefix='/api/tokens')
 
 @tokens_bp.route('/balance', methods=['GET'])
 @login_required
+@limiter.limit("60 per minute")
 def get_balance():
     """Get current token balance and streak."""
     user = request.current_user
@@ -64,8 +64,11 @@ def get_balance():
 
 @tokens_bp.route('/deduct', methods=['POST'])
 @login_required
+@limiter.limit("20 per minute")
 def deduct_tokens():
     """Deduct tokens from user balance."""
+    user = request.current_user
+    logger.info(f"Token deduction request from user {user.email}")
     try:
         data = request.get_json()
         

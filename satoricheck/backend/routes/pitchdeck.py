@@ -90,28 +90,44 @@ def analyze_pitch_deck():
         # ---------------------
         
         # Analyze with service
-        service = PitchdeckService()
-        result = service.analyze_pitch_deck(pdf_bytes)
-        
-        # Privacy: Log ID instead of email
-        logger.info(f"[Pitchdeck] Analysis complete for user {user.id}. Cost: {cost} CP")
-        
-        return jsonify({
-            'success': True,
-            'cost_incurred': cost, 
-            **result
-        })
-        
-    except ValueError as e:
-        # Validation errors from service
-        raise APIError(str(e), status_code=400)
-    except TimeoutError as e:
-        raise APIError(str(e), status_code=504)
+        try:
+            service = PitchdeckService()
+            result = service.analyze_pitch_deck(pdf_bytes)
+            
+            # Privacy: Log ID instead of email
+            logger.info(f"[Pitchdeck] Analysis complete for user {user.id}. Cost: {cost} CP")
+            
+            # Since we successfully analyzed, results from here will be stored 
+            # with source='pitchdeck' in future calls. 
+            # Note: PitchdeckService.analyze_pitch_deck handles its own internal storage
+            # but we can pass source='pitchdeck' if it supported it, or mark it here.
+            
+            return jsonify({
+                'success': True,
+                'cost_incurred': cost, 
+                **result
+            })
+            
+        except (ValueError, TimeoutError) as e:
+            # Revert deduction on known failures
+            logger.warning(f"[Pitchdeck] Refunding {cost} CP due to expected error: {e}")
+            user.token_balance.balance += cost
+            db_session.commit()
+            status_code = 400 if isinstance(e, ValueError) else 504
+            raise APIError(str(e), status_code=status_code)
+            
+        except Exception as e:
+            # Revert deduction on unexpected failures
+            logger.error(f"[Pitchdeck] Refunding {cost} CP due to unexpected error: {e}", exc_info=True)
+            user.token_balance.balance += cost
+            db_session.commit()
+            raise APIError('Analysis failed. Please try again.', status_code=500)
+            
     except APIError:
         raise
     except Exception as e:
-        logger.error(f"[Pitchdeck] Analysis error: {e}", exc_info=True)
-        raise APIError('Analysis failed. Please try again.', status_code=500)
+        logger.error(f"Pitchdeck analysis error: {e}", exc_info=True)
+        raise APIError('Analysis failed')
 
 
 @pitchdeck_bp.route('/verify-market', methods=['POST'])

@@ -3,22 +3,23 @@ Authentication routes.
 Handles user registration, login, logout, and password changes.
 Uses JWT tokens for stateless authentication (Cloud Run compatible).
 """
-from flask import Blueprint, request, session, jsonify, make_response
+from flask import Blueprint, request, session, jsonify, make_response, url_for, redirect
 from functools import wraps
 import bcrypt
 import logging
 from datetime import datetime
-
-from backend.database import db_session
-from backend.models import User, TokenBalance, Streak
-from backend.config import Config
-from backend.error_handlers import APIError
-from backend.services.streak import update_streak
-from backend.extensions import oauth
-from backend.jwt_utils import create_token, verify_token, refresh_token_if_needed
-from flask import url_for, redirect
 import secrets
 import hashlib
+import json
+import re
+
+from backend.database import db_session
+from backend.models import User, TokenBalance, Streak, DeletedUser
+from backend.config import Config
+from backend.error_handlers import APIError
+from backend.services.streak import handle_login_streak
+from backend.extensions import oauth
+from backend.jwt_utils import create_token, verify_token, refresh_token_if_needed
 
 logger = logging.getLogger(__name__)
 
@@ -152,8 +153,9 @@ def signup():
         if not email or not password:
             raise APIError('Email and password are required')
         
-        # Validate email format (basic)
-        if '@' not in email or '.' not in email:
+        # Validate email format (robust)
+        import re
+        if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
             raise APIError('Invalid email format')
         
         # Check if user already exists
@@ -166,7 +168,6 @@ def signup():
         
         # Check if they had an account before (prevent bonus abuse)
         email_hash = hashlib.sha256(email.lower().strip().encode()).hexdigest()
-        from backend.models import DeletedUser
         was_deleted = db_session.query(DeletedUser).filter_by(email_hash=email_hash).first()
         
         bonus = 0 if was_deleted else Config.SIGNUP_BONUS_TOKENS
@@ -227,40 +228,24 @@ def login():
         password = data.get('password')
         
         if not email or not password:
+            logger.warning("Login: Email or password missing")
             raise APIError('Email and password are required')
         
         # Find user
         user = db_session.query(User).filter_by(email=email).first()
         if not user:
+            logger.warning(f"Login: User not found: {email}")
             raise APIError('Invalid email or password', status_code=401)
         
         # Verify password
         if not bcrypt.checkpw(password.encode('utf-8'), user.password_hash.encode('utf-8')):
+            logger.warning(f"Login: Invalid password for: {email}")
             raise APIError('Invalid email or password', status_code=401)
         
-        # Update last login
+        # Update last login and handle streak
         user.last_login = datetime.utcnow()
-        
-        # Get or create streak
-        streak = db_session.query(Streak).filter_by(user_id=user.id).first()
-        
-        if streak:
-            current_streak = update_streak(streak, streak.last_active_date)
-        else:
-            # Create streak if doesn't exist
-            streak = Streak(
-                user_id=user.id,
-                current_streak=1,
-                longest_streak=1,
-                last_active_date=datetime.utcnow()
-            )
-            db_session.add(streak)
-            current_streak = 1
-        
-        # Check and grant streak reward using centralized function
-        from backend.services.streak import check_and_grant_streak_reward
-        check_and_grant_streak_reward(user.id, current_streak, db_session)
-
+        streak_result = handle_login_streak(user.id, db_session)
+        current_streak = streak_result['streak_count']
         
         db_session.commit()
         
@@ -441,7 +426,6 @@ def google_callback():
             
             # Check if they had an account before (prevent bonus abuse)
             email_hash = hashlib.sha256(email.lower().strip().encode()).hexdigest()
-            from backend.models import DeletedUser
             was_deleted = db_session.query(DeletedUser).filter_by(email_hash=email_hash).first()
             
             bonus = 0 if was_deleted else Config.SIGNUP_BONUS_TOKENS
@@ -460,30 +444,11 @@ def google_callback():
             
             logger.info(f"New Google user created: {email} (Bonus: {bonus} - was_deleted: {was_deleted})")
             
-        else:
-            # Update last login
-            user.last_login = datetime.utcnow()
-            
-            # Update streak
-            streak = db_session.query(Streak).filter_by(user_id=user.id).first()
-            current_streak = 1
-            if streak:
-                current_streak = update_streak(streak, streak.last_active_date)
-            else:
-                streak = Streak(
-                    user_id=user.id,
-                    current_streak=1,
-                    longest_streak=1,
-                    last_active_date=datetime.utcnow()
-                )
-                db_session.add(streak)
-            
-            # Check and grant streak reward using centralized function
-            from backend.services.streak import check_and_grant_streak_reward
-            check_and_grant_streak_reward(user.id, current_streak, db_session)
-            
-            db_session.commit()
-            logger.info(f"Google user logged in: {email}")
+        # Consolidate last login and streak handling for both new and existing users
+        user.last_login = datetime.utcnow()
+        handle_login_streak(user.id, db_session)
+        db_session.commit()
+        logger.info(f"Google user logged in: {email}")
             
         # Create JWT token
         jwt_token = create_token(user.id, user.email)

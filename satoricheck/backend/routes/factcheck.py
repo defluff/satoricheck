@@ -124,6 +124,9 @@ def analyze_claim():
         processing_time = time.time() - start_time
         
         # Save fact check to database
+        source = result.get('source', request.get_json().get('source', 'factcheck'))
+        source_id = result.get('source_id', request.get_json().get('source_id'))
+        
         fact_check = FactCheck(
             user_id=user.id,
             claim_text=text,
@@ -135,6 +138,8 @@ def analyze_claim():
             fallacy=result.get('fallacy'),
             sources=json.dumps(result.get('sources', [])),
             source_reliability=result.get('source_reliability', 'MEDIUM'),
+            source=source,
+            source_id=source_id,
             timestamp=datetime.utcnow(),
             processing_time=processing_time
         )
@@ -330,6 +335,10 @@ def analyze_batch_claims():
             # Let's split evenly for simplicity, it's metadata only.
             cost_per_item = token_cost / len(api_results) if api_results else 0
             
+            # Extract metadata for tracking
+            source = data.get('source', 'factcheck')
+            source_id = data.get('source_id')
+
             for idx, res in enumerate(api_results):
                 original_index = claims_to_process[idx][0]
                 text = claims_to_process[idx][1]
@@ -346,6 +355,8 @@ def analyze_batch_claims():
                     fallacy=res.get('fallacy'),
                     sources=json.dumps(res.get('sources', [])),
                     source_reliability=res.get('source_reliability', 'MEDIUM'),
+                    source=source,
+                    source_id=source_id,
                     timestamp=datetime.utcnow(),
                     processing_time=(time.time() - start_time) / len(api_results)
                 )

@@ -907,20 +907,9 @@ CRITICAL: Every claim MUST have at least 1 source URL. No exceptions."""
             
             # Clean and parse JSON
 
-            clean_text = text.strip()
-            
-            # Try to extract JSON from markdown code block
-            json_match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', clean_text, re.IGNORECASE)
-            if json_match:
-                clean_text = json_match.group(1)
-            else:
-                # Fallback: find first { to last }
-                start = clean_text.find('{')
-                end = clean_text.rfind('}')
-                if start != -1 and end != -1:
-                    clean_text = clean_text[start:end+1]
-            
-            result_data = json.loads(clean_text)
+            # Extract and parse JSON using unified helper
+            json_text = self._extract_json(text)
+            result_data = json.loads(json_text)
             results = result_data.get('results', [])
             
             # Normalize results
@@ -1029,19 +1018,9 @@ Return ONLY a JSON array, one object per claim:
             
             # Extract JSON array
 
-            clean_text = text.strip()
-            # Try markdown code block first
-            json_match = re.search(r'```(?:json)?\s*(\[[\s\S]*?\])\s*```', clean_text, re.IGNORECASE)
-            if json_match:
-                clean_text = json_match.group(1)
-            else:
-                # Fallback: find array brackets
-                start = clean_text.find('[')
-                end = clean_text.rfind(']')
-                if start != -1 and end != -1:
-                    clean_text = clean_text[start:end+1]
-            
-            triage_results = json.loads(clean_text)
+            # Extract JSON array using unified helper
+            json_text = self._extract_json(text, expect_array=True)
+            triage_results = json.loads(json_text)
             
             # Map to output format with ClaimPriority enum
             priority_map = {
@@ -1093,6 +1072,48 @@ Return ONLY a JSON array, one object per claim:
                 for i, c in enumerate(claims)
             ]
 
+    def _extract_json(self, text: str, expect_array: bool = False) -> str:
+        """
+        Robustly extract JSON from text, handling markdown blocks and loose text.
+        
+        Args:
+            text: Raw text containing JSON
+            expect_array: Whether to prioritize matching a JSON array ([]) vs object ({})
+            
+        Returns:
+            str: Cleaned JSON string ready for json.loads()
+        """
+        if not text:
+            return "[]" if expect_array else "{}"
+            
+        clean_text = text.strip()
+        
+        # 1. Try markdown code block first
+        pattern = r'```(?:json)?\s*(\[[\s\S]*?\]|\{[\s\S]*?\})\s*```'
+        json_match = re.search(pattern, clean_text, re.IGNORECASE)
+        if json_match:
+            return json_match.group(1).strip()
+            
+        # 2. Fallback: Find first/last bracket based on expected type
+        start_char = '[' if expect_array else '{'
+        end_char = ']' if expect_array else '}'
+        
+        start = clean_text.find(start_char)
+        end = clean_text.rfind(end_char)
+        
+        if start != -1 and end != -1 and end > start:
+            return clean_text[start:end+1]
+            
+        # 3. Final attempt: startswith/endswith strip (legacy fallback)
+        if clean_text.startswith('```json'):
+            clean_text = clean_text[7:]
+        elif clean_text.startswith('```'):
+            clean_text = clean_text[3:]
+        if clean_text.endswith('```'):
+            clean_text = clean_text[:-3]
+            
+        return clean_text.strip()
+
     def _parse_response(self, response_data):
         """Parse Gemini REST API response into structured format."""
         try:
@@ -1111,18 +1132,9 @@ Return ONLY a JSON array, one object per claim:
             # Extract text from response
             content_text = candidate['content']['parts'][0]['text']
             
-            # Clean up markdown code blocks
-            text = content_text.strip()
-            if text.startswith('```json'):
-                text = text[7:]
-            if text.startswith('```'):
-                text = text[3:]
-            if text.endswith('```'):
-                text = text[:-3]
-            text = text.strip()
-            
-            # Parse JSON
-            result = json.loads(text)
+            # Extract and parse JSON using unified helper
+            json_text = self._extract_json(content_text)
+            result = json.loads(json_text)
             
             # Validate required fields
             required_fields = ['is_claim', 'verdict', 'explanation']

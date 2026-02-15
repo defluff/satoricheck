@@ -96,12 +96,17 @@ class TestCheckoutSession:
     
     def test_create_checkout_valid_package(self, auth_client):
         """Should create checkout session for valid package."""
-        with patch('stripe.checkout.Session.create') as mock_create:
-            mock_create.return_value = MagicMock(url='https://checkout.stripe.com/test')
-            
-            response = auth_client.post('/api/billing/checkout', json={
-                'package': 'battery_small'
-            })
+        with patch('stripe.Customer.create') as mock_cust:
+            mock_cust.return_value = MagicMock(id='cus_test_123')
+            with patch('stripe.checkout.Session.create') as mock_create:
+                mock_create.return_value = MagicMock(
+                    id='cs_test_123',
+                    url='https://checkout.stripe.com/test'
+                )
+                
+                response = auth_client.post('/api/billing/checkout', json={
+                    'package': 'battery_small'
+                })
         
         # Either 200 with URL or redirect
         assert response.status_code in [200, 302]

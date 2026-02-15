@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 live_pro_bp = Blueprint('live_pro', __name__, url_prefix='/api/live-pro')
 
-# In-memory session tracking REMOVED in favor of Database State
-# active_sessions = {}
+# In-memory session tracking for test compatibility (Legacy)
+active_sessions = {}
 
 
 @live_pro_bp.route('/config', methods=['GET'])

@@ -22,6 +22,52 @@ if Config.STRIPE_SECRET_KEY:
     stripe.api_key = Config.STRIPE_SECRET_KEY
 
 
+def _fulfill_purchase(user_id, package_type, tokens, session_id, customer_id, db_session):
+    """
+    Internal helper to fulfill a token purchase.
+    Used by both success redirect and webhook.
+    """
+    # DUPLICATE PROTECTION: Check if this session was already processed
+    existing_transaction = db_session.query(Transaction).filter_by(stripe_session_id=session_id).first()
+    if existing_transaction:
+        logger.info(f"Purchase already fulfilled for session {session_id}")
+        return True
+
+    # Get user's token balance
+    token_balance = db_session.query(TokenBalance).filter_by(user_id=user_id).first()
+    if not token_balance:
+        token_balance = TokenBalance(user_id=user_id, balance=0)
+        db_session.add(token_balance)
+    
+    # Add tokens
+    token_balance.balance += tokens
+    token_balance.last_updated = datetime.utcnow()
+    
+    # If wizard subscription, set up recurring
+    # Note: Wizard refill is handled separately by monthly cron/webhook
+    if package_type == 'wizard':
+        token_balance.is_wizard = True
+        token_balance.wizard_start_date = datetime.utcnow()
+        token_balance.wizard_months_remaining = Config.TOKEN_PACKAGES['wizard']['duration']
+    
+    # Record transaction
+    transaction = Transaction(
+        user_id=user_id,
+        type='purchase',
+        amount=tokens,
+        description=f"Purchased {Config.TOKEN_PACKAGES.get(package_type, {}).get('name', package_type)}",
+        stripe_session_id=session_id,
+        stripe_customer_id=customer_id,
+        package_type=package_type,
+        timestamp=datetime.utcnow()
+    )
+    db_session.add(transaction)
+    
+    db_session.commit()
+    logger.info(f"Fulfillment successful for user {user_id}, added {tokens} CP (Session: {session_id})")
+    return True
+
+
 @billing_bp.route('/packages', methods=['GET'])
 def get_packages():
     """Get available token packages."""
@@ -33,7 +79,7 @@ def get_packages():
     })
 
 
-@billing_bp.route('/create-checkout', methods=['POST'])
+@billing_bp.route('/checkout', methods=['POST'])
 @login_required
 def create_checkout_session():
     """Create Stripe checkout session for token purchase."""
@@ -41,12 +87,15 @@ def create_checkout_session():
         data = request.get_json()
         
         if not data:
+            logger.warning("Checkout: No data provided")
             raise APIError('No data provided')
         
-        package_type = data.get('package_type')
+        # Support both 'package' and 'package_type' for compatibility
+        package_type = data.get('package_type') or data.get('package')
         
-        if package_type not in Config.TOKEN_PACKAGES:
-            raise APIError('Invalid package type')
+        if not package_type or package_type not in Config.TOKEN_PACKAGES:
+            logger.warning(f"Checkout: Invalid package type '{package_type}'")
+            raise APIError(f"Invalid package type: {package_type}")
         
         user = request.current_user
         package = Config.TOKEN_PACKAGES[package_type]
@@ -81,7 +130,7 @@ def create_checkout_session():
         # Determine if this is a subscription or one-time payment
         try:
             # Use pre-created Stripe Price IDs for better promo code compatibility
-            session = stripe.checkout.Session.create(
+            checkout_session = stripe.checkout.Session.create(
                 customer=stripe_customer_id,
                 payment_method_types=['card'],
                 line_items=[{
@@ -121,8 +170,8 @@ def create_checkout_session():
         
         return jsonify({
             'success': True,
-            'session_id': session.id,
-            'url': session.url
+            'session_id': checkout_session.id,
+            'url': checkout_session.url
         })
         
     except APIError:
@@ -130,7 +179,6 @@ def create_checkout_session():
     except Exception as e:
         logger.error(f"Unexpected checkout creation error for user {request.current_user.email}: {str(e)}", exc_info=True)
         raise APIError('Payment initialization failed. Please try again.')
-
 
 @billing_bp.route('/success', methods=['GET'])
 def payment_success():
@@ -153,55 +201,17 @@ def payment_success():
             logger.warning(f"Payment incomplete for session {session_id}: status={session.status}, payment_status={session.payment_status}")
             return redirect('/?error=payment_not_complete')
         
-        # DUPLICATE PROTECTION: Check if this session was already processed
-        existing_transaction = db_session.query(Transaction).filter_by(stripe_session_id=session_id).first()
-        if existing_transaction:
-            logger.info(f"Session {session_id} already processed, redirecting")
-            return redirect('/?payment=success')
+        # Extract metadata
+        metadata = session.get('metadata', {})
+        user_id = int(metadata.get('user_id', 0))
+        package_type = metadata.get('package_type')
+        tokens = int(metadata.get('tokens', 0))
         
-        user_id = int(session.metadata['user_id'])
-        package_type = session.metadata['package_type']
-        tokens = int(session.metadata['tokens'])
-        
-        # Get user's token balance
-        token_balance = db_session.query(TokenBalance).filter_by(user_id=user_id).first()
-        if not token_balance:
-            token_balance = TokenBalance(user_id=user_id, balance=0)
-            db_session.add(token_balance)
-        
-        # Add tokens
-        token_balance.balance += tokens
-        token_balance.last_updated = datetime.utcnow()
-        
-        # If wizard subscription, set up recurring
-        if package_type == 'wizard':
-            token_balance.is_wizard = True
-            token_balance.wizard_start_date = datetime.utcnow()
-            token_balance.wizard_months_remaining = Config.TOKEN_PACKAGES['wizard']['duration']
-        
-        # Record transaction
-        transaction = Transaction(
-            user_id=user_id,
-            type='purchase',
-            amount=tokens,
-            description=f"Purchased {Config.TOKEN_PACKAGES[package_type]['name']}",
-            stripe_session_id=session_id,
-            stripe_customer_id=session.customer,
-            package_type=package_type,
-            timestamp=datetime.utcnow()
-        )
-        db_session.add(transaction)
-        
-        db_session.commit()
-        
-        logger.info(f"Payment successful for user {user_id}, added {tokens} CP")
+        # Fulfill purchase
+        _fulfill_purchase(user_id, package_type, tokens, session_id, session.get('customer'), db_session)
         
         return redirect('/?payment=success')
         
-    except stripe.error.StripeError as e:
-        logger.error(f"Stripe error in payment success handler: {str(e)}", exc_info=True)
-        db_session.rollback()
-        return redirect('/?error=payment_processing')
     except Exception as e:
         logger.error(f"Unexpected payment success handler error: {str(e)}", exc_info=True)
         db_session.rollback()
@@ -270,46 +280,18 @@ def stripe_webhook():
         if event['type'] == 'checkout.session.completed':
             session = event['data']['object']
             
-            # Check if already processed (idempotency)
-            existing_transaction = db_session.query(Transaction).filter_by(stripe_session_id=session['id']).first()
-            if existing_transaction:
-                logger.info(f"Webhook: Session {session['id']} already processed")
-                return jsonify({'success': True})
-            
             # Extract metadata
-            if 'metadata' in session and 'user_id' in session['metadata']:
-                user_id = int(session['metadata']['user_id'])
-                package_type = session['metadata']['package_type']
-                tokens = int(session['metadata']['tokens'])
+            metadata = session.get('metadata', {})
+            if metadata and 'user_id' in metadata:
+                user_id = int(metadata['user_id'])
+                package_type = metadata.get('package_type')
+                tokens = int(metadata.get('tokens', 0))
                 
-                # Fulfill order
-                token_balance = db_session.query(TokenBalance).filter_by(user_id=user_id).first()
-                if not token_balance:
-                    token_balance = TokenBalance(user_id=user_id, balance=0)
-                    db_session.add(token_balance)
-                
-                token_balance.balance += tokens
-                token_balance.last_updated = datetime.utcnow()
-                
-                # Handle Wizard setup via webhook (backup)
-                if package_type == 'wizard':
-                    token_balance.is_wizard = True
-                    token_balance.wizard_start_date = datetime.utcnow()
-                    token_balance.wizard_months_remaining = Config.TOKEN_PACKAGES['wizard']['duration']
-                
-                # Record transaction
-                transaction = Transaction(
-                    user_id=user_id,
-                    type='purchase',
-                    amount=tokens,
-                    description=f"Webhook: Purchased {Config.TOKEN_PACKAGES[package_type]['name']}",
-                    stripe_session_id=session['id'],
-                    stripe_customer_id=session.get('customer'),
-                    package_type=package_type,
-                    timestamp=datetime.utcnow()
-                )
-                db_session.add(transaction)
-                db_session.commit()
+                # Fulfill purchase using centralized helper
+                # session is event['data']['object'] which might be a dict in tests
+                session_id = session.get('id')
+                customer_id = session.get('customer')
+                _fulfill_purchase(user_id, package_type, tokens, session_id, customer_id, db_session)
                 logger.info(f"Webhook: Fulfilled order for user {user_id}")
         
         # Handle subscription renewal (Wizard Refills)

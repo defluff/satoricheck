@@ -44,14 +44,14 @@ class TestLiveProStart:
         db_session_fixture.add(existing)
         db_session_fixture.commit()
         
-        # Mock active_sessions dict
-        with patch('backend.routes.live_pro.active_sessions', {existing.id: {'last_heartbeat': 9999999999}}):
-            with patch('backend.services.deepgram_service.DeepgramService.is_available', return_value=True):
-                response = auth_client.post('/api/live-pro/start', json={'language': 'en'})
+        # No longer blocking: Now auto-closes existing session and starts new one
+        with patch('backend.services.deepgram_service.DeepgramService.is_available', return_value=True):
+            response = auth_client.post('/api/live-pro/start', json={'language': 'en'})
         
-        assert response.status_code == 409
+        assert response.status_code == 200
         data = response.get_json()
-        assert 'already have an active' in data.get('error', '')
+        assert data['success'] is True
+        assert 'session_id' in data
     
     def test_start_success_returns_proxy_url(self, auth_client, test_user, db_session_fixture):
         """Successful start should return backend proxy URL, not Deepgram URL."""
