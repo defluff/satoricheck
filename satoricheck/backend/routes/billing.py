@@ -182,40 +182,20 @@ def create_checkout_session():
 
 @billing_bp.route('/success', methods=['GET'])
 def payment_success():
-    """Handle successful payment."""
-    try:
-        session_id = request.args.get('session_id')
-        
-        if not session_id:
-            logger.warning("Payment success called without session_id")
-            return redirect('/?error=no_session')
-        
-        # Retrieve session from Stripe
-        try:
-            session = stripe.checkout.Session.retrieve(session_id)
-        except stripe.error.StripeError as e:
-            logger.error(f"Failed to retrieve Stripe session {session_id}: {str(e)}", exc_info=True)
-            return redirect('/?error=payment_verification_failed')
-        
-        if session.payment_status not in ['paid', 'no_payment_required'] and session.status != 'complete':
-            logger.warning(f"Payment incomplete for session {session_id}: status={session.status}, payment_status={session.payment_status}")
-            return redirect('/?error=payment_not_complete')
-        
-        # Extract metadata
-        metadata = session.get('metadata', {})
-        user_id = int(metadata.get('user_id', 0))
-        package_type = metadata.get('package_type')
-        tokens = int(metadata.get('tokens', 0))
-        
-        # Fulfill purchase
-        _fulfill_purchase(user_id, package_type, tokens, session_id, session.get('customer'), db_session)
-        
-        return redirect('/?payment=success')
-        
-    except Exception as e:
-        logger.error(f"Unexpected payment success handler error: {str(e)}", exc_info=True)
-        db_session.rollback()
-        return redirect('/?error=payment_processing')
+    """Handle successful payment redirect from Stripe.
+
+    This endpoint is the Stripe success_url callback. It ONLY redirects the
+    user back to the app with a status indicator. Actual token fulfillment
+    is handled exclusively by the webhook (with signature verification).
+    """
+    session_id = request.args.get('session_id')
+
+    if not session_id:
+        logger.warning("Payment success called without session_id")
+        return redirect('/?error=no_session')
+
+    # Just redirect — the webhook handles fulfillment
+    return redirect('/?payment=success')
 
 
 @billing_bp.route('/create-portal', methods=['POST'])
@@ -360,11 +340,10 @@ def wizard_monthly_refill():
     - Auth: Include SCHEDULER_SECRET in header
     """
     try:
-        # Verify scheduler secret (simple auth for cron job)
+        # Verify scheduler secret (dedicated secret for cron jobs)
         scheduler_secret = request.headers.get('X-Scheduler-Secret')
-        expected_secret = Config.SECRET_KEY[:16]  # Use first 16 chars of secret key
         
-        if scheduler_secret != expected_secret:
+        if not scheduler_secret or scheduler_secret != Config.SCHEDULER_SECRET:
             logger.warning("Wizard refill called with invalid secret")
             raise APIError('Unauthorized', status_code=401)
         

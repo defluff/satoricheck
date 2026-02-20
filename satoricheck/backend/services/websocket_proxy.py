@@ -15,11 +15,16 @@ from datetime import datetime
 import os
 import ssl
 import certifi
+from http.cookies import SimpleCookie
 from backend.config import Config
 from backend.database import db_session
+from backend.jwt_utils import verify_token
 from backend.models import LiveProSession
 
 logger = logging.getLogger(__name__)
+
+# JWT cookie name — must match auth.py
+JWT_COOKIE_NAME = 'satoricheck_jwt'
 
 # Create blueprint for WebSocket routes
 ws_bp = Blueprint('ws', __name__)
@@ -30,6 +35,33 @@ def init_websocket_proxy(app) -> None:
     sock.init_app(app)
     logger.info("✓ WebSocket proxy initialized (SDK Mode)")
 
+
+def _authenticate_ws_user(environ: dict) -> int | None:
+    """Extract and verify JWT from WebSocket handshake cookies.
+
+    Returns the user_id if valid, None otherwise.
+    """
+    raw_cookie = environ.get('HTTP_COOKIE', '')
+    if not raw_cookie:
+        return None
+
+    cookie = SimpleCookie()
+    try:
+        cookie.load(raw_cookie)
+    except Exception:
+        return None
+
+    morsel = cookie.get(JWT_COOKIE_NAME)
+    if not morsel:
+        return None
+
+    payload = verify_token(morsel.value)
+    if not payload:
+        return None
+
+    return payload.get('user_id')
+
+
 @sock.route('/api/livepro/ws/<int:session_id>')
 def ws_proxy(ws, session_id: int) -> None:
     """
@@ -37,12 +69,28 @@ def ws_proxy(ws, session_id: int) -> None:
     """
     logger.info(f"WebSocket proxy connection for session {session_id}")
 
+    # 0. Authenticate the WebSocket user via JWT cookie
+    ws_user_id = _authenticate_ws_user(ws.environ)
+    if ws_user_id is None:
+        ws.send(json.dumps({'error': 'Authentication required'}))
+        ws.close()
+        return
+
     # 1. Validate Session from DB
     try:
         # Use a fresh session check
         db_session_obj = db_session.query(LiveProSession).get(session_id)
         if not db_session_obj or db_session_obj.status != 'active':
             ws.send(json.dumps({'error': 'Session not active'}))
+            ws.close()
+            return
+
+        # Verify the authenticated user owns this session
+        if db_session_obj.user_id != ws_user_id:
+            logger.warning(
+                f"WebSocket auth mismatch: JWT user {ws_user_id} tried to access session {session_id} owned by {db_session_obj.user_id}"
+            )
+            ws.send(json.dumps({'error': 'Session not found'}))
             ws.close()
             return
 

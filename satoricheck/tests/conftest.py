@@ -17,6 +17,7 @@ os.environ['FLASK_SECRET_KEY'] = 'test-secret-key-for-testing-only'
 os.environ['GEMINI_API_KEY'] = 'test-gemini-key'
 os.environ['STRIPE_SECRET_KEY'] = 'sk_test_fake'
 os.environ['STRIPE_WEBHOOK_SECRET'] = 'whsec_test_fake'
+os.environ['SCHEDULER_SECRET'] = 'test-scheduler-secret-for-tests'
 
 
 @pytest.fixture(scope='function')

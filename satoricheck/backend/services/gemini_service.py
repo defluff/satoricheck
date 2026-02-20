@@ -1,14 +1,23 @@
 """
 Google Gemini API integration service.
 """
+import ipaddress
 import json
 import logging
 import re
+import socket
 import requests
 from enum import Enum
+from urllib.parse import urlparse
 from backend.config import Config
 
 logger = logging.getLogger(__name__)
+
+# Cloud metadata IPs that must always be blocked (AWS, GCP, Azure)
+_BLOCKED_METADATA_IPS = frozenset({
+    '169.254.169.254',  # AWS / GCP instance metadata
+    'fd00:ec2::254',    # AWS IMDSv2 IPv6
+})
 
 
 # =============================================================================
@@ -53,14 +62,45 @@ class GeminiService:
         """Get API URL for a specific model."""
         return f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
     
+    @staticmethod
+    def _is_private_ip(ip_str: str) -> bool:
+        """Return True if the IP is private, loopback, link-local, or a cloud metadata address."""
+        if ip_str in _BLOCKED_METADATA_IPS:
+            return True
+        try:
+            addr = ipaddress.ip_address(ip_str)
+            return addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved
+        except ValueError:
+            # Malformed IP — block to be safe
+            return True
+
     def _validate_url(self, url):
-        """Check if a URL is reachable (returns 200). Quick HEAD request with timeout."""
+        """Check if a URL is reachable AND points to a public IP. Prevents SSRF."""
         if not url or not isinstance(url, str):
             return False
         if not url.startswith('http://') and not url.startswith('https://'):
             return False
+
+        # Extract hostname and resolve to IP before making any request
         try:
-            # Use HEAD request for speed (no body download)
+            parsed = urlparse(url)
+            hostname = parsed.hostname
+            port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+            if not hostname:
+                return False
+
+            # Resolve hostname to IP(s) — blocks DNS rebinding by checking before request
+            addr_infos = socket.getaddrinfo(hostname, port, proto=socket.IPPROTO_TCP)
+            for family, _type, _proto, _canonname, sockaddr in addr_infos:
+                ip = sockaddr[0]
+                if self._is_private_ip(ip):
+                    logger.warning(f"SSRF blocked: {url} resolved to private IP {ip}")
+                    return False
+        except (socket.gaierror, OSError):
+            # DNS resolution failed — URL is unreachable
+            return False
+
+        try:
             response = requests.head(url, timeout=3, allow_redirects=True, headers={
                 'User-Agent': 'Mozilla/5.0 (compatible; SatoriCheck/1.0)'
             })
@@ -817,6 +857,26 @@ Respond ONLY with valid JSON, no additional text."""
                 import time
                 time.sleep(1)
         
+        # Closing call: if the last turn executed tools, the model still needs
+        # one more API call to produce its final text answer from the tool results.
+        if conversation and conversation[-1].get("role") == "function":
+            try:
+                logger.info("Agentic closing turn (producing final answer from tool results)...")
+                payload["contents"] = conversation
+                response = requests.post(
+                    url,
+                    json=payload,
+                    headers={'Content-Type': 'application/json'},
+                    timeout=120
+                )
+                response.raise_for_status()
+                data = response.json()
+                
+                if 'candidates' in data and data['candidates']:
+                    return self._parse_thinking_batch_response(data, len(claims_to_verify))
+            except Exception as e:
+                logger.error(f"Agentic closing turn failed: {e}")
+        
         # Fallback: return error for all claims in this sub-batch
         logger.error("Agentic sub-batch failed after all turns")
         return [{
@@ -912,17 +972,25 @@ CRITICAL: Every claim MUST have at least 1 source URL. No exceptions."""
             result_data = json.loads(json_text)
             results = result_data.get('results', [])
             
-            # Normalize results
+            # Normalize results — match by claim_index, fallback to position
             normalized = []
+            used_indices = set()
             for i in range(expected_count):
-                # Find result for this claim index
+                # Try exact claim_index match first
                 claim_result = None
                 for r in results:
                     if r.get('claim_index') == i + 1:
                         claim_result = r
                         break
                 
+                # Fallback: use positional matching if index-based failed
+                if not claim_result and i < len(results):
+                    claim_result = results[i]
+                    if claim_result.get('claim_index') in used_indices:
+                        claim_result = None  # Already consumed
+                
                 if claim_result:
+                    used_indices.add(claim_result.get('claim_index'))
                     result = {
                         "is_claim": True,
                         "verdict": claim_result.get('verdict', 'UNVERIFIABLE'),
@@ -935,6 +1003,10 @@ CRITICAL: Every claim MUST have at least 1 source URL. No exceptions."""
                     normalized.append(result)
                 else:
                     # Missing result for this index
+                    logger.warning(
+                        f"No result for claim {i+1}/{expected_count}. "
+                        f"Model returned indices: {[r.get('claim_index') for r in results]}"
+                    )
                     normalized.append({
                         "is_claim": True,
                         "verdict": "COULD_NOT_VERIFY",

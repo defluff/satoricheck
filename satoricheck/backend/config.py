@@ -3,6 +3,7 @@ Configuration management for SatoriCheck.
 Loads environment variables and provides app configuration.
 """
 import os
+import secrets
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -32,6 +33,9 @@ class Config:
     TEST_MODE = os.getenv('TEST_MODE', 'false').lower() == 'true'
     MAINTENANCE_MODE = os.getenv('MAINTENANCE_MODE', 'false').lower() == 'true'
     DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///satoricheck.db')
+    
+    # Scheduler auth (Cloud Scheduler cron jobs)
+    SCHEDULER_SECRET = os.getenv('SCHEDULER_SECRET', secrets.token_hex(32))
     
     # Server
     PORT = int(os.getenv('PORT', 8000))
@@ -106,6 +110,13 @@ class Config:
     @classmethod
     def validate(cls):
         """Validate required configuration."""
+        # Safety: TEST_MODE must never be active in production
+        if cls.TEST_MODE and cls.ENV == 'production':
+            raise ValueError(
+                'TEST_MODE cannot be enabled in production. '
+                'Set TEST_MODE=false or change FLASK_ENV.'
+            )
+        
         required = []
         
         if not cls.SECRET_KEY:

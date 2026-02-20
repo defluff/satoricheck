@@ -257,8 +257,7 @@ def analyze_batch_claims():
             cached = db_session.query(FactCheck).filter(
                 and_(
                     FactCheck.claim_text == clean_text,
-                    # Optional: Filter by recency? e.g. last 7 days. 
-                    # For now, let's assume facts don't change that fast or user wants same result.
+                    FactCheck.user_id == user.id,
                 )
             ).order_by(FactCheck.timestamp.desc()).first()
             

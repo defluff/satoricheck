@@ -223,8 +223,7 @@ def health_check():
     """Health check endpoint."""
     return jsonify({
         'status': 'healthy',
-        'timestamp': datetime.utcnow().isoformat(),
-        'test_mode': Config.TEST_MODE
+        'timestamp': datetime.utcnow().isoformat()
     })
 
 
