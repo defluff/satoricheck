@@ -279,6 +279,19 @@ class PitchdeckModule {
             competitionList.appendChild(li);
         }
 
+        // Populate VC Metrics
+        const vcMetrics = result.vc_metrics || {};
+        this._renderMetricsContainer('pd-metrics-summary', [
+            { key: 'monthly_revenue_arr', label: 'Revenue / ARR', data: vcMetrics.monthly_revenue_arr },
+            { key: 'burn_multiple', label: 'Burn Multiple', data: vcMetrics.burn_multiple },
+            { key: 'nrr_percent', label: 'NRR', data: vcMetrics.nrr_percent },
+        ]);
+        this._renderMetricsContainer('pd-metrics-market', [
+            { key: 'cac_payback_months', label: 'CAC Payback', data: vcMetrics.cac_payback_months },
+            { key: 'ltv_cac_ratio', label: 'LTV:CAC', data: vcMetrics.ltv_cac_ratio },
+            { key: 'runway_months', label: 'Runway', data: vcMetrics.runway_months },
+        ]);
+
         // Store global context for claim verification
         this.globalDeckContext = {
             company: result.company_name || 'Unknown Company',
@@ -290,6 +303,72 @@ class PitchdeckModule {
 
         // Display extracted claims (no auto-verification)
         this.displayClaims(result);
+    }
+
+    /**
+     * Render a list of metric items into a container element.
+     * @param {string} containerId - DOM id of the metrics container
+     * @param {Array<{key: string, label: string, data: Object|null}>} metrics
+     */
+    _renderMetricsContainer(containerId, metrics) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        // Keep the header, clear dynamically added items
+        const header = container.querySelector('.pd-metrics-header');
+        container.innerHTML = '';
+        if (header) container.appendChild(header);
+
+        metrics.forEach(({ label, data }) => {
+            container.appendChild(this._renderMetricItem(label, data));
+        });
+    }
+
+    /**
+     * Create a single metric item DOM element.
+     * @param {string} label - Human-readable metric name
+     * @param {Object|null} data - { value, assessment, detail } or null
+     * @returns {HTMLElement}
+     */
+    _renderMetricItem(label, data) {
+        const el = document.createElement('div');
+        el.className = 'pd-metric-item';
+
+        if (!data) {
+            el.innerHTML = `
+                <span class="pd-metric-label">${label}</span>
+                <span class="pd-metric-value pd-metric-value--muted">—</span>
+                <span class="pd-metric-badge pd-metric-badge--not-disclosed">Not Disclosed</span>
+            `;
+            return el;
+        }
+
+        const badgeClass = this._getMetricBadgeClass(data.assessment);
+
+        el.innerHTML = `
+            <span class="pd-metric-label">${label}</span>
+            <span class="pd-metric-value">${data.value || '—'}</span>
+            <span class="pd-metric-badge ${badgeClass}">${data.assessment || 'Not Disclosed'}</span>
+            ${data.detail ? `<span class="pd-metric-detail">${data.detail}</span>` : ''}
+        `;
+        return el;
+    }
+
+    /**
+     * Map assessment string to a CSS modifier class.
+     * @param {string} assessment
+     * @returns {string}
+     */
+    _getMetricBadgeClass(assessment) {
+        const map = {
+            'Elite': 'pd-metric-badge--elite',
+            'Good': 'pd-metric-badge--good',
+            'Caution': 'pd-metric-badge--caution',
+            'Red Flag': 'pd-metric-badge--red-flag',
+            'Not Disclosed': 'pd-metric-badge--not-disclosed',
+            'Pre-Revenue': 'pd-metric-badge--pre-revenue',
+        };
+        return map[assessment] || 'pd-metric-badge--not-disclosed';
     }
 
     /**

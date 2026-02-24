@@ -214,8 +214,54 @@ REQUIRED OUTPUT (JSON format):
             "is_quantitative": true,
             "context": "Brief context about where this claim appears (e.g., 'Market slide', 'Financial projections')"
         }
-    ]
+    ],
+    "vc_metrics": {
+        "monthly_revenue_arr": { "value": "€85K MRR", "assessment": "Good",       "detail": "..." },
+        "burn_multiple":      { "value": "1.2x",     "assessment": "Good",       "detail": "..." },
+        "nrr_percent":        { "value": "115%",     "assessment": "Elite",      "detail": "..." },
+        "cac_payback_months": { "value": "8",        "assessment": "Good",       "detail": "..." },
+        "ltv_cac_ratio":      { "value": "4:1",      "assessment": "Good",       "detail": "..." },
+        "runway_months":      { "value": "18",       "assessment": "Good",       "detail": "..." }
+    }
 }
+
+VC METRICS RULES:
+- This tool analyses STARTUP pitch decks (startups seeking investment from angels, VCs, or grant bodies).
+- Extract ONLY from figures explicitly stated in the deck. Do NOT infer or fabricate.
+- "assessment" must be exactly one of: "Elite", "Good", "Caution", "Red Flag", "Not Disclosed", "Pre-Revenue".
+- "value" is the raw figure verbatim from the deck (e.g. "€85K MRR", "£1.2M ARR", "1.2x", "18"). ALWAYS use the currency symbol and amount exactly as stated — do NOT convert to USD. If the metric cannot be extracted and the startup is NOT pre-revenue, set to null.
+- "detail" is ONE sentence (max 200 characters) from an investor's perspective on what this signals.
+
+PRE-REVENUE RULE — apply when the startup has no revenue yet:
+  monthly_revenue_arr → { "value": "Pre-Revenue", "assessment": "Pre-Revenue", "detail": "No revenue yet — investors are evaluating team, market size, and early traction signals." }
+  burn_multiple, nrr_percent, cac_payback_months, ltv_cac_ratio → null (require revenue to calculate).
+  runway_months → still extract if cash balance and monthly burn are both stated.
+
+BENCHMARK TIERS (2026):
+
+  Monthly Revenue / ARR (report MRR or ARR exactly as stated in the deck, including currency symbol):
+    Elite: >1M | Good: 100K–1M | Caution: <100K | Pre-Revenue: no revenue yet.
+    Thresholds apply in whatever currency the deck uses — do NOT convert. Use "Not Disclosed" only if revenue exists but no figure is stated.
+
+  Burn Multiple (Net Burn ÷ Net New ARR):
+    Elite: <1x | Good: 1.0–1.5x | Caution: 1.5–2x | Red Flag: >2x
+    → null if pre-revenue OR if burn rate and ARR growth are not both stated.
+
+  NRR / Net Revenue Retention (%):
+    Elite: >120% | Good: 100–120% | Caution: 80–100% | Red Flag: <80%
+    → null if pre-revenue OR if no churn, retention, or expansion revenue data stated.
+
+  CAC Payback (months to recover CAC from gross margin):
+    Elite: <6 mo | Good: 6–12 mo | Caution: 12–18 mo | Red Flag: >18 mo
+    → null if pre-revenue OR if CAC or payback period not stated.
+
+  LTV:CAC Ratio:
+    Elite: ≥5:1 | Good: 3–5:1 | Caution: 1.5–3:1 | Red Flag: <1.5:1
+    → null if pre-revenue OR if LTV or CAC not stated.
+
+  Cash Runway (months at current burn):
+    Elite: >24 mo | Good: 18–24 mo | Caution: 12–18 mo | Red Flag: <12 mo
+    → null if cash balance or monthly burn not stated.
 
 CLAIM EXTRACTION RULES:
 - Extract ALL quantitative claims (numbers, percentages, dollar amounts, growth rates)
@@ -348,6 +394,10 @@ Respond ONLY with valid JSON, no additional text."""
         sanitized = {}
         
         for key, value in result.items():
+            if key == 'vc_metrics' and isinstance(value, dict):
+                sanitized[key] = self._sanitize_vc_metrics(value)
+                continue
+
             if isinstance(value, str):
                 # Escape HTML to prevent XSS
                 value = html.escape(value)
@@ -379,6 +429,33 @@ Respond ONLY with valid JSON, no additional text."""
             
             sanitized[key] = value
         
+        return sanitized
+
+    def _sanitize_vc_metrics(self, metrics: dict) -> dict:
+        """Sanitize the nested vc_metrics structure."""
+        sanitized = {}
+        valid_assessments = {'Elite', 'Good', 'Caution', 'Red Flag', 'Not Disclosed', 'Pre-Revenue'}
+
+        for metric_name, metric_data in metrics.items():
+            if metric_data is None:
+                sanitized[metric_name] = None
+                continue
+            if not isinstance(metric_data, dict):
+                continue
+
+            sanitized[metric_name] = {
+                'value': html.escape(str(metric_data.get('value', '')))[:100],
+                'assessment': (
+                    metric_data.get('assessment', 'Not Disclosed')
+                    if metric_data.get('assessment') in valid_assessments
+                    else 'Not Disclosed'
+                ),
+                # Hard cap at 200 chars — prompt requests 1 sentence but models can ignore it
+                'detail': html.escape(
+                    str(metric_data.get('detail', ''))
+                )[:200],
+            }
+
         return sanitized
 
     def verify_market_claims(

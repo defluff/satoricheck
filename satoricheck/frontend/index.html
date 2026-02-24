@@ -233,19 +233,25 @@
                             <div class="pd-spinner"></div>
                             <span>Analyzing pitch deck...</span>
                         </div>
-                        <!-- Results (shown after analysis) -->
-                        <div class="pd-results hidden" id="pd-summary-results">
-                            <div class="pd-result-item">
-                                <strong>Company:</strong>
-                                <span id="pd-company-name">—</span>
+                        <!-- Results (two-column layout) -->
+                        <div class="pd-results pd-card-columns hidden" id="pd-summary-results">
+                            <div class="pd-card-col-main">
+                                <div class="pd-result-item">
+                                    <strong>Company:</strong>
+                                    <span id="pd-company-name">—</span>
+                                </div>
+                                <div class="pd-result-item">
+                                    <strong>Summary:</strong>
+                                    <p id="pd-summary-text">—</p>
+                                </div>
+                                <div class="pd-result-item">
+                                    <strong>Unique Selling Point:</strong>
+                                    <p id="pd-usp-text">—</p>
+                                </div>
                             </div>
-                            <div class="pd-result-item">
-                                <strong>Summary:</strong>
-                                <p id="pd-summary-text">—</p>
-                            </div>
-                            <div class="pd-result-item">
-                                <strong>Unique Selling Point:</strong>
-                                <p id="pd-usp-text">—</p>
+                            <div class="pd-card-col-metrics" id="pd-metrics-summary">
+                                <div class="pd-metrics-header">📊 VC Lens</div>
+                                <!-- Populated by JS: monthly_revenue_arr, burn_multiple, nrr_percent -->
                             </div>
                         </div>
                     </div>
@@ -266,21 +272,27 @@
                         <div class="pd-loading hidden" id="pd-market-loading">
                             <div class="pd-spinner"></div>
                         </div>
-                        <!-- Results -->
-                        <div class="pd-results hidden" id="pd-market-results">
-                            <div class="pd-result-item">
-                                <strong>Industry:</strong>
-                                <span id="pd-industry">—</span>
-                                <span class="pd-separator">·</span>
-                                <span id="pd-sector">—</span>
+                        <!-- Results (two-column layout) -->
+                        <div class="pd-results pd-card-columns hidden" id="pd-market-results">
+                            <div class="pd-card-col-main">
+                                <div class="pd-result-item">
+                                    <strong>Industry:</strong>
+                                    <span id="pd-industry">—</span>
+                                    <span class="pd-separator">·</span>
+                                    <span id="pd-sector">—</span>
+                                </div>
+                                <div class="pd-result-item">
+                                    <strong>Market Size:</strong>
+                                    <span id="pd-market-size">—</span>
+                                </div>
+                                <div class="pd-result-item">
+                                    <strong>Competition:</strong>
+                                    <ul id="pd-competition-list"></ul>
+                                </div>
                             </div>
-                            <div class="pd-result-item">
-                                <strong>Market Size:</strong>
-                                <span id="pd-market-size">—</span>
-                            </div>
-                            <div class="pd-result-item">
-                                <strong>Competition:</strong>
-                                <ul id="pd-competition-list"></ul>
+                            <div class="pd-card-col-metrics" id="pd-metrics-market">
+                                <div class="pd-metrics-header">📊 VC Lens</div>
+                                <!-- Populated by JS: cac_payback_months, ltv_cac_ratio, runway_months -->
                             </div>
                         </div>
                     </div>

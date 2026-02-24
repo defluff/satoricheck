@@ -366,6 +366,179 @@ class TestPitchdeckServiceAnalyzePDF:
             assert len(result.get('summary', '')) <= max_field_length
 
     # =========================================================================
+    # VC METRICS TESTS
+    # =========================================================================
+
+    def test_analyze_pdf_extracts_vc_metrics(self, app):
+        """
+        Given: A pitch deck with VC-relevant metrics
+        When: analyze_pitch_deck() is called
+        Then: Returns vc_metrics with all 6 metric fields including monthly_revenue_arr
+        """
+        from backend.services.pitchdeck_service import PitchdeckService
+
+        service = PitchdeckService()
+        pdf_bytes = self._create_minimal_pdf()
+
+        with patch.object(service, '_call_gemini_vision') as mock_gemini:
+            mock_gemini.return_value = {
+                'candidates': [{
+                    'content': {
+                        'parts': [{'text': json.dumps({
+                            'company_name': 'MetricsCorp',
+                            'summary': 'A startup with great metrics.',
+                            'usp': 'Data-driven growth.',
+                            'vc_metrics': {
+                                # Using EUR to verify non-USD currency passes through verbatim
+                                'monthly_revenue_arr': {'value': '€120K MRR', 'assessment': 'Good',  'detail': 'Growing steadily.'},
+                                'burn_multiple':       {'value': '1.2x',      'assessment': 'Good',  'detail': 'Efficient spend.'},
+                                'nrr_percent':         {'value': '120%',      'assessment': 'Elite', 'detail': 'Strong expansion.'},
+                                'cac_payback_months':  {'value': '6',         'assessment': 'Elite', 'detail': 'Fast payback.'},
+                                'ltv_cac_ratio':       {'value': '5:1',       'assessment': 'Elite', 'detail': 'Best in class.'},
+                                'runway_months':       {'value': '22',        'assessment': 'Good',  'detail': 'Comfortable runway.'},
+                            }
+                        })}]
+                    }
+                }]
+            }
+
+            result = service.analyze_pitch_deck(pdf_bytes)
+
+            assert 'vc_metrics' in result
+            metrics = result['vc_metrics']
+            # Value should be preserved verbatim including currency symbol
+            assert metrics['monthly_revenue_arr']['value'] == '€120K MRR'
+            assert metrics['monthly_revenue_arr']['assessment'] == 'Good'
+            assert metrics['burn_multiple']['value'] == '1.2x'
+            assert metrics['nrr_percent']['assessment'] == 'Elite'
+            assert metrics['ltv_cac_ratio']['value'] == '5:1'
+            assert metrics['runway_months']['value'] == '22'
+
+    def test_analyze_pdf_pre_revenue_startup(self, app):
+        """
+        Given: A pre-revenue startup pitch deck
+        When: analyze_pitch_deck() is called
+        Then: monthly_revenue_arr shows 'Pre-Revenue' assessment; unit economics metrics are null
+        """
+        from backend.services.pitchdeck_service import PitchdeckService
+
+        service = PitchdeckService()
+        pdf_bytes = self._create_minimal_pdf()
+
+        with patch.object(service, '_call_gemini_vision') as mock_gemini:
+            mock_gemini.return_value = {
+                'candidates': [{
+                    'content': {
+                        'parts': [{'text': json.dumps({
+                            'company_name': 'SeedCorp',
+                            'summary': 'Pre-revenue startup.',
+                            'usp': 'Novel product.',
+                            'vc_metrics': {
+                                'monthly_revenue_arr': {
+                                    'value': 'Pre-Revenue',
+                                    'assessment': 'Pre-Revenue',
+                                    'detail': 'No revenue yet — investors are evaluating team, market size, and early traction signals.'
+                                },
+                                'burn_multiple':      None,
+                                'nrr_percent':        None,
+                                'cac_payback_months': None,
+                                'ltv_cac_ratio':      None,
+                                'runway_months':      {'value': '14', 'assessment': 'Caution', 'detail': 'Under 18 months — fundraising urgency is real.'},
+                            }
+                        })}]
+                    }
+                }]
+            }
+
+            result = service.analyze_pitch_deck(pdf_bytes)
+
+            metrics = result['vc_metrics']
+            assert metrics['monthly_revenue_arr']['assessment'] == 'Pre-Revenue'
+            assert metrics['monthly_revenue_arr']['value'] == 'Pre-Revenue'
+            assert metrics['burn_multiple'] is None
+            assert metrics['nrr_percent'] is None
+            assert metrics['runway_months']['assessment'] == 'Caution'
+
+    def test_analyze_pdf_handles_missing_vc_metrics(self, app):
+        """
+        Given: Gemini response without vc_metrics field
+        When: analyze_pitch_deck() is called
+        Then: Returns a valid result; vc_metrics is absent
+        """
+        from backend.services.pitchdeck_service import PitchdeckService
+
+        service = PitchdeckService()
+        pdf_bytes = self._create_minimal_pdf()
+
+        with patch.object(service, '_call_gemini_vision') as mock_gemini:
+            mock_gemini.return_value = {
+                'candidates': [{
+                    'content': {
+                        'parts': [{'text': json.dumps({
+                            'company_name': 'NoCorp',
+                            'summary': 'No metrics.',
+                            'usp': 'Nothing special.'
+                        })}]
+                    }
+                }]
+            }
+
+            result = service.analyze_pitch_deck(pdf_bytes)
+
+            assert result is not None
+            assert result['company_name'] == 'NoCorp'
+            assert result.get('vc_metrics') is None or 'vc_metrics' not in result
+
+    def test_analyze_pdf_sanitizes_vc_metrics_detail(self, app):
+        """
+        Given: Gemini returns XSS vectors in vc_metrics detail strings
+        When: analyze_pitch_deck() is called
+        Then: HTML is escaped in detail and invalid assessment falls back to 'Not Disclosed'
+        """
+        from backend.services.pitchdeck_service import PitchdeckService
+
+        service = PitchdeckService()
+        pdf_bytes = self._create_minimal_pdf()
+
+        with patch.object(service, '_call_gemini_vision') as mock_gemini:
+            mock_gemini.return_value = {
+                'candidates': [{
+                    'content': {
+                        'parts': [{'text': json.dumps({
+                            'company_name': 'XSSCorp',
+                            'summary': 'Test.',
+                            'usp': 'Test.',
+                            'vc_metrics': {
+                                'monthly_revenue_arr': {
+                                    # XSS in value + GBP currency: tests both sanitization and passthrough
+                                    'value': '<script>alert(1)</script>£50K MRR',
+                                    'assessment': 'Good',
+                                    'detail': 'Safe detail.'
+                                },
+                                'burn_multiple': {
+                                    'value': '1x',
+                                    'assessment': 'Good',
+                                    'detail': '<script>alert("xss")</script>Watch out'
+                                },
+                                'nrr_percent': {
+                                    'value': '100%',
+                                    'assessment': 'INVALID_VALUE',
+                                    'detail': 'Normal detail.'
+                                }
+                            }
+                        })}]
+                    }
+                }]
+            }
+
+            result = service.analyze_pitch_deck(pdf_bytes)
+
+            metrics = result['vc_metrics']
+            assert '<script>' not in metrics['monthly_revenue_arr']['value']
+            assert '<script>' not in metrics['burn_multiple']['detail']
+            assert metrics['nrr_percent']['assessment'] == 'Not Disclosed'
+
+    # =========================================================================
     # HELPER METHODS
     # =========================================================================
 
