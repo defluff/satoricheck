@@ -81,7 +81,25 @@ def redirect_https():
 
 @app.after_request
 def set_security_headers(response):
-    """Add security headers to all responses."""
+    """Add security headers and handle JWT token refresh."""
+    # --- JWT sliding refresh ---
+    # login_required stores a refreshed token on the request when <1 day remains.
+    # Apply it to the response cookie so the client gets the extended expiry.
+    refreshed_token = getattr(request, '_refresh_token', None)
+    if refreshed_token:
+        from backend.routes.auth import (
+            JWT_COOKIE_HTTPONLY, JWT_COOKIE_NAME,
+            JWT_COOKIE_SAMESITE, JWT_COOKIE_SECURE,
+        )
+        response.set_cookie(
+            JWT_COOKIE_NAME,
+            refreshed_token,
+            httponly=JWT_COOKIE_HTTPONLY,
+            secure=JWT_COOKIE_SECURE,
+            samesite=JWT_COOKIE_SAMESITE,
+            max_age=7 * 24 * 60 * 60,  # 7 days
+        )
+
     # Prevent clickjacking
     response.headers['X-Frame-Options'] = 'DENY'
     

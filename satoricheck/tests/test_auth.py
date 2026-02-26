@@ -84,6 +84,55 @@ class TestLogin:
         assert response.status_code == 401
 
 
+class TestTokenRefresh:
+    """Test JWT sliding window refresh."""
+
+    def test_near_expiry_token_gets_refreshed_cookie(self, client, test_user):
+        """A JWT with <1 day remaining should get a refreshed Set-Cookie."""
+        from backend.jwt_utils import TOKEN_EXPIRY_DAYS
+        from backend.config import Config
+        from datetime import datetime, timedelta
+        import jwt as pyjwt
+
+        # Craft a token that expires in 30 minutes (< 1 day threshold)
+        payload = {
+            'user_id': test_user.id,
+            'email': test_user.email,
+            'iat': datetime.utcnow() - timedelta(days=TOKEN_EXPIRY_DAYS),
+            'exp': datetime.utcnow() + timedelta(minutes=30),
+        }
+        near_expiry_token = pyjwt.encode(payload, Config.SECRET_KEY, algorithm='HS256')
+
+        # Call a protected endpoint with the near-expiry cookie
+        client.set_cookie('satori_token', near_expiry_token, domain='localhost')
+        response = client.get('/api/auth/me')
+
+        assert response.status_code == 200
+
+        # The response should contain a refreshed satori_token cookie
+        cookies = response.headers.getlist('Set-Cookie')
+        assert any('satori_token' in c for c in cookies), (
+            'Expected a refreshed satori_token cookie but none was set'
+        )
+
+    def test_fresh_token_not_refreshed(self, client, test_user):
+        """A JWT with plenty of time left should NOT get a refreshed cookie."""
+        from backend.jwt_utils import create_token
+
+        fresh_token = create_token(test_user.id, test_user.email)
+
+        client.set_cookie('satori_token', fresh_token, domain='localhost')
+        response = client.get('/api/auth/me')
+
+        assert response.status_code == 200
+
+        # No satori_token should be re-set
+        cookies = response.headers.getlist('Set-Cookie')
+        assert not any('satori_token' in c for c in cookies), (
+            'Fresh token should not trigger a refresh'
+        )
+
+
 class TestAuthRequired:
     """Test authentication requirement on protected endpoints."""
     
