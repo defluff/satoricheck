@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 class PitchdeckService:
     """Service for analyzing pitch deck PDFs with Gemini Vision."""
     
-    # Vision-capable model for PDF analysis
-    MODEL_VISION = "gemini-3-pro-preview"
+    # Vision-capable model for PDF analysis — sourced from Config for single-point migration
+    MODEL_VISION = Config.GEMINI_MODEL_PRO
     
     # Maximum PDF size: 25MB
     MAX_FILE_SIZE = 25 * 1024 * 1024

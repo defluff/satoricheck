@@ -37,10 +37,10 @@ class ClaimPriority(str, Enum):
 class GeminiService:
     """Service for interacting with Google Gemini API."""
     
-    # Models
-    MODEL_SMART = "gemini-3-flash-preview"
-    MODEL_FAST = "gemini-3-flash-preview"
-    MODEL_TRIAGE = "gemini-3-flash-preview"  # Fast triage with low token budget
+    # Models — sourced from Config for single-point migration
+    MODEL_SMART = Config.GEMINI_MODEL_FLASH
+    MODEL_FAST = Config.GEMINI_MODEL_FLASH
+    MODEL_TRIAGE = Config.GEMINI_MODEL_FLASH  # Fast triage with low token budget
     
     # Timeouts (seconds)
     TIMEOUT_SMART = 30
@@ -155,15 +155,18 @@ class GeminiService:
         Supports Context Caching if cache_name is provided.
         """
         try:
-            from backend.services.grok_service import get_grok_service
+            from backend.services.grok_service import get_grok_service, should_fire_grok
             grok = get_grok_service()
             tools = [grok.get_tool_definition()]
             
             tool_config = {"function_declarations": tools}
             
-            # Context Caching: If cache_name is provided, backend uses it for context
+            # Detect social triggers to hint the agent
+            social_hint = should_fire_grok(text)
+            if social_hint:
+                logger.info(f"Social trigger detected for: {text[:50]}...")
             
-            prompt = self._build_fact_check_prompt(text, agentic=True)
+            prompt = self._build_fact_check_prompt(text, agentic=True, social_hint=social_hint)
             
             conversation_history = [
                 {"role": "user", "parts": [{"text": prompt}]}
@@ -561,10 +564,35 @@ class GeminiService:
             logger.error(f"Failed to generate with cache: {e}")
             raise
 
-    def _build_fact_check_prompt(self, text, agentic=False):
-        """Build the fact-checking prompt with Meta-Truth awareness."""
+    def _build_fact_check_prompt(self, text, agentic=False, social_hint=False):
+        """Build the fact-checking prompt with Meta-Truth awareness.
+        
+        Args:
+            text: The claim text to analyze.
+            agentic: If True, includes tool usage guidance for the agentic loop.
+            social_hint: If True, adds a recommendation to use search_social.
+        """
+        # Tool guidance block — only included in agentic mode
+        tool_block = ""
+        if agentic:
+            tool_block = """
+
+AVAILABLE TOOLS:
+- search_social(query): Search X/Twitter for real-time social context.
+  USE when: quote claims ("X said", "according to X"), @handles, #hashtags,
+  breaking/viral news, temporal keywords (today, just, now, breaking),
+  or when you cannot verify attribution from your knowledge alone.
+  DO NOT USE for: well-established historical facts, science, geography."""
+            if social_hint:
+                tool_block += """
+
+⚠️ SOCIAL CONTEXT RECOMMENDED: This claim matches social triggers (quote attribution,
+breaking news, or social reference). You SHOULD call search_social to verify attribution
+before rendering your verdict."""
+
         return f"""You are an elite, impartial fact-checker specializing in detecting misinformation and state propaganda.
 Analyze the following text with extreme skepticism.
+{tool_block}
 
 CRITICAL DETECTION - QUOTE CLAIMS:
 If the text contains phrases like "X said", "X claimed", "X stated", "according to X", then this is a QUOTE CLAIM.
@@ -827,6 +855,17 @@ Respond ONLY with valid JSON, no additional text."""
                             query = fn_args.get('query', '')
                             logger.info(f"🔍 Social Search: {query[:50]}...")
                             result = grok.search_social(query)
+                            # If Grok timed out or errored, tell the model to stop retrying
+                            # and proceed to verdict using its own knowledge. Without this,
+                            # the model re-calls search_social on every remaining turn.
+                            if result.get('error'):
+                                logger.info(f"Grok failed ({result['error']}), injecting fallback hint.")
+                                result['found'] = False
+                                result['instruction'] = (
+                                    "The social search tool is unavailable. "
+                                    "Do NOT call search_social again. "
+                                    "Proceed to produce the final JSON verdict using your own knowledge."
+                                )
                         elif fn_name == 'google_search':
                             # Google Search is handled by the model internally
                             # We just acknowledge it
@@ -862,10 +901,15 @@ Respond ONLY with valid JSON, no additional text."""
         if conversation and conversation[-1].get("role") == "function":
             try:
                 logger.info("Agentic closing turn (producing final answer from tool results)...")
-                payload["contents"] = conversation
+                # Force text-only response: disable tools so the model must produce JSON.
+                # Without this, the model may call another tool instead of finishing.
+                closing_payload = {**payload, "contents": conversation}
+                closing_payload["toolConfig"] = {
+                    "functionCallingConfig": {"mode": "NONE"}
+                }
                 response = requests.post(
                     url,
-                    json=payload,
+                    json=closing_payload,
                     headers={'Content-Type': 'application/json'},
                     timeout=120
                 )
@@ -930,7 +974,7 @@ INSTRUCTIONS:
 1. For each claim, pick the most cost-effective strategy that ensures accuracy
 2. ALWAYS provide 1-5 working source URLs for EVERY claim (no exceptions)
 3. If using KNOWLEDGE_CHECK but unsure about sources, switch to SEARCH_VERIFY
-4. Use SOCIAL_VERIFY sparingly (only for claims needing real-time social context)
+4. Use SOCIAL_VERIFY when claims involve quotes, viral content, breaking news, or @handles
 
 OUTPUT FORMAT:
 Return JSON with results in the EXACT same order as input claims:
