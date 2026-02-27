@@ -153,17 +153,12 @@ class APIClient {
     }
 
     // Fact-check endpoints
-    async analyzeText(text, context = null, smartAgent = false) {
+    async analyzeText(text, context = null) {
         const payload = { text };
 
         // Add optional context for improved accuracy
         if (context) {
             payload.context = context;
-        }
-
-        // Add smart agent flag if enabled
-        if (smartAgent) {
-            payload.smart_agent = true;
         }
 
         return this.request('/factcheck/analyze', {

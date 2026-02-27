@@ -31,8 +31,10 @@ class PitchdeckService:
     MAX_FIELD_LENGTH = 5000
     MAX_COMPANY_NAME_LENGTH = 200
     
-    # API timeout for vision analysis (longer than text)
-    TIMEOUT = 60
+    # API timeout for vision analysis.
+    # 90s is generous for a direct extraction call (no thinking mode).
+    # If thinking mode is ever re-enabled here, raise this to 180s.
+    TIMEOUT = 90
     
     def __init__(self):
         """Initialize Pitchdeck service."""
@@ -90,47 +92,46 @@ class PitchdeckService:
         # Call Gemini Vision API with Retries
         prompt = self._build_analysis_prompt()
         
-        max_retries = 3
-        retry_delay = 1
+        # 2 retries max: each attempt can take up to TIMEOUT seconds.
+        # 3 retries × 180s = 9 min of blocking — capped at 2 × 180s = 6 min worst case.
+        max_retries = 2
+        retry_delay = 2
         last_exception = None
         
         for attempt in range(max_retries):
             try:
-                # logger.info(f"[Pitchdeck] Sending analysis request (Attempt {attempt+1})")
+                logger.info(f"[Pitchdeck] Sending analysis request (Attempt {attempt + 1}/{max_retries})")
                 raw_result = self._call_gemini_vision(pdf_bytes, prompt)
-                
-                # If successful, break loop
-                break
+                break  # Success
                 
             except requests.exceptions.Timeout:
-                logger.warning(f"[Pitchdeck] Timeout on attempt {attempt+1}")
+                logger.warning(f"[Pitchdeck] Timeout on attempt {attempt + 1} (>{self.TIMEOUT}s)")
                 last_exception = TimeoutError("Analysis timed out. Please try again.")
                 
             except requests.exceptions.HTTPError as e:
                 status_code = e.response.status_code if e.response else None
-                logger.warning(f"[Pitchdeck] HTTP {status_code} on attempt {attempt+1}: {e}")
+                logger.warning(f"[Pitchdeck] HTTP {status_code} on attempt {attempt + 1}: {e}")
                 
                 if status_code == 429:
                     last_exception = Exception("Rate limit reached. Please try again later.")
                 elif status_code and 500 <= status_code < 600:
                     last_exception = Exception("Service temporarily unavailable. Please try again.")
                 else:
-                    # 4xx errors (client side) shouldn't be retried usually, unless transient
                     last_exception = Exception(f"API error: {status_code}")
-                    if 400 <= status_code < 500:
-                         raise last_exception # Don't retry client errors
+                    if status_code and 400 <= status_code < 500:
+                        raise last_exception  # Don't retry client errors
             
             except Exception as e:
-                logger.warning(f"[Pitchdeck] Error on attempt {attempt+1}: {e}")
+                logger.warning(f"[Pitchdeck] Error on attempt {attempt + 1}: {e}")
                 last_exception = e
                 
-            # If we are here, we failed. Wait and retry if not last attempt
+            # Wait before retry (not after last attempt)
             if attempt < max_retries - 1:
                 import time
                 time.sleep(retry_delay)
-                retry_delay *= 2
+                retry_delay = min(retry_delay * 2, 10)  # Cap backoff at 10s
         else:
-            # Loop finished without break = all attempts failed
+            # for/else: loop finished without break — all attempts failed
             raise last_exception or Exception("Analysis failed after retries")
         
         # =================================================================
@@ -293,7 +294,9 @@ Respond ONLY with valid JSON, no additional text."""
         # Encode PDF as base64 for inline data
         pdf_base64 = base64.standard_b64encode(pdf_bytes).decode('utf-8')
         
-        # Build multimodal request with PDF
+        # Build multimodal request with PDF.
+        # No thinkingConfig: pitchdeck analysis is structured extraction (read → emit JSON),
+        # not a reasoning task. Thinking mode adds 60-90s latency with no accuracy benefit here.
         payload = {
             "contents": [{
                 "parts": [
@@ -307,12 +310,7 @@ Respond ONLY with valid JSON, no additional text."""
                         "text": prompt
                     }
                 ]
-            }],
-            "generationConfig": {
-                "thinkingConfig": {
-                    "includeThoughts": True
-                }
-            }
+            }]
         }
         
         url = self._get_api_url(self.MODEL_VISION)

@@ -55,9 +55,8 @@ def analyze_claim():
         current_unbilled = token_balance.unbilled_words or 0
         total_unbilled = current_unbilled + word_count
         
-        # Get optional context and smart_agent flag
+        # Get optional context
         context = data.get('context')
-        smart_agent = data.get('smart_agent', False)
         
         # Calculate effective text for analysis
         analysis_text = text
@@ -71,20 +70,6 @@ def analyze_claim():
         # Calculate base tokens (Word Accumulation Model)
         token_cost = (total_unbilled // Config.WORDS_PER_CP) * Config.TOKENS_PER_CP_UNIT
         remainder_words = total_unbilled % Config.WORDS_PER_CP
-        
-        # Smart Agent: Apply multiplier BEFORE deduction
-        if smart_agent:
-            token_cost *= 2
-            logger.info(f"Smart Agent enabled - 2x cost applied: {token_cost} CP")
-            
-            try:
-                # Pre-analysis to identify distinct claims
-                claims_result = gemini_service.identify_claims(text)
-                if claims_result and len(claims_result) > 1:
-                    logger.info(f"Smart Agent identified {len(claims_result)} distinct claims")
-                    analysis_text = f"[Pre-analysis: {len(claims_result)} claims identified]\n\n{analysis_text}"
-            except Exception as e:
-                logger.warning(f"Smart Agent pre-analysis failed, continuing with enhanced analysis: {e}")
         
         # Check balance (Checks FINAL calculated cost)
         if token_balance.balance < token_cost:
@@ -103,10 +88,9 @@ def analyze_claim():
         # Record start time
         start_time = time.time()
         
-        # Analyze with Gemini (Agentic or Standard)
+        # Always use the agentic path (smart agent is now the default, not a flag)
         try:
-            # Pass smart_agent flag to enable Agentic Loop if requested
-            result = gemini_service.analyze_claim(analysis_text, smart_agent=smart_agent)
+            result = gemini_service.analyze_claim(analysis_text, smart_agent=True)
             
             # If agentic mode was used, 'social' might be in the result already
             # or integrated into the explanation. Check if we need to structure it.
@@ -300,8 +284,7 @@ def analyze_batch_claims():
             token_cost = (total_unbilled // Config.WORDS_PER_CP) * Config.TOKENS_PER_CP_UNIT
             remainder_words = total_unbilled % Config.WORDS_PER_CP
             
-            # Smart Agent multiplier (Batch is implicitly smart agent verified)
-            token_cost *= 2 
+            # Batch analysis is now the standard path — no cost multiplier
             token_cost = max(1, token_cost) if token_cost > 0 else 0
             
             if token_balance.balance < token_cost:

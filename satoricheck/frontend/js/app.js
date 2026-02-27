@@ -112,7 +112,6 @@ class App {
 
         // Analysis Mode Toggle (Fact Check vs AI Detect)
         const analysisModeToggle = document.getElementById('analysis-mode-toggle');
-        const smartAgentToggle = document.getElementById('smart-agent-toggle');
 
         if (analysisModeToggle) {
             const modeButtons = analysisModeToggle.querySelectorAll('.analysis-mode-btn');
@@ -122,12 +121,6 @@ class App {
                 btn.classList.toggle('active', btn.dataset.mode === this.analysisMode);
             });
 
-            // Disable Smart Agent if in AI detect mode
-            if (smartAgentToggle && this.analysisMode === 'aidetect') {
-                smartAgentToggle.disabled = true;
-                smartAgentToggle.parentElement.style.opacity = '0.5';
-            }
-
             modeButtons.forEach(btn => {
                 btn.addEventListener('click', () => {
                     this.analysisMode = btn.dataset.mode;
@@ -136,19 +129,6 @@ class App {
                     // Update UI
                     modeButtons.forEach(b => b.classList.remove('active'));
                     btn.classList.add('active');
-
-                    // Enable/disable Smart Agent based on mode
-                    if (smartAgentToggle) {
-                        if (this.analysisMode === 'aidetect') {
-                            smartAgentToggle.disabled = true;
-                            smartAgentToggle.checked = false;
-                            smartAgentToggle.parentElement.style.opacity = '0.5';
-                            factcheck.smartAgent = false;
-                        } else {
-                            smartAgentToggle.disabled = false;
-                            smartAgentToggle.parentElement.style.opacity = '1';
-                        }
-                    }
 
                     ui.showToast(
                         this.analysisMode === 'aidetect' ? '🤖 AI Detection Mode' : '✓ Fact Check Mode',

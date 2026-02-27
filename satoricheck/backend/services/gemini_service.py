@@ -985,6 +985,12 @@ Return JSON with results in the EXACT same order as input claims:
       "strategy_used": "SEARCH_VERIFY",
       "verdict": "TRUE|FALSE|MISLEADING|COULD_NOT_VERIFY|FUTURE_PROJECTION",
       "explanation": "Brief explanation (max 3 sentences)",
+      "fallacy": null or "fallacy name (e.g. Hyperbole, Straw Man, False Dichotomy)",
+      "is_quote_claim": true or false,
+      "quote_attribution": "Person name or null",
+      "quote_verified": true or false or null,
+      "quote_source": "Where/when they said it or null",
+      "meta_truth_verdict": "TRUE|FALSE|MISLEADING|COULD_NOT_VERIFY or null",
       "sources": ["https://authoritative-source.com/article"],
       "social_context": "Optional: only include if SOCIAL_VERIFY was used"
     }}
@@ -1039,7 +1045,14 @@ CRITICAL: Every claim MUST have at least 1 source URL. No exceptions."""
                         "is_claim": True,
                         "verdict": claim_result.get('verdict', 'UNVERIFIABLE'),
                         "explanation": claim_result.get('explanation', ''),
-                        "sources": claim_result.get('sources', [])[:5]
+                        "sources": claim_result.get('sources', [])[:5],
+                        # Quote / meta-truth fields — pass through if present
+                        "fallacy": claim_result.get('fallacy'),
+                        "is_quote_claim": claim_result.get('is_quote_claim', False),
+                        "quote_attribution": claim_result.get('quote_attribution'),
+                        "quote_verified": claim_result.get('quote_verified'),
+                        "quote_source": claim_result.get('quote_source'),
+                        "meta_truth_verdict": claim_result.get('meta_truth_verdict'),
                     }
                     # Add social context if present (from search_social tool)
                     if claim_result.get('social_context'):

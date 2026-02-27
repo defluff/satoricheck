@@ -160,8 +160,8 @@ class PitchdeckModule {
             this.elements.generateBtn.textContent = 'Analyzing...';
             this.elements.generateBtn.classList.add('analyzing');
 
-            // Show toast notification so user knows analysis started
-            ui.showToast('🔍 Generating overview... This may take up to 60 seconds.', 'info');
+            // Show toast — Pro + thinking mode on a PDF can take 60-120s on larger decks
+            ui.showToast('🔍 Generating overview... Large decks may take up to 2 minutes.', 'info');
 
             // Hide skeletons, show loading spinners
             summarySkeleton?.classList.add('hidden');
@@ -176,13 +176,28 @@ class PitchdeckModule {
             const base64Data = this.arrayBufferToBase64(this.uploadedFileData);
 
             // === CALL API ===
-            const response = await fetch('/api/pitchdeck/analyze', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ pdf_data: base64Data })
-            });
+            // Use AbortController for a 2-minute client-side timeout.
+            // The backend itself allows up to 180s per attempt — without this the
+            // browser can drop the connection before the server finishes.
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 120_000); // 2 min (90s backend + margin)
+
+            let response;
+            try {
+                response = await fetch('/api/pitchdeck/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pdf_data: base64Data }),
+                    signal: controller.signal
+                });
+            } catch (fetchError) {
+                if (fetchError.name === 'AbortError') {
+                    throw new Error('Analysis timed out. Your deck may be too large — try a smaller PDF.');
+                }
+                throw fetchError;
+            } finally {
+                clearTimeout(timeoutId);
+            }
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));

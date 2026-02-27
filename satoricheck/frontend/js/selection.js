@@ -76,14 +76,10 @@ class SelectionHandler {
             const appMode = localStorage.getItem('analysisMode') || 'factcheck';
 
             if (appMode === 'aidetect') {
-                // AI Detection mode - use handleAICheck with selected text
                 factcheck.handleAICheckWithText(this.selectedText);
-            } else if (factcheck.smartAgent) {
-                // Fact Check mode with Smart Agent
-                factcheck.handleSmartAgentCheck(this.selectedText);
             } else {
-                // Standard Fact Check mode
-                factcheck.checkText(this.selectedText);
+                // Always use Smart Agent for selection verification
+                factcheck.handleSmartAgentCheck(this.selectedText);
             }
 
             ui.hideSelectionTooltip();

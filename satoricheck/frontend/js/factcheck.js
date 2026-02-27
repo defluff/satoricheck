@@ -10,8 +10,6 @@ import auth from './auth.js';
 class FactCheckManager {
     constructor() {
         this.autoCheck = false;
-        this.smartAgent = false;
-        this.smartAgentNotified = false; // Track if user was notified this session
         this.pendingChecks = new Set();
         this.checkedTexts = new Set(); // Track checked text blocks
         this.isAutoChecking = false;
@@ -32,18 +30,6 @@ class FactCheckManager {
                 this.autoCheck ? 'success' : 'info'
             );
         });
-
-        // Smart Agent toggle - simple on/off with tooltip for explanation
-        const smartAgentToggle = document.getElementById('smart-agent-toggle');
-        if (smartAgentToggle) {
-            smartAgentToggle.addEventListener('change', (e) => {
-                this.smartAgent = e.target.checked;
-                ui.showToast(
-                    this.smartAgent ? 'Smart Agent enabled ✓' : 'Smart Agent disabled',
-                    this.smartAgent ? 'success' : 'info'
-                );
-            });
-        }
 
         // Manual check button (serves as Check or Stop)
         ui.elements.checkNowBtn.addEventListener('click', () => {
@@ -96,12 +82,12 @@ class FactCheckManager {
 
         try {
             // Call API directly - Retries now handled in api.js based on 503/429 errors
-            const response = await api.analyzeText(trimmedText, context, this.smartAgent);
+            const response = await api.analyzeText(trimmedText, context);
 
-            // Update card with results (include Smart Agent flag for share button visibility)
+            // Update card with results
             ui.updateCard(cardId, {
                 ...response.result,
-                isSmartAgentMode: this.smartAgent
+                isSmartAgentMode: true
             });
             this.checkedTexts.add(trimmedText);
 
@@ -165,124 +151,10 @@ class FactCheckManager {
             return;
         }
 
-        // If Smart Agent is enabled, use the backend to identify claims first
-        if (this.smartAgent) {
-            this.handleSmartAgentCheck(text);
-            return;
-        }
-
-        // STANDARD MODE: Find unchecked sentences and batch them
-        const sentences = text.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
-
-        const uncheckedSentences = [];
-        for (const sentence of sentences) {
-            const trimmed = sentence.trim();
-            if (trimmed.length >= 10 && !this.checkedTexts.has(trimmed)) {
-                uncheckedSentences.push(trimmed);
-            }
-        }
-
-        if (uncheckedSentences.length === 0) {
-            ui.showToast('All text already checked', 'info');
-            return;
-        }
-
-        // Batch into chunks of max 10 sentences each
-        const MAX_SENTENCES_PER_BATCH = 10;
-        const batches = [];
-
-        for (let i = 0; i < uncheckedSentences.length; i += MAX_SENTENCES_PER_BATCH) {
-            const batch = uncheckedSentences.slice(i, i + MAX_SENTENCES_PER_BATCH);
-            batches.push(batch);
-        }
-
-        // Show info about what's being checked
-        const batchInfo = batches.length > 1
-            ? `Checking ${uncheckedSentences.length} sentences in ${batches.length} batches`
-            : `Checking ${uncheckedSentences.length} new sentence(s)`;
-        ui.showToast(batchInfo, 'info');
-
-        // Process batches sequentially
-        this.processBatches(batches);
+        // Always use the Smart Agent pipeline: identify claims, then batch-verify
+        this.handleSmartAgentCheck(text);
     }
 
-    async processBatches(batches) {
-        this.isProcessing = true;
-        this.abortRequested = false;
-        ui.setCheckButtonMode('stop');
-
-        try {
-            for (let i = 0; i < batches.length; i++) {
-                // Check if stop requested
-                if (this.abortRequested) {
-                    ui.showToast('⏹️ Stopped. Tokens used for completed checks are non-refundable.', 'warning');
-                    break;
-                }
-
-                const batch = batches[i];
-                const batchedText = batch.join(' ');
-
-                try {
-                    await this.checkText(batchedText, null);
-
-                    // Mark sentences as checked after successful check
-                    batch.forEach(s => this.checkedTexts.add(s));
-
-                } catch (error) {
-                    ui.showToast(`Batch ${i + 1} failed: ${error.message}`, 'error');
-                    // Stop processing remaining batches if one fails (e.g., insufficient CP)
-                    break;
-                }
-            }
-        } finally {
-            this.isProcessing = false;
-            ui.setCheckButtonMode('check');
-        }
-    }
-
-    /**
-     * Process items with concurrency limit
-     * @param {Array} items - Items to process
-     * @param {number} concurrency - Max concurrent requests
-     * @param {Function} taskFn - Async function to run for each item
-     */
-    async processWithConcurrency(items, concurrency, taskFn) {
-        const queue = [...items];
-        const workers = [];
-
-        // Create worker function
-        const worker = async () => {
-            while (queue.length > 0) {
-                // Check stop flag
-                if (this.abortRequested) {
-                    break;
-                }
-
-                // Get next item
-                const item = queue.shift();
-
-                try {
-                    await taskFn(item);
-                } catch (error) {
-                    console.error('Task failed:', error);
-                    // Continue to next item even if one fails
-                }
-            }
-        };
-
-        // Start workers
-        const limit = Math.min(concurrency, items.length);
-        for (let i = 0; i < limit; i++) {
-            workers.push(worker());
-        }
-
-        // Wait for all to finish
-        await Promise.all(workers);
-
-        if (this.abortRequested) {
-            ui.showToast('⏹️ Stopped. Tokens used for completed checks are non-refundable.', 'warning');
-        }
-    }
 
 
     async handleSmartAgentCheck(text) {
@@ -494,9 +366,6 @@ class FactCheckManager {
     }
 
     handleAutoCheckFromTyping() {
-        // OPTION 2: Context Window
-        // When auto-checking from typing, use sentence-based with context
-
         const transcriptEl = ui.elements.transcriptContainer;
         const placeholder = transcriptEl.querySelector('.transcript-placeholder');
         let text = transcriptEl.textContent || transcriptEl.innerText || '';
@@ -508,12 +377,9 @@ class FactCheckManager {
         text = text.trim();
         if (!text) return;
 
-        // Check analysis mode
+        // AI detection mode: check full text (minimum 20 words required)
         const appMode = localStorage.getItem('analysisMode') || 'factcheck';
-
-        // If in AI detection mode, just run AI check on the full text
         if (appMode === 'aidetect') {
-            // For AI detection, check the entire text (minimum 20 words required)
             const wordCount = text.split(/\s+/).length;
             if (wordCount >= 20) {
                 this.handleAICheckWithText(text);
@@ -521,41 +387,20 @@ class FactCheckManager {
             return;
         }
 
-        // Standard fact-check mode: extract sentences
+        // Fact-check mode: extract the last sentence typed and run smart agent on it
         const sentences = text.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
-
         if (sentences.length === 0) return;
 
-        // Get the last sentence (most recent)
         const lastSentence = sentences[sentences.length - 1].trim();
+        if (lastSentence.length < 10 || this.checkedTexts.has(lastSentence)) return;
 
-        // Skip if too short or already checked
-        if (lastSentence.length < 10 || this.checkedTexts.has(lastSentence)) {
-            return;
-        }
-
-        // Build context from previous 2 sentences
-        let context = null;
-        if (sentences.length > 1) {
-            const contextSentences = sentences.slice(Math.max(0, sentences.length - 3), sentences.length - 1);
-            context = contextSentences.join(' ');
-        }
-
-        // Check if Smart Agent is enabled
-        if (this.smartAgent) {
-            // Use Smart Agent to identify and check claims for this sentence
-            this.handleSmartAgentCheck(lastSentence);
-        } else {
-            // Standard check with context
-            this.checkText(lastSentence, context);
-        }
+        this.handleSmartAgentCheck(lastSentence);
     }
 
     async handleAutoCheck(chunkText) {
-        // Called from audio input
+        // Called from audio input (both standard browser SpeechRecognition and Live Pro)
         if (!this.autoCheck) return;
 
-        // For audio, use the same context window approach
         const transcriptEl = ui.elements.transcriptContainer;
         const placeholder = transcriptEl.querySelector('.transcript-placeholder');
         let fullText = transcriptEl.textContent || transcriptEl.innerText || '';
@@ -564,10 +409,8 @@ class FactCheckManager {
             fullText = fullText.replace(placeholder.textContent, '').trim();
         }
 
-        // Check analysis mode
+        // AI detection mode: check full text
         const appMode = localStorage.getItem('analysisMode') || 'factcheck';
-
-        // If in AI detection mode, check the entire text
         if (appMode === 'aidetect') {
             const wordCount = fullText.split(/\s+/).length;
             if (wordCount >= 20) {
@@ -576,34 +419,14 @@ class FactCheckManager {
             return;
         }
 
-        // Standard fact-check mode: get sentences for context
+        // Fact-check mode: run smart agent on the last sentence
         const sentences = fullText.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
-
         if (sentences.length === 0) return;
 
-        // Get last sentence
         const lastSentence = sentences[sentences.length - 1].trim();
+        if (lastSentence.length < 10 || this.checkedTexts.has(lastSentence)) return;
 
-        if (lastSentence.length < 10 || this.checkedTexts.has(lastSentence)) {
-            return;
-        }
-
-        // Build context
-        let context = null;
-        if (sentences.length > 1) {
-            const contextSentences = sentences.slice(Math.max(0, sentences.length - 3), sentences.length - 1);
-            context = contextSentences.join(' ');
-        }
-
-        // Check if Smart Agent is enabled
-        if (this.smartAgent) {
-            // Use Smart Agent to identify and check claims for this sentence
-            // Note: handleSmartAgentCheck handles its own "checkedTexts" logic
-            this.handleSmartAgentCheck(lastSentence);
-        } else {
-            // Standard check with context
-            this.checkText(lastSentence, context);
-        }
+        this.handleSmartAgentCheck(lastSentence);
     }
 
     /**
