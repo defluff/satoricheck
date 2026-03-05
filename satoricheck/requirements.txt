@@ -5,7 +5,7 @@ flask-sock==0.7.0
 deepgram-sdk==3.4.0
 SQLAlchemy==2.0.48
 bcrypt==5.0.0
-stripe==8.11.0
+stripe==14.0.1
 google-generativeai>=0.8.3
 python-dotenv==1.0.0
 psycopg2-binary==2.9.11
