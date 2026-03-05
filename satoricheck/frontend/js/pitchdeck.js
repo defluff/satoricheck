@@ -266,17 +266,16 @@ class PitchdeckModule {
         marketResults?.classList.remove('hidden');
 
         // Populate Summary & USP
-        // Populate Summary & USP
-        // Note: Using innerHTML because backend response is already HTML-escaped
-        // This allows entities like &quot; to render correctly as "
-        document.getElementById('pd-company-name').innerHTML = result.company_name || '—';
-        document.getElementById('pd-summary-text').innerHTML = result.summary || '—';
-        document.getElementById('pd-usp-text').innerHTML = result.usp || '—';
+        // AI-generated content — always sanitize before injecting into the DOM;
+        // Gemini output is never inherently XSS-safe.
+        document.getElementById('pd-company-name').innerHTML = DOMPurify.sanitize(result.company_name || '—');
+        document.getElementById('pd-summary-text').innerHTML = DOMPurify.sanitize(result.summary || '—');
+        document.getElementById('pd-usp-text').innerHTML = DOMPurify.sanitize(result.usp || '—');
 
         // Populate Market & Competition
-        document.getElementById('pd-industry').innerHTML = result.industry || '—';
-        document.getElementById('pd-sector').innerHTML = result.sector || '—';
-        document.getElementById('pd-market-size').innerHTML = result.market_size || 'Not specified';
+        document.getElementById('pd-industry').innerHTML = DOMPurify.sanitize(result.industry || '—');
+        document.getElementById('pd-sector').innerHTML = DOMPurify.sanitize(result.sector || '—');
+        document.getElementById('pd-market-size').innerHTML = DOMPurify.sanitize(result.market_size || 'Not specified');
 
         const competitionList = document.getElementById('pd-competition-list');
         competitionList.innerHTML = '';
@@ -285,7 +284,8 @@ class PitchdeckModule {
         if (competitors.length > 0) {
             competitors.forEach(competitor => {
                 const li = document.createElement('li');
-                li.innerHTML = competitor; // Backend sanitized
+                // textContent is safer than innerHTML here — competitor names are plain text
+                li.textContent = competitor;
                 competitionList.appendChild(li);
             });
         } else {
@@ -350,6 +350,7 @@ class PitchdeckModule {
         el.className = 'pd-metric-item';
 
         if (!data) {
+            // label is a static constant defined in displayResults — safe without sanitize
             el.innerHTML = `
                 <span class="pd-metric-label">${label}</span>
                 <span class="pd-metric-value pd-metric-value--muted">—</span>
@@ -360,12 +361,13 @@ class PitchdeckModule {
 
         const badgeClass = this._getMetricBadgeClass(data.assessment);
 
-        el.innerHTML = `
+        // data.value, data.assessment, data.detail are AI-generated — sanitize before injecting
+        el.innerHTML = DOMPurify.sanitize(`
             <span class="pd-metric-label">${label}</span>
             <span class="pd-metric-value">${data.value || '—'}</span>
             <span class="pd-metric-badge ${badgeClass}">${data.assessment || 'Not Disclosed'}</span>
             ${data.detail ? `<span class="pd-metric-detail">${data.detail}</span>` : ''}
-        `;
+        `);
         return el;
     }
 
@@ -468,7 +470,9 @@ class PitchdeckModule {
                 claimEl.className = 'pd-claim-item';
                 claimEl.id = `pd-claim-${claim.originalIndex}`;
 
-                claimEl.innerHTML = `
+                // claim.claim and claim.source_cited come from AI/PDF extraction — sanitize.
+                // data-claim-index and the result div id use only the integer originalIndex — safe.
+                claimEl.innerHTML = DOMPurify.sanitize(`
                     <div class="pd-claim-header">
                         <div class="pd-claim-text">${claim.claim}</div>
                         <button class="pd-claim-check-btn" data-claim-index="${claim.originalIndex}" title="Fact-check this claim">
@@ -479,7 +483,7 @@ class PitchdeckModule {
                     <div class="pd-claim-result hidden" id="pd-claim-result-${claim.originalIndex}">
                         <!-- Verification result will be inserted here -->
                     </div>
-                `;
+                `);
 
                 itemsEl.appendChild(claimEl);
             });
@@ -650,13 +654,15 @@ class PitchdeckModule {
             sourcesHtml = `<div class="pd-claim-sources">Sources: ${sourceLinks}</div>`;
         }
 
-        resultEl.innerHTML = `
+        // result.verdict, result.explanation, and source data all come from the Gemini API — sanitize.
+        // KEEP_CONTENT: false is the DOMPurify default, so scripts/event-handlers are stripped.
+        resultEl.innerHTML = DOMPurify.sanitize(`
             <div class="pd-claim-verdict">
                 <span class="pd-verdict-badge ${verdictClass}">${verdictIcon} ${result.verdict}</span>
             </div>
             ${result.explanation ? `<div class="pd-claim-explanation">${result.explanation}</div>` : ''}
             ${sourcesHtml}
-        `;
+        `);
         resultEl.classList.remove('hidden');
     }
 
