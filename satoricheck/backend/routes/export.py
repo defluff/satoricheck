@@ -7,7 +7,7 @@ import csv
 import io
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, UTC
 
 from backend.database import db_session
 from backend.models import FactCheck
@@ -85,9 +85,9 @@ def export_fact_checks():
             # Create response
             output.seek(0)
             
-            filename = f"satoricheck_export_{datetime.utcnow().strftime('%Y%m%d')}.csv"
+            filename = f"satoricheck_export_{datetime.now(UTC).strftime('%Y%m%d')}.csv"
             if source_filter:
-                filename = f"satoricheck_{source_filter}_{datetime.utcnow().strftime('%Y%m%d')}.csv"
+                filename = f"satoricheck_{source_filter}_{datetime.now(UTC).strftime('%Y%m%d')}.csv"
                 
             response = make_response(output.getvalue())
             response.headers['Content-Type'] = 'text/csv'

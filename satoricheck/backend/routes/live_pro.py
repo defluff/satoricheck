@@ -5,7 +5,7 @@ Handles Live Pro session management and time-based billing with heartbeat monito
 from flask import Blueprint, request, jsonify
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 
 from backend.database import db_session
 from backend.models import TokenBalance, Transaction, LiveProSession
@@ -63,7 +63,7 @@ def start_session() -> tuple:
         # Check if it's actually stale (no heartbeat in 60s) OR just force close it if it matches current user
         # This prevents "Ghost Session" lockouts after page reload
         existing_session.status = 'abandoned'
-        existing_session.ended_at = datetime.utcnow()
+        existing_session.ended_at = datetime.now(UTC)
         db_session.commit()
         logger.info(f"Auto-closed existing session {existing_session.id} for user {user.email} (Restarted)")
     
@@ -83,9 +83,9 @@ def start_session() -> tuple:
     # Create session in database
     session = LiveProSession(
         user_id=user.id,
-        started_at=datetime.utcnow(),
-        last_heartbeat=datetime.utcnow(),
-        last_billed_at=datetime.utcnow(),
+        started_at=datetime.now(UTC),
+        last_heartbeat=datetime.now(UTC),
+        last_billed_at=datetime.now(UTC),
         status='active',
         language=language,
         device_id=device_id
@@ -153,11 +153,11 @@ def heartbeat() -> tuple:
             raise APIError('Unauthorized', status_code=403)
         
         # Update heartbeat timestamp
-        session.last_heartbeat = datetime.utcnow()
+        session.last_heartbeat = datetime.now(UTC)
         
         # Check if 30 seconds elapsed since last billing
         # Use DB timestamps (UTC)
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         last_billing = session.last_billed_at
         
         elapsed_since_billing = (now - last_billing).total_seconds()
@@ -176,11 +176,11 @@ def heartbeat() -> tuple:
             if token_balance.balance >= cp_to_deduct:
                 # Deduct CP
                 token_balance.balance -= cp_to_deduct
-                token_balance.last_updated = datetime.utcnow()
+                token_balance.last_updated = datetime.now(UTC)
                 
                 # Update session
                 session.cp_consumed += cp_to_deduct
-                session.duration_seconds = int((datetime.utcnow() - session.started_at).total_seconds())
+                session.duration_seconds = int((datetime.now(UTC) - session.started_at).total_seconds())
                 session.last_billed_at = now  # Update billing timer
                 
                 # Record transaction
@@ -189,7 +189,7 @@ def heartbeat() -> tuple:
                     type='deduction',
                     amount=-cp_to_deduct,
                     description=f'Live Pro session {session_id} ({int(elapsed_since_billing)}s)',
-                    timestamp=datetime.utcnow()
+                    timestamp=datetime.now(UTC)
                 )
                 db_session.add(transaction)
                 db_session.commit()
@@ -242,16 +242,16 @@ def end_session() -> tuple:
             raise APIError('Unauthorized', status_code=403)
         
         # Calculate final billing
-        elapsed_seconds = int((datetime.utcnow() - session.started_at).total_seconds())
+        elapsed_seconds = int((datetime.now(UTC) - session.started_at).total_seconds())
         
         # Check if there's time since last billing
         # Check final billing segment
         last_billing_time = session.last_billed_at
-        remaining_seconds = (datetime.utcnow() - last_billing_time).total_seconds()
+        remaining_seconds = (datetime.now(UTC) - last_billing_time).total_seconds()
         
         if remaining_seconds > 0:
             # Grace Period Check (4s)
-            potential_total_duration = (datetime.utcnow() - session.started_at).total_seconds()
+            potential_total_duration = (datetime.now(UTC) - session.started_at).total_seconds()
             
             if potential_total_duration < 4:
                 logger.info(f"Session {session_id} ended within grace period ({potential_total_duration}s). No charge.")
@@ -264,7 +264,7 @@ def end_session() -> tuple:
                 token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
                 if token_balance and token_balance.balance >= cp_to_deduct:
                     token_balance.balance -= cp_to_deduct
-                    token_balance.last_updated = datetime.utcnow()
+                    token_balance.last_updated = datetime.now(UTC)
                     session.cp_consumed += cp_to_deduct
                     
                     # Record final transaction
@@ -273,12 +273,12 @@ def end_session() -> tuple:
                         type='deduction',
                         amount=-cp_to_deduct,
                         description=f'Live Pro session {session_id} (final {int(remaining_seconds)}s)',
-                        timestamp=datetime.utcnow()
+                        timestamp=datetime.now(UTC)
                     )
                     db_session.add(transaction)
         
         # Update session status
-        session.ended_at = datetime.utcnow()
+        session.ended_at = datetime.now(UTC)
         session.duration_seconds = elapsed_seconds
         session.status = 'completed'
         
@@ -314,7 +314,7 @@ def cleanup_abandoned_sessions() -> None:
     MAX_SESSION_DURATION = 7200  # 2 hours in seconds
     
     try:
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         limit_heartbeat = now - timedelta(seconds=60)
         limit_duration = now - timedelta(seconds=MAX_SESSION_DURATION)
         

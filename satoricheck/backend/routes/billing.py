@@ -5,7 +5,7 @@ Handles token purchases and subscription management.
 from flask import Blueprint, request, jsonify, redirect
 import stripe
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 
 from backend.database import db_session
 from backend.models import TokenBalance, Transaction
@@ -41,13 +41,13 @@ def _fulfill_purchase(user_id, package_type, tokens, session_id, customer_id, db
     
     # Add tokens
     token_balance.balance += tokens
-    token_balance.last_updated = datetime.utcnow()
+    token_balance.last_updated = datetime.now(UTC)
     
     # If wizard subscription, set up recurring
     # Note: Wizard refill is handled separately by monthly cron/webhook
     if package_type == 'wizard':
         token_balance.is_wizard = True
-        token_balance.wizard_start_date = datetime.utcnow()
+        token_balance.wizard_start_date = datetime.now(UTC)
         token_balance.wizard_months_remaining = Config.TOKEN_PACKAGES['wizard']['duration']
     
     # Record transaction
@@ -59,7 +59,7 @@ def _fulfill_purchase(user_id, package_type, tokens, session_id, customer_id, db
         stripe_session_id=session_id,
         stripe_customer_id=customer_id,
         package_type=package_type,
-        timestamp=datetime.utcnow()
+        timestamp=datetime.now(UTC)
     )
     db_session.add(transaction)
     
@@ -294,7 +294,7 @@ def stripe_webhook():
                 if token_balance and token_balance.is_wizard:
                     # Set balance to refill amount
                     token_balance.balance = Config.WIZARD_REFILL_AMOUNT
-                    token_balance.last_updated = datetime.utcnow()
+                    token_balance.last_updated = datetime.now(UTC)
                     
                     # Decrement months remaining
                     if token_balance.wizard_months_remaining > 0:
@@ -312,7 +312,7 @@ def stripe_webhook():
                         description='Wizard monthly refill',
                         stripe_customer_id=customer_id,
                         package_type='wizard',
-                        timestamp=datetime.utcnow()
+                        timestamp=datetime.now(UTC)
                     )
                     db_session.add(refill_transaction)
                     
@@ -359,7 +359,7 @@ def wizard_monthly_refill():
         for balance in wizard_balances:
             # Refill CP
             balance.balance = Config.WIZARD_REFILL_AMOUNT
-            balance.last_updated = datetime.utcnow()
+            balance.last_updated = datetime.now(UTC)
             
             # Decrement months remaining
             balance.wizard_months_remaining -= 1
@@ -376,7 +376,7 @@ def wizard_monthly_refill():
                 amount=Config.WIZARD_REFILL_AMOUNT,
                 description='Wizard monthly refill',
                 package_type='wizard',
-                timestamp=datetime.utcnow()
+                timestamp=datetime.now(UTC)
             )
             db_session.add(refill_transaction)
             refilled_count += 1

@@ -1,7 +1,7 @@
 """
 Database models for SatoriCheck.
 """
-from datetime import datetime
+from datetime import datetime, UTC
 from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -17,11 +17,15 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     api_token = Column(String(64), unique=True, index=True)  # Secure API token for Bearer auth
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     last_login = Column(DateTime)
     
     # Live Pro preferences
     hide_live_pro_modal = Column(Boolean, default=False)
+    
+    # Volatile Cache Tracking (Clears on new uploads to prevent bloat)
+    current_media_cache = Column(String(255))
+    current_pitchdeck_cache = Column(String(255))
     
     # Relationships
     token_balance = relationship('TokenBalance', back_populates='user', uselist=False)
@@ -29,6 +33,7 @@ class User(Base):
     transactions = relationship('Transaction', back_populates='user')
     fact_checks = relationship('FactCheck', back_populates='user')
     live_pro_sessions = relationship('LiveProSession', back_populates='user')
+    media_checks = relationship('MediaCheck', back_populates='user')
     
     def __repr__(self):
         return f'<User {self.email}>'
@@ -41,7 +46,7 @@ class TokenBalance(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id'), unique=True, nullable=False)
     balance = Column(Integer, default=0)
-    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_updated = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
     
     # Wizard subscription tracking
     is_wizard = Column(Boolean, default=False)
@@ -90,7 +95,7 @@ class Transaction(Base):
     stripe_customer_id = Column(String(255))
     package_type = Column(String(50))
     
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=lambda: datetime.now(UTC))
     
     user = relationship('User', back_populates='transactions')
     
@@ -123,7 +128,7 @@ class FactCheck(Base):
     source_id = Column(String(100), index=True)  # Links to a session or document ID
     
     # Metadata
-    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    timestamp = Column(DateTime, default=lambda: datetime.now(UTC), index=True)
     processing_time = Column(Float)  # in seconds
     
     user = relationship('User', back_populates='fact_checks')
@@ -145,9 +150,9 @@ class LiveProSession(Base):
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
     
     # Session timing
-    started_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    last_heartbeat = Column(DateTime, nullable=False, default=datetime.utcnow)
-    last_billed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    started_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
+    last_heartbeat = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
+    last_billed_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
     ended_at = Column(DateTime)
     
     # Billing tracking
@@ -179,7 +184,7 @@ class DeletedUser(Base):
     
     id = Column(Integer, primary_key=True)
     email_hash = Column(String(64), unique=True, index=True)  # SHA256 of email
-    deleted_at = Column(DateTime, default=datetime.utcnow)
+    deleted_at = Column(DateTime, default=lambda: datetime.now(UTC))
     
     def __repr__(self):
         return f'<DeletedUser hash={self.email_hash[:10]}...>'
@@ -195,7 +200,7 @@ class ShareStats(Base):
     
     id = Column(Integer, primary_key=True)
     platform = Column(String(20), nullable=False)  # 'X', 'LinkedIn', 'Download'
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), index=True)
     
     def __repr__(self):
         return f'<ShareStats platform={self.platform}>'
@@ -211,7 +216,7 @@ class FeatureVote(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
     feature = Column(String(50), nullable=False)  # e.g., 'video_check'
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
     # Prevent multiple votes for same feature by same user
     __table_args__ = (
@@ -220,4 +225,39 @@ class FeatureVote(Base):
 
     def __repr__(self):
         return f'<FeatureVote user={self.user_id} feature={self.feature}>'
+
+
+class MediaCheck(Base):
+    """Media authenticity check history."""
+    __tablename__ = 'media_checks'
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    
+    # Input
+    url = Column(Text, nullable=False)
+    mime_type = Column(String(100))
+    
+    # Analysis results
+    verdict = Column(String(50))  # 'ai', 'authentic', 'cgi', 'camera_trick', 'inconclusive'
+    confidence = Column(Integer)
+    reasoning = Column(Text)
+    criteria_json = Column(Text)  # JSON storage for detailed criteria
+    
+    # Fingerprinting
+    embedding_json = Column(Text)  # JSON storage for multimodal embedding vector
+    
+    # Metadata
+    timestamp = Column(DateTime, default=lambda: datetime.now(UTC), index=True)
+    processing_time = Column(Float)
+    
+    user = relationship('User', back_populates='media_checks')
+    
+    # Index for fast history lookup
+    __table_args__ = (
+        Index('ix_mediacheck_user_timestamp', 'user_id', 'timestamp'),
+    )
+    
+    def __repr__(self):
+        return f'<MediaCheck id={self.id} verdict={self.verdict}>'
 

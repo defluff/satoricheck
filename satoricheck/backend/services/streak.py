@@ -1,7 +1,7 @@
 """
 Streak calculation and management service.
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from backend.config import Config
 
 
@@ -29,10 +29,10 @@ def update_streak(streak_obj, last_active):
         # First time user
         streak_obj.current_streak = 1
         streak_obj.longest_streak = 1
-        streak_obj.last_active_date = datetime.utcnow()
+        streak_obj.last_active_date = datetime.now(UTC)
         return 1
     
-    today = datetime.utcnow().date()
+    today = datetime.now(UTC).date()
     last_date = last_active.date()
     
     # Check if already logged in today
@@ -49,7 +49,7 @@ def update_streak(streak_obj, last_active):
         # Streak broken, reset to 1
         streak_obj.current_streak = 1
     
-    streak_obj.last_active_date = datetime.utcnow()
+    streak_obj.last_active_date = datetime.now(UTC)
     return streak_obj.current_streak
 
 
@@ -76,7 +76,7 @@ def check_and_grant_streak_reward(user_id, current_streak, db_session):
     reward_amount = STREAK_REWARDS[cycle_day]
     
     # Check if we already gave a bonus today
-    start_of_day = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    start_of_day = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     existing_bonus = db_session.query(Transaction).filter(
         Transaction.user_id == user_id,
         Transaction.type == 'bonus',
@@ -165,7 +165,7 @@ def handle_login_streak(user_id, db_session):
             user_id=user_id,
             current_streak=1,
             longest_streak=1,
-            last_active_date=datetime.utcnow()
+            last_active_date=datetime.now(UTC)
         )
         db_session.add(streak)
         db_session.flush() # Ensure object has ID if needed

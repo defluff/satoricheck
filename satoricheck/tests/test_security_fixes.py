@@ -468,7 +468,7 @@ class TestTestModeProductionGuard:
 
     def test_health_check_does_not_leak_test_mode(self, client):
         """Health endpoint must not expose test_mode status."""
-        resp = client.get('/api/health')
+        resp = client.get('/health')
         assert resp.status_code == 200
         data = resp.get_json()
         assert 'test_mode' not in data, (

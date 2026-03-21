@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 class PitchdeckService:
     """Service for analyzing pitch deck PDFs with Gemini Vision."""
     
-    # Vision-capable model for PDF analysis — sourced from Config for single-point migration
-    MODEL_VISION = Config.GEMINI_MODEL_PRO
+    # Models — strictly two-tier architecture (Fast/Flash and Pro)
+    MODEL_PRO = Config.GEMINI_MODEL_PRO
     
     # Maximum PDF size: 25MB
     MAX_FILE_SIZE = 25 * 1024 * 1024
@@ -45,8 +45,15 @@ class PitchdeckService:
             logger.info("[Pitchdeck] ✓ Service initialized")
     
     def _get_api_url(self, model: str) -> str:
-        """Get API URL for a specific model (matches factcheck pattern)."""
-        return f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
+        """Get API URL for a specific model (matches GeminiService pattern)."""
+        return f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+    def _get_headers(self) -> dict:
+        """Get standard headers for Gemini REST API."""
+        return {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': self.api_key
+        }
 
     def analyze_pitch_deck(self, pdf_bytes: bytes) -> dict:
         """
@@ -313,14 +320,14 @@ Respond ONLY with valid JSON, no additional text."""
             }]
         }
         
-        url = self._get_api_url(self.MODEL_VISION)
+        url = self._get_api_url(self.MODEL_PRO)
         
         logger.info(f"[Pitchdeck] Sending PDF to Gemini Vision ({len(pdf_bytes)} bytes)")
         
         response = requests.post(
             url,
             json=payload,
-            headers={'Content-Type': 'application/json'},
+            headers=self._get_headers(),
             timeout=self.TIMEOUT
         )
         response.raise_for_status()

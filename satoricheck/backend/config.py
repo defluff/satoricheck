@@ -88,9 +88,10 @@ class Config:
     
     WIZARD_REFILL_AMOUNT = 1000  # Was 5000, now ÷5
     
-    # Token costs - NEW: 5x more words per CP for text mode
-    WORDS_PER_CP = 1250  # Was 250, now 5x (to maintain margins with Live Pro)
+    # Token costs
+    WORDS_PER_CP = 1250
     TOKENS_PER_CP_UNIT = 1
+    MEDIA_ANALYSIS_COST = 1  # 1 CP per media analysis
     
     # Live Pro: Time-based billing
     LIVE_PRO_CP_PER_MINUTE = 1  # 1 CP = 1 minute of Deepgram transcription

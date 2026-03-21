@@ -306,62 +306,32 @@ class App {
             });
         }
 
-        // Video Check button - shows coming soon modal (first time only)
-        const navVideoBtn = document.getElementById('nav-video-btn');
-        if (navVideoBtn) {
-            navVideoBtn.addEventListener('click', () => {
-                // Check if user has already seen the modal
-                const hasSeenVideoModal = localStorage.getItem('hasSeenVideoModal');
-
-                if (!hasSeenVideoModal) {
-                    // First time - show the modal
-                    localStorage.setItem('hasSeenVideoModal', 'true');
-                    ui.showModal('feature-vote-modal');
-
-                    // Check if already voted
-                    const hasVoted = localStorage.getItem('videoFeatureVoted');
-                    if (hasVoted) {
-                        this.showVotedState();
-                    }
-                }
-                // After first view, button does nothing (stays inactive)
+        // 🎬 Media button — switches to #media-view
+        const navMediaBtn = document.getElementById('nav-media-btn');
+        if (navMediaBtn) {
+            navMediaBtn.addEventListener('click', () => {
+                this.switchView('media');
             });
         }
 
-        // Close Feature Vote modal
-        const closeFeatureVoteModal = document.getElementById('close-feature-vote-modal');
-        if (closeFeatureVoteModal) {
-            closeFeatureVoteModal.addEventListener('click', () => {
-                ui.hideModal('feature-vote-modal');
+        // 🧠 Fact Check button
+        const navFactcheckBtn = document.getElementById('nav-factcheck-btn');
+        if (navFactcheckBtn) {
+            navFactcheckBtn.addEventListener('click', () => {
+                this.switchView('factcheck');
             });
         }
 
-        // Feature Vote button - vote for video feature
-        const featureVoteBtn = document.getElementById('feature-vote-btn');
-        if (featureVoteBtn) {
-            // Check if already voted on page load
-            const hasVoted = localStorage.getItem('videoFeatureVoted');
-            if (hasVoted) {
-                this.showVotedState();
-            }
-
-            featureVoteBtn.addEventListener('click', async () => {
-                // Record the vote
-                localStorage.setItem('videoFeatureVoted', 'true');
-
-                // Send vote to backend (fire and forget)
-                try {
-                    await api.recordFeatureVote('video_check');
-                } catch (e) {
-                    // Silent fail - vote is recorded locally
-                    console.log('[App] Feature vote recorded locally');
-                }
-
-                // Update UI
-                this.showVotedState();
-                ui.showToast('Thanks for your feedback! ⚡', 'success');
+        // 📊 Pitch Deck button
+        const navPitchdeckBtn = document.getElementById('nav-pitchdeck-btn');
+        if (navPitchdeckBtn) {
+            navPitchdeckBtn.addEventListener('click', () => {
+                this.switchView('pitchdeck');
             });
         }
+
+        // Wire up internal media view interactions
+        this.setupMediaView();
 
         // Handle token package purchases (Event Delegation)
         document.body.addEventListener('click', async (e) => {
@@ -437,19 +407,303 @@ class App {
     }
 
     /**
-     * Update UI to show voted state for feature vote modal
+     * Switch between the three main views: factcheck, pitchdeck, media.
+     * Delegates to pitchdeck's own show()/hide() to respect its isActive flag;
+     * otherwise uses direct DOM toggling for factcheck ↔ media.
+     * @param {'factcheck'|'pitchdeck'|'media'} view
      */
-    showVotedState() {
-        const featureVoteBtn = document.getElementById('feature-vote-btn');
-        const featureVoteThanks = document.getElementById('feature-vote-thanks');
+    switchView(view) {
+        // Delegate to modules for specialized show/hide logic
+        if (view === 'pitchdeck') {
+            pitchdeck.show(); 
+        } else {
+            pitchdeck.hide();
+        }
 
-        if (featureVoteBtn) {
-            featureVoteBtn.classList.add('voted');
-            featureVoteBtn.innerHTML = '<span class="vote-icon">✓</span><span class="vote-text">Voted!</span>';
+        const views = {
+            factcheck: document.getElementById('factcheck-view'),
+            pitchdeck: document.getElementById('pitchdeck-view'),
+            media:     document.getElementById('media-view'),
+        };
+        const navBtns = {
+            factcheck: document.getElementById('nav-factcheck-btn'),
+            pitchdeck: document.getElementById('nav-pitchdeck-btn'),
+            media:     document.getElementById('nav-media-btn'),
+        };
+
+        Object.keys(views).forEach(key => {
+            const el = views[key];
+            const btn = navBtns[key];
+            
+            if (el) el.classList.toggle('hidden', key !== view);
+            if (btn) btn.classList.toggle('active', key === view);
+        });
+
+        console.log(`[App] Switched to ${view} view`);
+    }
+
+    /**
+     * Initialise all interactions within the #media-view shell:
+     * tab switching (upload ↔ URL), drag-and-drop, file input,
+     * URL input, enable/disable of the Analyse button, and
+     * the TEST_MODE demo result render.
+     */
+    setupMediaView() {
+        const tabUpload         = document.getElementById('ma-tab-upload');
+        const tabUrl            = document.getElementById('ma-tab-url');
+        const uploadPanel       = document.getElementById('ma-upload-panel');
+        const urlPanel          = document.getElementById('ma-url-panel');
+        const dropZone          = document.getElementById('ma-drop-zone');
+        const fileInput         = document.getElementById('ma-file-input');
+        const urlInput          = document.getElementById('ma-url-input');
+        const analyseBtn        = document.getElementById('ma-analyse-btn');
+        const resultSection     = document.getElementById('ma-result-section');
+        const resultPlaceholder = document.getElementById('ma-result-placeholder');
+
+        if (!tabUpload) return; // Guard: media-view not in DOM
+
+        // --- Tab switcher ---
+        tabUpload.addEventListener('click', () => {
+            tabUpload.classList.add('active');
+            tabUrl.classList.remove('active');
+            uploadPanel.classList.remove('hidden');
+            urlPanel.classList.add('hidden');
+            this._updateAnalyseBtn(analyseBtn, dropZone, urlInput, 'upload');
+        });
+
+        tabUrl.addEventListener('click', () => {
+            tabUrl.classList.add('active');
+            tabUpload.classList.remove('active');
+            urlPanel.classList.remove('hidden');
+            uploadPanel.classList.add('hidden');
+            this._updateAnalyseBtn(analyseBtn, dropZone, urlInput, 'url');
+        });
+
+        // --- Drop zone: click to open file picker ---
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') fileInput.click();
+        });
+
+        // --- Drag-and-drop visual feedback ---
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drag-over');
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            const file = e.dataTransfer.files[0];
+            if (file) this._handleFileSelected(file, dropZone, analyseBtn);
+        });
+
+        // --- File input change ---
+        fileInput.addEventListener('change', () => {
+            const file = fileInput.files[0];
+            if (file) this._handleFileSelected(file, dropZone, analyseBtn);
+        });
+
+        // "Change file" text resets the drop zone
+        dropZone.querySelector('.ma-file-selected-change')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            fileInput.value = '';
+            this._mediaFile = null;
+            dropZone.classList.remove('has-file');
+            document.getElementById('ma-selected-filename').textContent = '';
+            analyseBtn.disabled = true;
+        });
+
+        // --- URL input ---
+        urlInput.addEventListener('input', () => {
+            analyseBtn.disabled = urlInput.value.trim() === '';
+        });
+
+        // --- Analyse button ---
+        analyseBtn.addEventListener('click', async () => {
+            const activeTab = tabUpload.classList.contains('active') ? 'upload' : 'url';
+            
+
+            // Set loading state
+            const originalBtnText = analyseBtn.innerHTML;
+            analyseBtn.disabled = true;
+            analyseBtn.innerHTML = '<span class="spinner"></span> Analysing...';
+            
+            try {
+                let response;
+                if (activeTab === 'upload') {
+                    const file = this._mediaFile || fileInput.files[0];
+                    if (!file) throw new Error('Please select a file first.');
+                    response = await api.analyzeMedia(file);
+                } else {
+                    const url = urlInput.value.trim();
+                    if (!url) throw new Error('Please enter a media URL.');
+                    response = await api.analyzeMediaUrl(url);
+                }
+
+                if (response.success) {
+                    this._renderMediaResult(response.result, resultSection, resultPlaceholder);
+                    ui.showToast('Analysis complete', 'success');
+                    
+                    // Update global balance if returned
+                    if (response.new_balance !== undefined) {
+                        const balanceEl = document.getElementById('user-balance');
+                        if (balanceEl) balanceEl.textContent = response.new_balance;
+                    }
+                } else {
+                    throw new Error(response.error || 'Analysis failed');
+                }
+            } catch (error) {
+                ui.showToast(error.message, 'error');
+            } finally {
+                analyseBtn.disabled = false;
+                analyseBtn.innerHTML = originalBtnText;
+            }
+        });
+    }
+
+    /**
+     * Render media analysis result into the result panel.
+     * @param {Object} result The analysis result object
+     * @param {HTMLElement} resultSection
+     * @param {HTMLElement} resultPlaceholder
+     */
+    _renderMediaResult(result, resultSection, resultPlaceholder) {
+        if (!result) return;
+
+        resultPlaceholder.classList.add('hidden');
+        resultSection.classList.remove('hidden');
+
+        // Update Verdict Card
+        const verdictCard = document.getElementById('ma-verdict-card');
+        const verdictLabel = document.getElementById('ma-verdict-label');
+        const verdictEmoji = document.getElementById('ma-verdict-emoji');
+        const reasoningText = document.getElementById('ma-reasoning-text');
+
+        const verdictMap = {
+            'AI Generated':      { type: 'ai',          emoji: '🤖' },
+            'Likely Manipulated': { type: 'manipulated', emoji: '⚠️' },
+            'Appears Authentic':  { type: 'authentic',   emoji: '✅' }
+        };
+
+        const verdictInfo = verdictMap[result.verdict] || { type: 'manipulated', emoji: '❓' };
+        
+        verdictCard.setAttribute('data-verdict', verdictInfo.type);
+        verdictLabel.textContent = result.verdict;
+        verdictEmoji.textContent = verdictInfo.emoji;
+        
+        // Security: Sanitize AI-generated explanation
+        if (window.DOMPurify) {
+            reasoningText.innerHTML = DOMPurify.sanitize(result.explanation || '');
+        } else {
+            reasoningText.textContent = result.explanation || '';
         }
-        if (featureVoteThanks) {
-            featureVoteThanks.classList.remove('hidden');
+
+        // Update Confidence Arc
+        const confidenceValue = document.getElementById('ma-confidence-value');
+        const confidenceArc = document.getElementById('ma-confidence-arc');
+        const conf = result.confidence || 0;
+        
+        confidenceValue.textContent = `${conf}%`;
+        confidenceArc.style.setProperty('--arc-fill', `${conf}%`);
+        
+        // Arc color based on verdict and confidence
+        let arcColor = '#eab308'; // Yellow (Uncertain)
+        if (verdictInfo.type === 'ai') arcColor = '#ef4444'; // Red
+        if (verdictInfo.type === 'authentic' && conf > 70) arcColor = '#22c55e'; // Green
+        confidenceArc.style.setProperty('--arc-color', arcColor);
+
+        // Update Criteria Strips
+        const criteria = result.criteria || {};
+        const updateCriterion = (id, data) => {
+            const signalTag = document.getElementById(`ma-signal-${id}`);
+            const bar = document.getElementById(`ma-bar-${id}`);
+            const desc = document.getElementById(`ma-desc-${id}`);
+
+            if (!signalTag || !data) return;
+
+            // Map friendly tags to CSS signal states
+            const tagLower = (data.tag || '').toLowerCase();
+            let signal = 'uncertain';
+            if (tagLower.includes('high') || tagLower.includes('suspicious')) signal = 'suspicious';
+            else if (tagLower.includes('low') || tagLower.includes('clean') || tagLower.includes('clear')) signal = 'clear';
+            else if (tagLower.includes('med') || tagLower.includes('uncertain')) signal = 'uncertain';
+
+            const score = data.score || 0;
+
+            signalTag.setAttribute('data-signal', signal);
+            signalTag.textContent = `${this._getSignalEmoji(signal)} ${data.tag}`;
+            
+            bar.setAttribute('data-signal', signal);
+            bar.style.width = `${score}%`;
+            bar.style.setProperty('--fill', `${score}%`);
+            
+            // Security: Sanitize AI-generated detail
+            if (window.DOMPurify) {
+                desc.innerHTML = DOMPurify.sanitize(data.detail || '');
+            } else {
+                desc.textContent = data.detail || '';
+            }
+        };
+
+        updateCriterion('physics',   criteria.physics);
+        updateCriterion('bio',       criteria.bio);
+        updateCriterion('context',   criteria.context);
+        updateCriterion('compression', criteria.compression);
+        updateCriterion('metadata',  criteria.metadata);
+        
+        // Smooth scroll to results on mobile
+        if (window.innerWidth < 1024) {
+            resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
+    }
+
+    _getSignalEmoji(signal) {
+        // Signal state is conveyed via CSS [data-signal] styling — no emoji needed
+        return '';
+    }
+
+    /**
+     * Handle a file being selected (via drop or file picker).
+     * Transitions the drop zone to its "file selected" state.
+     * @param {File} file
+     * @param {HTMLElement} dropZone
+     * @param {HTMLButtonElement} analyseBtn
+     */
+    _handleFileSelected(file, dropZone, analyseBtn) {
+        this._mediaFile = file;
+        dropZone.classList.add('has-file');
+        document.getElementById('ma-selected-filename').textContent = file.name;
+        analyseBtn.disabled = false;
+    }
+
+    /**
+     * Enable/disable the Analyse button depending on which tab is active
+     * and whether that tab has valid input.
+     * @param {HTMLButtonElement} btn
+     * @param {HTMLElement} dropZone
+     * @param {HTMLInputElement} urlInput
+     * @param {'upload'|'url'} activeTab
+     */
+    _updateAnalyseBtn(btn, dropZone, urlInput, activeTab) {
+        btn.disabled = activeTab === 'upload'
+            ? !dropZone.classList.contains('has-file')
+            : urlInput.value.trim() === '';
+    }
+
+    /**
+     * Render the static demo result panel (TEST_MODE only).
+     * Reveals the pre-populated `#ma-result-section` without any API call,
+     * so the full shell layout can be reviewed without a live backend.
+     * @param {HTMLElement} resultSection
+     * @param {HTMLElement} resultPlaceholder
+     */
+    _renderDemoResult(resultSection, resultPlaceholder) {
+        resultPlaceholder.classList.add('hidden');
+        resultSection.classList.remove('hidden');
+        ui.showToast('🧪 Demo result rendered (TEST_MODE)', 'info');
     }
 
     async handlePurchase(packageType) {

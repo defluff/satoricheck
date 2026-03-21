@@ -35,8 +35,7 @@ class PitchdeckModule {
             uploadSubtitle: document.querySelector('.pd-upload-subtitle'),
             uploadedInfo: document.querySelector('.pd-uploaded-info'),
             uploadedFilename: document.querySelector('.pd-uploaded-filename'),
-            generateBtn: document.getElementById('pd-generate-btn'),
-            deepDiveBtn: document.getElementById('pd-deep-dive-btn')
+            generateBtn: document.getElementById('pd-generate-btn')
         };
 
         // Check if pitchdeck elements exist
@@ -52,10 +51,6 @@ class PitchdeckModule {
      * Set up event listeners for navigation and upload interactions
      */
     setupEventListeners() {
-        // Navigation buttons
-        this.elements.navBtnFactcheck?.addEventListener('click', () => this.hide());
-        this.elements.navBtnPitchdeck?.addEventListener('click', () => this.show());
-
         // Upload zone - click to trigger file picker
         if (this.elements.uploadZone && this.elements.fileInput) {
             this.elements.uploadZone.addEventListener('click', () => {
@@ -182,71 +177,55 @@ class PitchdeckModule {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 120_000); // 2 min (90s backend + margin)
 
-            let response;
-            try {
-                response = await fetch('/api/pitchdeck/analyze', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ pdf_data: base64Data }),
-                    signal: controller.signal
-                });
-            } catch (fetchError) {
-                if (fetchError.name === 'AbortError') {
-                    throw new Error('Analysis timed out. Your deck may be too large — try a smaller PDF.');
+                const result = await api.analyzePitchDeck(base64Data, controller.signal);
+
+                // === DISPLAY RESULTS ===
+                this.displayResults(result);
+
+                // Show cost toast if available
+                if (result.success && result.cost_incurred) {
+                    ui.showToast(`Analysis complete`, 'success');
+                    // Refresh balance
+                    if (result.new_balance !== undefined) {
+                        ui.updateBalance(result.new_balance);
+                    } else {
+                        // Fallback: Fetch balance if not provided in response
+                        try {
+                            const balanceResponse = await api.getBalance();
+                            if (balanceResponse && balanceResponse.balance !== undefined) {
+                                ui.updateBalance(balanceResponse.balance);
+                            }
+                        } catch (e) {
+                            console.warn('[Pitchdeck] Failed to refresh balance:', e);
+                        }
+                    }
                 }
-                throw fetchError;
+
+                // Update button state
+                this.elements.generateBtn.textContent = 'Overview Generated ✓';
+                this.elements.generateBtn.classList.remove('analyzing');
+
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    ui.showToast('Analysis timed out. Your deck may be too large — try a smaller PDF.', 'error');
+                } else {
+                    console.error('[Pitchdeck] Analysis failed:', error);
+                    ui.showToast(error.message || 'Analysis failed. Please try again.', 'error');
+                }
+
+                // Reset to skeleton state
+                summarySkeleton?.classList.remove('hidden');
+                summaryLoading?.classList.add('hidden');
+                marketSkeleton?.classList.remove('hidden');
+                marketLoading?.classList.add('hidden');
+
+                // Reset button
+                this.elements.generateBtn.disabled = false;
+                this.elements.generateBtn.textContent = 'Generate Overview';
+                this.elements.generateBtn.classList.remove('analyzing');
             } finally {
                 clearTimeout(timeoutId);
             }
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.message || `Analysis failed (${response.status})`);
-            }
-
-            const result = await response.json();
-
-            // === DISPLAY RESULTS ===
-            this.displayResults(result);
-
-            // Show cost toast if available
-            if (result.success && result.cost_incurred) {
-                ui.showToast(`Analysis complete`, 'success');
-                // Refresh balance
-                if (result.new_balance !== undefined) {
-                    ui.updateBalance(result.new_balance);
-                } else {
-                    // Fallback: Fetch balance if not provided in response
-                    try {
-                        const balanceResponse = await api.getBalance();
-                        if (balanceResponse && balanceResponse.balance !== undefined) {
-                            ui.updateBalance(balanceResponse.balance);
-                        }
-                    } catch (e) {
-                        console.warn('[Pitchdeck] Failed to refresh balance:', e);
-                    }
-                }
-            }
-
-            // Update button state
-            this.elements.generateBtn.textContent = 'Overview Generated ✓';
-            this.elements.generateBtn.classList.remove('analyzing');
-
-        } catch (error) {
-            console.error('[Pitchdeck] Analysis failed:', error);
-            ui.showToast(error.message || 'Analysis failed. Please try again.', 'error');
-
-            // Reset to skeleton state
-            summarySkeleton?.classList.remove('hidden');
-            summaryLoading?.classList.add('hidden');
-            marketSkeleton?.classList.remove('hidden');
-            marketLoading?.classList.add('hidden');
-
-            // Reset button
-            this.elements.generateBtn.disabled = false;
-            this.elements.generateBtn.textContent = 'Generate Overview';
-            this.elements.generateBtn.classList.remove('analyzing');
-        }
     }
 
     /**
@@ -583,20 +562,7 @@ class PitchdeckModule {
                 cache_name: this.globalDeckContext?.cache_name
             };
 
-            const response = await fetch('/api/pitchdeck/verify-market', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload)
-            });
-
-            if (!response.ok) {
-                const err = await response.json();
-                throw new Error(err.message || `Verification failed (${response.status})`);
-            }
-
-            const data = await response.json();
+            const data = await api.verifyMarketClaims(payload);
 
             if (data.success && data.findings && data.findings.length > 0) {
                 // Store result
@@ -848,33 +814,19 @@ class PitchdeckModule {
     }
 
     /**
-     * Show the Pitchdeck workspace, hide Factcheck view
+     * Show the Pitchdeck workspace
      */
     show() {
-        if (this.isActive) return;
-
         this.isActive = true;
-        this.elements.factcheckView?.classList.add('hidden');
-        this.elements.pitchdeckView?.classList.remove('hidden');
-        this.elements.navBtnFactcheck?.classList.remove('active');
-        this.elements.navBtnPitchdeck?.classList.add('active');
-
-        console.log('[Pitchdeck] View activated');
+        console.log('[Pitchdeck] Module activated');
     }
 
     /**
-     * Hide the Pitchdeck workspace, show Factcheck view
+     * Hide the Pitchdeck workspace
      */
     hide() {
-        if (!this.isActive) return;
-
         this.isActive = false;
-        this.elements.pitchdeckView?.classList.add('hidden');
-        this.elements.factcheckView?.classList.remove('hidden');
-        this.elements.navBtnPitchdeck?.classList.remove('active');
-        this.elements.navBtnFactcheck?.classList.add('active');
-
-        console.log('[Pitchdeck] View deactivated');
+        console.log('[Pitchdeck] Module deactivated');
     }
 }
 

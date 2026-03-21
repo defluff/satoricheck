@@ -4,7 +4,7 @@ Enables Cloud Run scaling by removing server-side session dependency.
 """
 import jwt
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from backend.config import Config
 
 logger = logging.getLogger(__name__)
@@ -27,8 +27,8 @@ def create_token(user_id: int, email: str) -> str:
     payload = {
         'user_id': user_id,
         'email': email,
-        'iat': datetime.utcnow(),
-        'exp': datetime.utcnow() + timedelta(days=TOKEN_EXPIRY_DAYS)
+        'iat': datetime.now(UTC),
+        'exp': datetime.now(UTC) + timedelta(days=TOKEN_EXPIRY_DAYS)
     }
     
     token = jwt.encode(payload, Config.SECRET_KEY, algorithm='HS256')
@@ -71,8 +71,8 @@ def refresh_token_if_needed(token: str) -> str | None:
     if not payload:
         return None
     
-    exp = datetime.fromtimestamp(payload['exp'])
-    remaining = exp - datetime.utcnow()
+    exp = datetime.fromtimestamp(payload['exp'], tz=UTC)
+    remaining = exp - datetime.now(UTC)
     
     # Refresh if less than 1 day remaining
     if remaining < timedelta(days=1):

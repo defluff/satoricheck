@@ -8,7 +8,7 @@ from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, UTC
 from sqlalchemy import text # For DB health check
 
 from backend.config import Config
@@ -42,6 +42,9 @@ app.config['SESSION_COOKIE_SECURE'] = Config.ENV == 'production'
 
 # Trust proxy headers (Cloud Run, nginx, etc.)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
+# Limit upload size to 50MB
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
 # Enable CORS (Production + Extension + Local)
 CORS(app, supports_credentials=True, origins=[
@@ -141,6 +144,12 @@ def health():
         logger.error(f"Health check failed: {e}")
         return jsonify({'status': 'unhealthy'}), 500
 
+
+@app.route('/api/health')
+def health_legacy():
+    """Backwards-compatible redirect for external monitors."""
+    return redirect('/health', code=301)
+
 from backend.extensions import oauth
 
 # Initialize OAuth
@@ -194,6 +203,10 @@ app.register_blueprint(feedback_bp)
 from backend.routes.pitchdeck import pitchdeck_bp
 app.register_blueprint(pitchdeck_bp)
 
+# Import and register Media blueprint (URL/Media analysis)
+from backend.routes.media import media_bp
+app.register_blueprint(media_bp)
+
 
 # Initialize WebSocket proxy for Live Pro (keeps Deepgram key server-side)
 from backend.services.websocket_proxy import init_websocket_proxy
@@ -234,15 +247,6 @@ import os
 if os.environ.get('WERKZEUG_RUN_MAIN') != 'true' or not app.debug:
     scheduler.start()
     logger.info("✓ Background scheduler started (cleanup every 60s)")
-
-
-@app.route('/api/health')
-def health_check():
-    """Health check endpoint."""
-    return jsonify({
-        'status': 'healthy',
-        'timestamp': datetime.utcnow().isoformat()
-    })
 
 
 @app.route('/')

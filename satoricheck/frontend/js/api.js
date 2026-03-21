@@ -8,12 +8,16 @@ const API_BASE = '/api';
 class APIClient {
     async request(endpoint, options = {}, retries = 5, delay = 1500) {
         try {
+            const headers = { ...options.headers };
+
+            // Only set Content-Type to JSON if not already set and not FormData
+            if (!headers['Content-Type'] && !(options.body instanceof FormData)) {
+                headers['Content-Type'] = 'application/json';
+            }
+
             const response = await fetch(`${API_BASE}${endpoint}`, {
                 ...options,
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...options.headers
-                },
+                headers,
                 credentials: 'include' // Include cookies for session
             });
 
@@ -56,7 +60,8 @@ class APIClient {
         }
     }
 
-    // Auth endpoints
+    // --- AUTH ENDPOINTS ---
+
     async signup(email, password) {
         return this.request('/auth/signup', {
             method: 'POST',
@@ -97,7 +102,8 @@ class APIClient {
         });
     }
 
-    // Token endpoints
+    // --- TOKEN & BILLING ENDPOINTS ---
+
     async getBalance() {
         return this.request('/tokens/balance');
     }
@@ -124,7 +130,8 @@ class APIClient {
         return this.request('/billing/packages');
     }
 
-    // Live Pro endpoints
+    // --- LIVE PRO ENDPOINTS ---
+
     async getLiveProConfig() {
         return this.request('/live-pro/config');
     }
@@ -143,8 +150,6 @@ class APIClient {
         });
     }
 
-
-
     async endLiveProSession(sessionId) {
         return this.request('/live-pro/end', {
             method: 'POST',
@@ -152,14 +157,11 @@ class APIClient {
         });
     }
 
-    // Fact-check endpoints
+    // --- FACT-CHECK ENDPOINTS ---
+
     async analyzeText(text, context = null) {
         const payload = { text };
-
-        // Add optional context for improved accuracy
-        if (context) {
-            payload.context = context;
-        }
+        if (context) payload.context = context;
 
         return this.request('/factcheck/analyze', {
             method: 'POST',
@@ -167,21 +169,19 @@ class APIClient {
         });
     }
 
-    async analyzeBatch(claims, context = null) {
-        // Progressive micro-batches: smaller chunks = faster user feedback
-        // 3 claims per batch balances speed vs API efficiency
+    async analyzeBatch(claims, context = null, cache_name = null) {
+        // Micro-batching handled here for standard fact-check mode
         const CHUNK_SIZE = 3;
         const allResults = [];
         let newBalance = null;
 
-        // Process in chunks - user sees results progressively
         for (let i = 0; i < claims.length; i += CHUNK_SIZE) {
             const chunk = claims.slice(i, i + CHUNK_SIZE);
             const payload = { claims: chunk };
             if (context) payload.context = context;
+            if (cache_name) payload.cache_name = cache_name;
 
             try {
-                // Send chunk request
                 const response = await this.request('/factcheck/analyze-batch', {
                     method: 'POST',
                     body: JSON.stringify(payload)
@@ -189,38 +189,23 @@ class APIClient {
 
                 if (response.success && response.results) {
                     allResults.push(...response.results);
-
-                    // Update balance from latest successful response
-                    if (response.new_balance !== undefined) {
-                        newBalance = response.new_balance;
-                    }
+                    if (response.new_balance !== undefined) newBalance = response.new_balance;
                 }
             } catch (error) {
                 console.error(`Batch chunk ${i} failed:`, error);
-
-                // If a chunk fails, we still want to return results for others if possible
-                // Fill failed chunk with error placeholders
-                for (let j = 0; j < chunk.length; j++) {
+                chunk.forEach(() => {
                     allResults.push({
                         verdict: 'ERROR',
-                        explanation: `Batch processing failed for this item: ${error.message}`,
+                        explanation: `Batch processing failed: ${error.message}`,
                         sources: [],
                         is_claim: true
                     });
-                }
-
-                // If it's a 403 (insufficient funds) or 401, we should probably stop
-                if (error.status === 403 || error.status === 401) {
-                    throw error;
-                }
+                });
+                if (error.status === 403 || error.status === 401) throw error;
             }
         }
 
-        return {
-            success: true,
-            results: allResults,
-            new_balance: newBalance
-        };
+        return { success: true, results: allResults, new_balance: newBalance };
     }
 
     async identifyClaims(text) {
@@ -230,6 +215,12 @@ class APIClient {
         });
     }
 
+    async getFactCheckHistory(limit = 50) {
+        return this.request(`/factcheck/history?limit=${limit}`);
+    }
+
+    // --- AI DETECTION ENDPOINTS ---
+
     async analyzeAI(text) {
         return this.request('/factcheck/analyze-ai', {
             method: 'POST',
@@ -237,32 +228,54 @@ class APIClient {
         });
     }
 
-    async getFactCheckHistory(limit = 50) {
-        return this.request(`/factcheck/history?limit=${limit}`);
+    // --- MEDIA AUTHENTICITY ENDPOINTS ---
+
+    async analyzeMedia(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        return this.request('/media/analyze-upload', {
+            method: 'POST',
+            body: formData
+        });
     }
 
-    // Export endpoint
+    async analyzeMediaUrl(url) {
+        return this.request('/media/analyze-url', {
+            method: 'POST',
+            body: JSON.stringify({ url })
+        });
+    }
+
+    // --- PITCHDECK ENDPOINTS ---
+
+    async analyzePitchDeck(pdfData, signal) {
+        // pdfData is base64
+        return this.request('/pitchdeck/analyze', {
+            method: 'POST',
+            body: JSON.stringify({ pdf_data: pdfData }),
+            signal: signal
+        });
+    }
+
+    async verifyMarketClaims(payload) {
+        return this.request('/pitchdeck/verify-market', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+    }
+
+    // --- UTILITY ENDPOINTS ---
+
     async exportFactChecks(format = 'csv') {
-        // This returns a file, so handle differently
         const response = await fetch(`${API_BASE}/export/factchecks?format=${format}`, {
             credentials: 'include'
         });
 
-        if (!response.ok) {
-            throw new Error('Export failed');
-        }
-
-        const blob = await response.blob();
-        return blob;
+        if (!response.ok) throw new Error('Export failed');
+        return await response.blob();
     }
 
-    // Feature voting (user research)
-    async recordFeatureVote(featureName) {
-        return this.request('/feedback/feature-vote', {
-            method: 'POST',
-            body: JSON.stringify({ feature: featureName })
-        });
-    }
 }
 
 export default new APIClient();

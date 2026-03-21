@@ -20,20 +20,19 @@
     <header class="app-header">
         <div class="header-content">
             <h1 class="app-logo">
-                <span class="logo-icon">⚡</span>
                 SatoriCheck
             </h1>
 
             <!-- Module Navigation Toggle -->
             <div class="module-nav-toggle">
                 <button class="module-nav-btn active" id="nav-factcheck-btn" title="Fact Check Mode">
-                    ✓ Fact Check
+                    Fact Check
                 </button>
                 <button class="module-nav-btn" id="nav-pitchdeck-btn" title="Pitch Deck Analysis">
-                    📊 Pitch Deck
+                    Pitch Deck
                 </button>
-                <button class="module-nav-btn" id="nav-video-btn" title="Video Fact-Check">
-                    🎬 Video
+                <button class="module-nav-btn" id="nav-media-btn" title="Media Authenticity Check">
+                    Media
                 </button>
             </div>
 
@@ -147,10 +146,10 @@
                     <!-- Analysis Mode Toggle (moved here for logical grouping) -->
                     <div class="analysis-mode-toggle" id="analysis-mode-toggle">
                         <button class="analysis-mode-btn active" data-mode="factcheck" title="Verify factual claims">
-                            ✓ Fact Check
+                            Fact Check
                         </button>
                         <button class="analysis-mode-btn" data-mode="aidetect" title="Detect AI-generated text (Beta)">
-                            🤖 AI Detect <span class="beta-tag">β</span>
+                            AI Detect <span class="beta-tag">β</span>
                         </button>
                     </div>
 
@@ -321,6 +320,212 @@
                 <span class="pd-privacy-text">Sandbox Mode: Data stays in local memory and is discarded after session.
                     Never used for training.</span>
             </footer>
+        </main>
+    </div>
+
+    <!-- Media Authenticity Checker View (hidden by default) -->
+    <div id="media-view" class="hidden">
+        <main class="media-workspace">
+
+            <!-- Left column: Input -->
+            <section class="ma-input-section">
+
+                <!-- Tab switcher: Upload file vs Paste URL -->
+                <div class="ma-tab-switcher" id="ma-tab-switcher" role="tablist">
+                    <button class="ma-tab-btn active" id="ma-tab-upload" role="tab" aria-selected="true">
+                        📁 Upload File
+                    </button>
+                    <button class="ma-tab-btn" id="ma-tab-url" role="tab" aria-selected="false">
+                        🔗 Paste Link
+                    </button>
+                </div>
+
+                <!-- Upload panel -->
+                <div id="ma-upload-panel">
+                    <div class="ma-drop-zone" id="ma-drop-zone" tabindex="0" role="button"
+                        aria-label="Drop media here or click to upload">
+                        <span class="ma-drop-zone-icon">🖼️</span>
+                        <p class="ma-drop-zone-title">Drop image or video here to check if it is ai generated</p>
+                        <p class="ma-drop-zone-hint">or click to browse your files</p>
+                        <p class="ma-drop-zone-formats">JPG · PNG · WebP · GIF · MP4 · WebM · MOV</p>
+                        <!-- File selected state -->
+                        <div class="ma-file-selected">
+                            <span class="ma-file-selected-icon">✓</span>
+                            <span class="ma-file-selected-name" id="ma-selected-filename"></span>
+                            <span class="ma-file-selected-change">Change file</span>
+                        </div>
+                    </div>
+                    <input type="file" id="ma-file-input"
+                        accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime"
+                        aria-label="Upload image or video file" />
+                </div>
+
+                <!-- URL panel (hidden by default) -->
+                <div class="ma-url-panel hidden" id="ma-url-panel">
+                    <label class="ma-url-label" for="ma-url-input">
+                        Paste a public link to an image or video
+                    </label>
+                    <div class="ma-url-input-row">
+                        <input class="ma-url-input" id="ma-url-input" type="url"
+                            placeholder="https://example.com/image.jpg or youtube.com/watch?v=…" autocomplete="off"
+                            spellcheck="false" />
+                    </div>
+                    <p class="ma-url-hint">⚠️ Only publicly accessible, non-gated URLs are supported.</p>
+                </div>
+
+                <!-- CTA -->
+                <button class="ma-analyse-btn" id="ma-analyse-btn" disabled>
+                    Analyse Media
+                </button>
+
+                <p class="ma-disclaimer">
+                    🛡️ Media is processed in-session only and never stored or used for training.
+                </p>
+            </section>
+
+            <!-- Right column: idle placeholder -->
+            <section class="ma-result-placeholder" id="ma-result-placeholder">
+                <span class="ma-placeholder-icon">🧬</span>
+                <p class="ma-placeholder-text">Upload or link a file to begin authenticity analysis</p>
+            </section>
+
+            <!-- Right column: Result panel (hidden until analysis completes) -->
+            <section class="ma-result-section hidden" id="ma-result-section">
+
+                <!-- Verdict card: left = verdict + confidence, right = reasoning -->
+                <div class="ma-verdict-card" id="ma-verdict-card" data-verdict="ai">
+                    <div class="ma-verdict-left">
+                        <div class="ma-verdict-badge">
+                            <span class="ma-verdict-emoji" id="ma-verdict-emoji">🤖</span>
+                            <span class="ma-verdict-label" id="ma-verdict-label">AI Generated</span>
+                        </div>
+                        <div class="ma-confidence-wrap">
+                            <div class="ma-confidence-arc" id="ma-confidence-arc"
+                                style="--arc-fill: 87%; --arc-color: #ef4444;">
+                                <span class="ma-confidence-value" id="ma-confidence-value">87%</span>
+                            </div>
+                            <span class="ma-confidence-label">Confidence</span>
+                        </div>
+                    </div>
+                    <div class="ma-verdict-right">
+                        <p class="ma-reasoning-label">Summary Reasoning</p>
+                        <p class="ma-reasoning-text" id="ma-reasoning-text">
+                            Multiple high-confidence indicators of GAN synthesis detected: biological anomalies (finger
+                            count, hair edges),
+                            inconsistent lighting physics, and a noise frequency signature consistent with Stable
+                            Diffusion or Midjourney
+                            generation. No credible camera metadata chain. This image is very unlikely to be a direct
+                            photograph.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- 5 Criteria strips -->
+                <div class="ma-criteria-list">
+                    <p class="ma-criteria-title">Analysis Criteria</p>
+
+                    <!-- 1. Physical Plausibility -->
+                    <div class="ma-criterion">
+                        <div class="ma-criterion-header">
+                            <span class="ma-criterion-name">
+                                Physical Plausibility
+                            </span>
+                            <span class="ma-signal-tag" data-signal="suspicious" id="ma-signal-physics">🔴
+                                Suspicious</span>
+                        </div>
+                        <div class="ma-signal-bar-track">
+                            <div class="ma-signal-bar-fill" data-signal="suspicious" id="ma-bar-physics"
+                                style="--fill: 82%"></div>
+                        </div>
+                        <p class="ma-criterion-desc" id="ma-desc-physics">
+                            Shadow directions inconsistent with single light source. Reflections in eyes don't match
+                            scene lighting.
+                        </p>
+                    </div>
+
+                    <!-- 2. Biological Consistency -->
+                    <div class="ma-criterion">
+                        <div class="ma-criterion-header">
+                            <span class="ma-criterion-name">
+                                Biological Consistency
+                            </span>
+                            <span class="ma-signal-tag" data-signal="suspicious" id="ma-signal-bio">🔴 Suspicious</span>
+                        </div>
+                        <div class="ma-signal-bar-track">
+                            <div class="ma-signal-bar-fill" data-signal="suspicious" id="ma-bar-bio"
+                                style="--fill: 91%"></div>
+                        </div>
+                        <p class="ma-criterion-desc" id="ma-desc-bio">
+                            Finger count anomaly detected (6 fingers on left hand). Hair texture shows GAN smoothing
+                            artifacts near edges.
+                        </p>
+                    </div>
+
+                    <!-- 3. Contextual Coherence -->
+                    <div class="ma-criterion">
+                        <div class="ma-criterion-header">
+                            <span class="ma-criterion-name">
+                                Contextual Coherence
+                            </span>
+                            <span class="ma-signal-tag" data-signal="uncertain" id="ma-signal-context">🟡
+                                Uncertain</span>
+                        </div>
+                        <div class="ma-signal-bar-track">
+                            <div class="ma-signal-bar-fill" data-signal="uncertain" id="ma-bar-context"
+                                style="--fill: 55%"></div>
+                        </div>
+                        <p class="ma-criterion-desc" id="ma-desc-context">
+                            Scene composition is plausible. Background depth of field appears inconsistent with claimed
+                            focal length.
+                        </p>
+                    </div>
+
+                    <!-- 4. Compression & Artifact Forensics -->
+                    <div class="ma-criterion">
+                        <div class="ma-criterion-header">
+                            <span class="ma-criterion-name">
+                                Compression & Artifacts
+                            </span>
+                            <span class="ma-signal-tag" data-signal="suspicious" id="ma-signal-compression">🔴
+                                Suspicious</span>
+                        </div>
+                        <div class="ma-signal-bar-track">
+                            <div class="ma-signal-bar-fill" data-signal="suspicious" id="ma-bar-compression"
+                                style="--fill: 78%"></div>
+                        </div>
+                        <p class="ma-criterion-desc" id="ma-desc-compression">
+                            Noise distribution inconsistent with camera sensor patterns. Frequency domain analysis shows
+                            GAN fingerprint markers.
+                        </p>
+                    </div>
+
+                    <!-- 5. Metadata Signals -->
+                    <div class="ma-criterion">
+                        <div class="ma-criterion-header">
+                            <span class="ma-criterion-name">
+                                Metadata Signals
+                            </span>
+                            <span class="ma-signal-tag" data-signal="uncertain" id="ma-signal-metadata">🟡
+                                Uncertain</span>
+                        </div>
+                        <div class="ma-signal-bar-track">
+                            <div class="ma-signal-bar-fill" data-signal="uncertain" id="ma-bar-metadata"
+                                style="--fill: 40%"></div>
+                        </div>
+                        <p class="ma-criterion-desc" id="ma-desc-metadata">
+                            No EXIF camera data present. Creation timestamp is missing — common in synthetically
+                            generated images.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Reasoning is now inside the verdict card above -->
+
+                <p class="ma-disclaimer-footer">
+                    🛡️ AI analysis only — not a forensic determination. Use with critical judgement.
+                </p>
+            </section>
+
         </main>
     </div>
 
@@ -576,23 +781,23 @@
                     <div>
                         <strong>Multi Agent Fact-Checking</strong>
                         <p>Paste text or use live audio transcription. Using Google Gemini, X ai (grok) and Deepgram
-                            Nova AI to
-                            transcribe, find and verify claims.</p>
+                            Nova AI we transcribe, find and verify claims and give you a verdict.</p>
                     </div>
                 </div>
                 <div class="intro-feature">
-                    <span class="intro-icon">✨</span>
+                    <span class="intro-icon">📊</span>
                     <div>
-                        <strong>Smart Checks worth sharing</strong>
-                        <p>Satori identifies individual claims and separates them with a Meta Analysis.
-                            This also enables sharing verdicts to X and LinkedIn.</p>
+                        <strong>Pitch Decks worth checking</strong>
+                        <p>Upload a Pitch Deck and Satori will analys its claims, summarise it and look for important
+                            metrics while at it.</p>
                     </div>
                 </div>
                 <div class="intro-feature">
                     <span class="intro-icon">🔍</span>
                     <div>
-                        <strong>Pitchdeck Factchecking</strong>
-                        <p>You can upload your pitchdeck and Satori will summarise and check the claims in it.</p>
+                        <strong>Media AI Authenticity Check</strong>
+                        <p>You can upload media files such as images, video or video links and Satori will check if it
+                            has traits of being ai generated content. </p>
                     </div>
                 </div>
                 <div class="intro-feature">
@@ -600,7 +805,7 @@
                     <div>
                         <strong>Privacy first</strong>
                         <p>We do not store any data. All temporary data is deleted after use and I do not allow sharing
-                            or using for training. We want to use as little data as possible</p>
+                            or using for training. We want to use as little data as possible.</p>
                     </div>
                 </div>
             </div>
@@ -645,30 +850,7 @@
         </div>
     </div>
 
-    <!-- Feature Vote Modal (Video Check Coming Soon) -->
-    <div class="modal hidden" id="feature-vote-modal">
-        <div class="modal-overlay"></div>
-        <div class="modal-content feature-vote-content">
-            <button class="modal-close" id="close-feature-vote-modal">×</button>
-            <div class="feature-vote-icon">🎬</div>
-            <h2>Video Fact-Check</h2>
-            <p class="feature-vote-subtitle">Coming Soon</p>
-            <p class="feature-vote-description">
-                Analyze and fact-check video content in real-time.
-                Upload videos or paste links to verify claims automatically.
-            </p>
-            <div class="feature-vote-action">
-                <p class="feature-vote-cta">Want this feature next?</p>
-                <button class="feature-vote-btn" id="feature-vote-btn">
-                    <span class="vote-icon">⚡</span>
-                    <span class="vote-text">Yes, build this!</span>
-                </button>
-                <p class="feature-vote-count hidden" id="feature-vote-thanks">
-                    Thanks for your vote! 🎉
-                </p>
-            </div>
-        </div>
-    </div>
+    <!-- Feature vote modal removed — replaced by #media-view -->
 
     <!-- Toast Container -->
     <div class="toast-container" id="toast-container"></div>

@@ -91,8 +91,22 @@ def analyze_pitch_deck():
         
         # Analyze with service
         try:
+            from backend.services import get_gemini_service
+            gemini_svc = get_gemini_service()
+
+            # 5. Flush Previous Cache (Volatile Caching)
+            if user.current_pitchdeck_cache:
+                gemini_svc.delete_cache(user.current_pitchdeck_cache)
+                user.current_pitchdeck_cache = None
+                db_session.commit()
+
             service = PitchdeckService()
             result = service.analyze_pitch_deck(pdf_bytes)
+            
+            # Use the cache_name from the result
+            if result.get('cache_name'):
+                user.current_pitchdeck_cache = result['cache_name']
+                db_session.commit()
             
             # Privacy: Log ID instead of email
             logger.info(f"[Pitchdeck] Analysis complete for user {user.id}. Cost: {cost} CP")

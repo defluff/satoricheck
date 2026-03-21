@@ -7,7 +7,7 @@ from flask import Blueprint, request, session, jsonify, make_response, url_for, 
 from functools import wraps
 import bcrypt
 import logging
-from datetime import datetime
+from datetime import datetime, UTC
 import secrets
 import hashlib
 import json
@@ -109,7 +109,7 @@ def provision_new_user(user, bonus_amount=None):
         user_id=user.id,
         current_streak=1,
         longest_streak=1,
-        last_active_date=datetime.utcnow()
+        last_active_date=datetime.now(UTC)
     )
     db_session.add(streak)
     db_session.commit()
@@ -125,7 +125,7 @@ def create_test_user():
     user = User(
         email='test@satoricheck.com',
         password_hash=password_hash.decode('utf-8'),
-        created_at=datetime.utcnow()
+        created_at=datetime.now(UTC)
     )
     db_session.add(user)
     db_session.commit()
@@ -180,7 +180,7 @@ def signup():
             email=email,
             password_hash=password_hash.decode('utf-8'),
             api_token=api_token,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(UTC)
         )
         db_session.add(user)
         db_session.commit()
@@ -243,7 +243,7 @@ def login():
             raise APIError('Invalid email or password', status_code=401)
         
         # Update last login and handle streak
-        user.last_login = datetime.utcnow()
+        user.last_login = datetime.now(UTC)
         streak_result = handle_login_streak(user.id, db_session)
         current_streak = streak_result['streak_count']
         
@@ -434,7 +434,7 @@ def google_callback():
                 email=email,
                 password_hash=password_hash.decode('utf-8'),
                 api_token=api_token,
-                created_at=datetime.utcnow()
+                created_at=datetime.now(UTC)
             )
             db_session.add(user)
             db_session.commit()
@@ -445,7 +445,7 @@ def google_callback():
             logger.info(f"New Google user created: {email} (Bonus: {bonus} - was_deleted: {was_deleted})")
             
         # Consolidate last login and streak handling for both new and existing users
-        user.last_login = datetime.utcnow()
+        user.last_login = datetime.now(UTC)
         handle_login_streak(user.id, db_session)
         db_session.commit()
         logger.info(f"Google user logged in: {email}")

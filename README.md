@@ -1,22 +1,22 @@
 # SatoriCheck
 
-Fully vibecoded, AI-powered fact-checking app with live audio transcription, Meta Analysis for quote claims, Pitch Deck verification, and Stripe billing, using antigravity IDE.
+Fully vibecoded, AI-powered fact-checking app with live audio transcription, Meta Analysis for quote claims, Pitch Deck fact verification, media ai/authenticity analysis  and Stripe billing, using antigravity IDE.
 
 **Status:** In Production, Active Users.
 **Mission:** Provide instant, credible verification of claims using advanced AI and source grounding.
 
 ## ✨ Features
 
-- 🎤 Live audio with Standard (browser-based speech recognition) or Pro (Deepgram transcription) (1 CP/minute)
-- 📊 Pitch Deck Check — Verify claims in startup pitch decks (Gemini 3)
-- 🤖 AI Fact-Checking — Google Gemini with web search grounding
-- 🧠 Smart Agent — Auto-separates multiple claims for individual verification
-- 🔍 Meta Analysis — Distinguishes between "X said Y" (quote) and whether Y is actually true
+- 🎤 Live audio with Standard (browser-based speech recognition) or Pro (Deepgram transcription)
+- 📊 Pitch Deck Check — Verify claims in startup pitch decks (Gemini)
+- 🤖 AI Fact-Checking — Google Gemini with web search grounding and Grok.
+- 🖼️ Media Authenticity — Analysis of images and videos for AI generation and manipulation
+- 🧠 Smart Agent — Auto-separates multiple claims for individual verification and meta level analysis.
 - 🃏 Social Sharing — Generate shareable cards for verified claims for X & Linkedin (Privacy-first)
 - 🔥 Streak System — Daily login rewards with CP bonuses
 - ⚡ Token Billing — Stripe integration for Check Points (CP)
-- 🔐 Google OAuth — One-click sign-in
-- 🗑️ Account Deletion — GDPR-compliant data erasure with anti-abuse protection
+- 🔐 Google OAuth — One-click sign-in.
+- 🗑️ Account Deletion — GDPR-compliant data erasure with anti-abuse protection.
 
 
 ## 🚀 Quick Start
@@ -71,6 +71,7 @@ flowchart TB
         FactBP["FactCheck BP"]
         LiveBP["Live Pro BP<br>WebSocket"]
         PitchBP["PitchDeck BP"]
+        MediaBP["Media BP"]
   end
  subgraph Logic["Business Logic Layer"]
     direction TB
@@ -102,10 +103,11 @@ flowchart TB
         DeepgramAPI["Deepgram API"]
         GeminiAPI["Google Gemini API"]
   end
-    Browser -- HTTP/REST --> AuthBP & BillingBP & FactBP & PitchBP
+    Browser -- HTTP/REST --> AuthBP & BillingBP & FactBP & PitchBP & MediaBP
     Browser -- WS / WebSocket --> LiveBP
     FactBP --> GeminiSvc
     PitchBP --> PitchSvc
+    MediaBP --> GeminiSvc
     LiveBP --> DeepgramSvc & GeminiSvc
     BillingBP --> StreakSvc
     PitchSvc -- Verify Claims --> GeminiSvc
@@ -113,6 +115,7 @@ flowchart TB
     AuthBP -- Verify Token --> OAuth
     BillingBP -- Webhooks --> StripeAPI
     PitchSvc -- "1. Vision + Thinking<br>(Multimodal)" --> GeminiAPI
+    MediaBP -- "Forensic Analysis" --> GeminiAPI
     GeminiSvc -- "2. Agentic Verification<br>(Thinking Loop)" --> GeminiAPI
     GrokSvc -- Social Context --> GrokAPI
     DeepgramSvc -- Audio Stream --> DeepgramAPI
@@ -126,6 +129,7 @@ flowchart TB
      FactBP:::route
      LiveBP:::route
      PitchBP:::route
+     MediaBP:::route
      GrokSvc:::service
      DeepgramSvc:::service
      PitchSvc:::service
@@ -180,7 +184,7 @@ Events to listen for:
 Data handling:
 - User data stored in PostgreSQL
 - Audio processed by Deepgram (not stored)
-- Text processed by Google Gemini
+- Text and Media processed by Google Gemini
 - Payments via Stripe (PCI-DSS compliant)
 - Account deletion removes all PII; SHA256 hash retained for anti-abuse
 

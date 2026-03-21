@@ -1,14 +1,19 @@
 """
 Google Gemini API integration service.
 """
+import base64
 import ipaddress
 import json
 import logging
 import re
 import socket
+import time
+
 import requests
+from datetime import datetime, UTC
 from enum import Enum
 from urllib.parse import urlparse
+import google.generativeai as genai
 from backend.config import Config
 
 logger = logging.getLogger(__name__)
@@ -38,29 +43,44 @@ class GeminiService:
     """Service for interacting with Google Gemini API."""
     
     # Models — sourced from Config for single-point migration
-    MODEL_SMART = Config.GEMINI_MODEL_FLASH
+    # Models — strictly two-tier architecture (Fast/Flash and Pro)
+    MODEL_PRO = Config.GEMINI_MODEL_PRO
     MODEL_FAST = Config.GEMINI_MODEL_FLASH
-    MODEL_TRIAGE = Config.GEMINI_MODEL_FLASH  # Fast triage with low token budget
+    MODEL_EMBEDDING = "gemini-embedding-2-preview"
     
     # Timeouts (seconds)
-    TIMEOUT_SMART = 30
+    TIMEOUT_PRO = 30
     TIMEOUT_FAST = 30
     TIMEOUT_TRIAGE = 10  # Triage should be quick
+    TIMEOUT_SLOW = 60    # Long-running analysis (multimodal, video)
     
     # Batch sizing: conservative limit to stay within maxOutputTokens (8192)
     MAX_CLAIMS_PER_PROMPT = 8
     
     def __init__(self):
         """Initialize Gemini service."""
-        if not Config.GEMINI_API_KEY:
-            logger.error("GEMINI_API_KEY is not set!")
-        else:
-            logger.info("✓ Gemini API key configured")
         self.api_key = Config.GEMINI_API_KEY
+        if not self.api_key:
+            logger.error("GEMINI_API_KEY is not set for GeminiService!")
+        else:
+            logger.info("✓ Gemini service initialized")
+            # Configure official SDK for Files API support (used for media analysis)
+            try:
+                genai.configure(api_key=self.api_key)
+                logger.info("✓ Gemini SDK (genai) configured")
+            except Exception as e:
+                logger.error(f"Failed to configure Gemini SDK: {e}")
     
-    def _get_api_url(self, model):
+    def _get_api_url(self, model: str, action: str = "generateContent") -> str:
         """Get API URL for a specific model."""
-        return f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
+        return f"https://generativelanguage.googleapis.com/v1beta/models/{model}:{action}"
+    
+    def _get_headers(self) -> dict:
+        """Get standard headers for Gemini REST API."""
+        return {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': self.api_key
+        }
     
     @staticmethod
     def _is_private_ip(ip_str: str) -> bool:
@@ -74,8 +94,14 @@ class GeminiService:
             # Malformed IP — block to be safe
             return True
 
-    def _validate_url(self, url):
+    _MAX_REDIRECT_DEPTH = 5
+
+    def _validate_url(self, url: str, _redirect_depth: int = 0) -> bool:
         """Check if a URL is reachable AND points to a public IP. Prevents SSRF."""
+        if _redirect_depth >= self._MAX_REDIRECT_DEPTH:
+            logger.warning(f"SSRF blocked: Exceeded {self._MAX_REDIRECT_DEPTH} redirects for {url}")
+            return False
+
         if not url or not isinstance(url, str):
             return False
         if not url.startswith('http://') and not url.startswith('https://'):
@@ -101,9 +127,21 @@ class GeminiService:
             return False
 
         try:
-            response = requests.head(url, timeout=3, allow_redirects=True, headers={
+            # Enforce NO REDIRECTS to prevent SSRF bypass via redirect to private IP
+            # We follow redirects manually if they pass validation.
+            response = requests.head(url, timeout=3, allow_redirects=False, headers={
                 'User-Agent': 'Mozilla/5.0 (compatible; SatoriCheck/1.0)'
             })
+            
+            if 300 <= response.status_code < 400:
+                from urllib.parse import urljoin
+                redirect_url = response.headers.get('Location')
+                if redirect_url and isinstance(redirect_url, str):
+                    # Handle relative redirects
+                    full_redirect_url = urljoin(url, redirect_url)
+                    logger.info(f"SSRF Check: Following redirect to {full_redirect_url}")
+                    return self._validate_url(full_redirect_url, _redirect_depth + 1)
+            
             return response.status_code < 400
         except Exception:
             return False
@@ -204,10 +242,10 @@ class GeminiService:
                 for attempt in range(2): # Try twice
                     try:
                         response = requests.post(
-                            self._get_api_url(self.MODEL_SMART),
+                            self._get_api_url(self.MODEL_PRO),
                             json=payload,
-                            headers={'Content-Type': 'application/json'},
-                            timeout=self.TIMEOUT_SMART
+                            headers=self._get_headers(),
+                            timeout=self.TIMEOUT_PRO
                         )
                         response.raise_for_status()
                         turn_response = response.json()
@@ -215,7 +253,6 @@ class GeminiService:
                     except Exception as e:
                         logger.warning(f"Agentic turn {current_turn} failed (attempt {attempt+1}): {e}")
                         turn_exception = e
-                        import time
                         time.sleep(1) # Brief pause
                 
                 if not turn_response:
@@ -333,7 +370,7 @@ class GeminiService:
 
     def _analyze_claim_standard(self, text):
         """
-        Analyze text for factual claims using Gemini API (Smart Model).
+        Standard claim analysis using Gemini Pro (no thinking mode or tools).
         
         Args:
             text: The text to analyze
@@ -387,10 +424,10 @@ class GeminiService:
                 
                 # Make REST API call
                 response = requests.post(
-                    self._get_api_url(self.MODEL_SMART),
+                    self._get_api_url(self.MODEL_PRO),
                     json=payload,
-                    headers={'Content-Type': 'application/json'},
-                    timeout=self.TIMEOUT_SMART
+                    headers=self._get_headers(),
+                    timeout=self.TIMEOUT_PRO
                 )
                 response.raise_for_status()
                 response_data = response.json()
@@ -408,7 +445,6 @@ class GeminiService:
                 last_exception = "Network timeout. Please try again."
                 
                 if attempt < max_retries - 1:
-                    import time
                     time.sleep(retry_delay)
                     retry_delay *= 2
             
@@ -418,7 +454,6 @@ class GeminiService:
                 last_exception = "Network connection failed. Please check your internet connection."
                 
                 if attempt < max_retries - 1:
-                    import time
                     time.sleep(retry_delay)
                     retry_delay *= 2
             
@@ -438,7 +473,6 @@ class GeminiService:
                     last_exception = "API request failed."
                 
                 if attempt < max_retries - 1:
-                    import time
                     time.sleep(retry_delay)
                     retry_delay *= 2
             
@@ -447,7 +481,6 @@ class GeminiService:
                 last_exception = "Invalid response from AI service."
                 
                 if attempt < max_retries - 1:
-                    import time
                     time.sleep(retry_delay)
                     retry_delay *= 2
             
@@ -457,7 +490,6 @@ class GeminiService:
                 last_exception = "Unexpected error occurred."
                 
                 if attempt < max_retries - 1:
-                    import time
                     time.sleep(retry_delay)
                     retry_delay *= 2
 
@@ -478,23 +510,36 @@ class GeminiService:
         raise Exception("Fact-check service temporarily unavailable. Please try again.")
     
     
-    def create_cache(self, content: str, ttl_minutes: int = 10) -> str:
+    def create_cache(self, content: str | dict | list, ttl_minutes: int = 15) -> str:
         """
-        Create a Context Cache for Gemini.
+        Create a Context Cache for Gemini (Supports text or multimodal parts).
         
         Args:
-            content: The text content to cache
-            ttl_minutes: Time-to-live in minutes (default 10)
+            content: The content to cache (string for text, dict/list for multimodal parts)
+            ttl_minutes: Time-to-live in minutes (default 15)
             
         Returns:
             str: The resource name of the cache (e.g., 'cachedContents/123...')
         """
-        url = "https://generativelanguage.googleapis.com/v1beta/cachedContents?key=" + self.api_key
+        url = f"https://generativelanguage.googleapis.com/v1beta/cachedContents"
         
+        # Prepare parts — SDK File objects pass isinstance(dict) as False,
+        # so check for SDK attributes first, then fall through to plain types.
+        parts = []
+        if hasattr(content, 'uri') and hasattr(content, 'mime_type'):
+            # Gemini SDK File object (e.g., from genai.upload_file)
+            parts = [{"file_data": {"mime_type": content.mime_type, "file_uri": content.uri}}]
+        elif isinstance(content, str):
+            parts = [{"text": content}]
+        elif isinstance(content, list):
+            parts = content
+        elif isinstance(content, dict):
+            parts = [content]
+
         payload = {
-            "model": f"models/{self.MODEL_SMART}",
+            "model": f"models/{self.MODEL_PRO}",
             "contents": [{
-                "parts": [{"text": content}],
+                "parts": parts,
                 "role": "user"
             }],
             "ttl": f"{ttl_minutes * 60}s"
@@ -504,20 +549,51 @@ class GeminiService:
             response = requests.post(
                 url,
                 json=payload,
-                headers={'Content-Type': 'application/json'},
-                timeout=30
+                headers=self._get_headers(),
+                timeout=60
             )
             response.raise_for_status()
             data = response.json()
-            
-            # The 'name' field contains the resource ID
             cache_name = data.get('name')
-            logger.info(f"Created Gemini Cache: {cache_name} (TTL: {ttl_minutes}m)")
+            logger.info(f"Created Gemini Context Cache: {cache_name} at {datetime.now(UTC)} (TTL: {ttl_minutes}m)")
             return cache_name
             
         except Exception as e:
-            logger.error(f"Failed to create cache: {e}")
-            raise
+            logger.error(f"Failed to create context cache: {e}")
+            return None
+            
+    def delete_cache(self, cache_name: str) -> bool:
+        """
+        Explicitly delete a Context Cache record.
+        
+        Args:
+            cache_name: The resource name (e.g., 'cachedContents/123...')
+            
+        Returns:
+            bool: True if deleted successfully
+        """
+        if not cache_name:
+            return False
+            
+        # URL format: https://generativelanguage.googleapis.com/v1beta/cachedContents/{id}
+        # Since cache_name already includes 'cachedContents/', we just append it to the base host
+        url = f"https://generativelanguage.googleapis.com/v1beta/{cache_name}"
+        
+        try:
+            response = requests.delete(
+                url,
+                headers=self._get_headers(),
+                timeout=10
+            )
+            if response.status_code == 200:
+                logger.info(f"Successfully deleted Gemini Cache: {cache_name}")
+                return True
+            else:
+                logger.warning(f"Failed to delete cache {cache_name}: {response.status_code}")
+                return False
+        except Exception as e:
+            logger.error(f"Error deleting cache {cache_name}: {e}")
+            return False
 
     def generate_with_cache(self, cache_name: str, prompt: str) -> dict:
         """
@@ -532,7 +608,7 @@ class GeminiService:
         """
         # Note: URL format for cached requests is slightly different or standard
         # We target the model, but payload points to cache
-        url = self._get_api_url(self.MODEL_SMART)
+        url = self._get_api_url(self.MODEL_PRO)
         
         payload = {
             "contents": [{
@@ -546,8 +622,8 @@ class GeminiService:
             response = requests.post(
                 url,
                 json=payload,
-                headers={'Content-Type': 'application/json'},
-                timeout=self.TIMEOUT_SMART
+                headers=self._get_headers(),
+                timeout=self.TIMEOUT_PRO
             )
             response.raise_for_status()
             
@@ -799,8 +875,11 @@ Respond ONLY with valid JSON, no additional text."""
             "contents": conversation,
             "tools": [tools],
             "generationConfig": {
-                "temperature": 0.2,
-                "maxOutputTokens": 8192
+                "temperature": 1.0,
+                "maxOutputTokens": 8192,
+                "thinkingConfig": {
+                    "includeThoughts": True
+                }
             }
         }
         
@@ -808,7 +887,7 @@ Respond ONLY with valid JSON, no additional text."""
             payload["cachedContent"] = cache_name
         
         max_turns = 3
-        url = self._get_api_url(self.MODEL_SMART)
+        url = self._get_api_url(self.MODEL_PRO)
         
         for turn in range(max_turns):
             try:
@@ -816,7 +895,7 @@ Respond ONLY with valid JSON, no additional text."""
                 response = requests.post(
                     url,
                     json=payload,
-                    headers={'Content-Type': 'application/json'},
+                    headers=self._get_headers(),
                     timeout=120
                 )
                 response.raise_for_status()
@@ -893,7 +972,6 @@ Respond ONLY with valid JSON, no additional text."""
                 logger.error(f"Agentic turn {turn + 1} failed: {e}")
                 if turn == max_turns - 1:
                     break
-                import time
                 time.sleep(1)
         
         # Closing call: if the last turn executed tools, the model still needs
@@ -910,7 +988,7 @@ Respond ONLY with valid JSON, no additional text."""
                 response = requests.post(
                     url,
                     json=closing_payload,
-                    headers={'Content-Type': 'application/json'},
+                    headers=self._get_headers(),
                     timeout=120
                 )
                 response.raise_for_status()
@@ -1128,12 +1206,12 @@ Return ONLY a JSON array, one object per claim:
 
         try:
             response = requests.post(
-                self._get_api_url(self.MODEL_TRIAGE),
+                self._get_api_url(self.MODEL_FAST),
                 json={
                     "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"temperature": 0.1, "maxOutputTokens": 1024}
+                    "generationConfig": {"temperature": 1.0, "maxOutputTokens": 1024}
                 },
-                headers={'Content-Type': 'application/json'},
+                headers=self._get_headers(),
                 timeout=self.TIMEOUT_TRIAGE
             )
             response.raise_for_status()
@@ -1379,7 +1457,7 @@ Respond with ONLY the summary, no JSON."""
             response = requests.post(
                 self._get_api_url(self.MODEL_FAST),
                 json={"contents": [{"parts": [{"text": prompt}]}]},
-                headers={'Content-Type': 'application/json'},
+                headers=self._get_headers(),
                 timeout=self.TIMEOUT_FAST
             )
             response.raise_for_status()
@@ -1440,7 +1518,7 @@ mentions "Biden" and this chunk says "He", replace "He" with "Biden".
 \"\"\"
 
 YOUR TASK:
-Go through the text SENTENCE BY SENTENCE. For each sentence, ask: "Does this contain a factual claim that can be verified as true or false?"
+Go through the text SENTENCE BY SENTENCE,  keep the context of the whole text. For each sentence, ask: "Does this contain a factual claim that can be verified as true or false?"
 
 EXTRACTION RULES:
 1. RESOLVE PRONOUNS: Replace "they", "it", "this", "that", "he", "she" with the actual noun
@@ -1472,8 +1550,12 @@ If zero claims found, return: {{"claims": []}}"""
 
             try:
                 payload = {"contents": [{"parts": [{"text": prompt}]}]}
-                response = requests.post(self._get_api_url(self.MODEL_FAST), json=payload, 
-                                         headers={'Content-Type': 'application/json'}, timeout=self.TIMEOUT_FAST)
+                response = requests.post(
+                    self._get_api_url(self.MODEL_FAST), 
+                    json=payload, 
+                    headers=self._get_headers(),
+                    timeout=self.TIMEOUT_FAST
+                )
                 response.raise_for_status()
                 data = response.json()
                 
@@ -1481,13 +1563,7 @@ If zero claims found, return: {{"claims": []}}"""
                     continue
                 
                 content = data['candidates'][0]['content']['parts'][0]['text'].strip()
-                # Clean markdown code blocks
-                if content.startswith('```json'):
-                    content = content[7:]
-                elif content.startswith('```'):
-                    content = content[3:]
-                if content.endswith('```'):
-                    content = content[:-3]
+                content = self._extract_json(content)
                 
                 result = json.loads(content.strip())
                 claims = result.get('claims', [])
@@ -1574,7 +1650,7 @@ RESPOND WITH JSON ONLY:
             response = requests.post(
                 self._get_api_url(self.MODEL_FAST), 
                 json=payload, 
-                headers={'Content-Type': 'application/json'}, 
+                headers=self._get_headers(),
                 timeout=self.TIMEOUT_FAST
             )
             response.raise_for_status()
@@ -1584,14 +1660,7 @@ RESPOND WITH JSON ONLY:
                 raise ValueError("No candidates in response")
             
             content = data['candidates'][0]['content']['parts'][0]['text'].strip()
-            
-            # Clean markdown code blocks
-            if content.startswith('```json'):
-                content = content[7:]
-            elif content.startswith('```'):
-                content = content[3:]
-            if content.endswith('```'):
-                content = content[:-3]
+            content = self._extract_json(content)
             
             result = json.loads(content.strip())
             
@@ -1637,3 +1706,184 @@ RESPOND WITH JSON ONLY:
                 'human_indicators': [],
                 'explanation': f'Analysis failed: {str(e)}'
             }
+
+    # =============================================================================
+    # MULTIMODAL MEDIA ANALYSIS (Multimodal Thinking Mode)
+    # =============================================================================
+    def _prepare_media_part(self, media_input: str | bytes, mime_type: str, input_type: str = 'url') -> dict:
+        """
+        Helper to prepare a multimodal part for Gemini REST API.
+        
+        Gemini's file_data.file_uri only accepts Gemini File API URIs, NOT
+        public HTTP URLs.  For public URLs we download the content and send
+        it as inline_data (base64).
+        
+        Args:
+            media_input: URL (str), local file path (str), or raw bytes
+            mime_type: MIME type of the media
+            input_type: one of 'url', 'file', 'bytes'
+            
+        Returns:
+            dict: Part formatted for Gemini contents payload
+        """
+        if input_type == 'url':
+            # SSRF check repeated here for defense-in-depth
+            if not self._validate_url(str(media_input)):
+                raise ValueError("Invalid or restricted URL")
+            # Download content — file_uri only accepts Gemini File API URIs
+            resp = requests.get(
+                str(media_input),
+                timeout=30,
+                headers={'User-Agent': 'Mozilla/5.0 (compatible; SatoriCheck/1.0)'},
+                stream=True
+            )
+            resp.raise_for_status()
+            data = resp.content
+            data_b64 = base64.b64encode(data).decode('utf-8')
+            return {"inline_data": {"mime_type": mime_type, "data": data_b64}}
+        
+        if input_type == 'file':
+            with open(str(media_input), 'rb') as f:
+                data = f.read()
+        else:
+            # Assume bytes
+            data = media_input  # type: ignore
+            
+        data_b64 = base64.b64encode(data).decode('utf-8')  # type: ignore
+        return {"inline_data": {"mime_type": mime_type, "data": data_b64}}
+
+    def get_media_embedding(self, media_input: str | bytes, mime_type: str, input_type: str = 'url') -> list:
+        """
+        Generate a multimodal embedding for media fingerprinting.
+        """
+        try:
+            part = self._prepare_media_part(media_input, mime_type, input_type)
+            
+            payload = {
+                "content": {
+                    "parts": [part]
+                }
+            }
+            
+            response = requests.post(
+                self._get_api_url(self.MODEL_EMBEDDING, action="embedContent"), 
+                json=payload, 
+                headers=self._get_headers(), 
+                timeout=self.TIMEOUT_FAST
+            )
+            response.raise_for_status()
+            
+            embeddings = response.json().get('embeddings', [{}])
+            if not embeddings and 'embedding' in response.json():
+                return response.json()['embedding'].get('values', [])
+                
+            return embeddings[0].get('values', []) if embeddings else []
+            
+        except Exception as e:
+            logger.error(f"Media embedding failed: {e}")
+            return []
+
+    def analyze_media_authenticity(self, media_input: str | bytes, input_type: str = 'url', mime_type: str = 'video/mp4') -> dict:
+        """
+        Analyze media for authenticity (AI generation, manipulation, deepfakes).
+        Uses Gemini Files API for video/large files, otherwise REST.
+        """
+        uploaded_file = None
+        try:
+            # For video files, we MUST use the Files API (via SDK) for reliable processing
+            if input_type == 'file':
+                logger.info(f"[Gemini] Uploading file for analysis: {media_input}")
+                uploaded_file = genai.upload_file(path=str(media_input), mime_type=mime_type)
+                
+                # Wait for processing
+                start_time = time.time()
+                while uploaded_file.state.name == "PROCESSING":
+                    if time.time() - start_time > 120: # 2 minute timeout
+                        raise TimeoutError("Gemini file processing timed out")
+                    time.sleep(2)
+                    uploaded_file = genai.get_file(uploaded_file.name)
+                
+                if uploaded_file.state.name != "ACTIVE":
+                    raise ValueError(f"Gemini file processing failed with state: {uploaded_file.state.name}")
+                
+                part = uploaded_file
+            else:
+                # Use REST part for URLs or bytes
+                part = self._prepare_media_part(media_input, mime_type, input_type)
+
+            prompt = (
+                "Act as a Senior Forensic Media Analyst specializing in deepfake and synthetic content detection. "
+                "Conduct a rigorous multi-layered analysis of this media to determine its authenticity. "
+                "Reason step-by-step through the following forensic layers:\n\n"
+                "1. Global Logic & Contextual Plausibility: Is the scenario logically plausible for the actors/location? Check for audio-visual flow vs logical 'slicing'.\n"
+                "2. Physical & Environmental Logic: Evaluate lighting and shadow physics. Check for 'melting' backdrops or flickering edge artifacts.\n"
+                "3. Cinematic vs AI Artifacts: Distinguish intentional camera tricks (blocking, cuts) from AI hallucination (pixel warping, object ghosting).\n"
+                "4. Anatomical & Biometric Indicators: Analyze eye movements, skin, and mouth-sync. Look for ear/hand anomalies.\n"
+                "5. Media Heuristics & Platform Evidence: AI videos are often shorter than 20-30 seconds due to cost. Also, check for SynthID watermarks.\n\n"
+                "Respond ONLY with a JSON object containing:\n"
+                "- verdict: 'AI Generated', 'Likely Manipulated', or 'Appears Authentic'\n"
+                "- confidence: 0-100 (overall certainty of verdict)\n"
+                "- explanation: A forensic summary of your reasoning, addressing specific logic, context, and visual artifacts observed.\n"
+                "- criteria: A dictionary with keys 'physics', 'bio', 'context', 'compression', and 'metadata'. Each criterion must contain:\n"
+                "    * tag: Choose exactly one of 'High Signal' (clear problem), 'Med Signal' (suspicious/uncertain), or 'Clean' (appears authentic).\n"
+                "    * score: 0-100 (representing the strength or certainty of that specific signal).\n"
+                "    * detail: A concise string explaining the verdict for that specific criterion."
+            )
+
+            cache_name = self.create_cache(part)
+            
+            if cache_name:
+                # Use generate_with_cache for the initial analysis, then parse the
+                # raw text into the structured verdict/confidence/criteria shape
+                # that routes/media.py expects.
+                result_data = self.generate_with_cache(cache_name, prompt)
+                parsed = json.loads(self._extract_json(result_data['text']))
+                parsed['cache_name'] = cache_name
+                return parsed
+            
+            if uploaded_file:
+                # Use SDK for Files
+                model = genai.GenerativeModel(self.MODEL_PRO)
+                response = model.generate_content([part, prompt])
+                text = response.text
+                
+                # Cleanup
+                try:
+                    uploaded_file.delete()
+                    logger.info(f"Deleted Gemini file: {uploaded_file.name}")
+                except Exception as cleanup_err:
+                    logger.warning(f"Failed to delete Gemini file: {cleanup_err}")
+            else:
+                # Use REST
+                payload = {
+                    "contents": [
+                        {
+                            "parts": [
+                                part,
+                                {"text": prompt}
+                            ]
+                        }
+                    ]
+                }
+                
+                response = requests.post(
+                    self._get_api_url(self.MODEL_PRO), 
+                    json=payload, 
+                    headers=self._get_headers(), 
+                    timeout=self.TIMEOUT_SLOW
+                )
+                response.raise_for_status()
+                data = response.json()
+                text = data['candidates'][0]['content']['parts'][0]['text']
+
+            # Parse and return
+            return json.loads(self._extract_json(text))
+
+        except Exception as e:
+            logger.error(f"Media analysis failed: {e}")
+            if uploaded_file:
+                try:
+                    uploaded_file.delete()
+                except Exception:
+                    pass
+            raise e

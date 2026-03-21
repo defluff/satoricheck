@@ -5,7 +5,7 @@ Handles text analysis and fact verification using Gemini API.
 from flask import Blueprint, request, jsonify
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, UTC
 import json
 
 from backend.database import db_session
@@ -81,16 +81,26 @@ def analyze_claim():
         # Deduct tokens (Deducts FINAL calculated cost)
         token_balance.balance -= token_cost
         token_balance.unbilled_words = remainder_words
-        token_balance.last_updated = datetime.utcnow()
+        token_balance.last_updated = datetime.now(UTC)
         
         logger.info(f"Analyzing claim for user {user.email}: {text[:100]}... (Cost: {token_cost} CP)")
         
         # Record start time
         start_time = time.time()
         
-        # Always use the agentic path (smart agent is now the default, not a flag)
+        # Always use the agentic path (smart_agent is now the default, not a flag)
         try:
-            result = gemini_service.analyze_claim(analysis_text, smart_agent=True)
+            # Auto-inject valid volatile cache if present.
+            # Guard against stale caches (expired TTL): retry without cache on failure.
+            active_cache = user.current_media_cache or user.current_pitchdeck_cache
+            try:
+                result = gemini_service.analyze_claim(analysis_text, smart_agent=True, cache_name=active_cache)
+            except Exception:
+                if active_cache:
+                    logger.warning(f"Volatile cache {active_cache} failed, retrying without cache")
+                    result = gemini_service.analyze_claim(analysis_text, smart_agent=True, cache_name=None)
+                else:
+                    raise
             
             # If agentic mode was used, 'social' might be in the result already
             # or integrated into the explanation. Check if we need to structure it.
@@ -124,7 +134,7 @@ def analyze_claim():
             source_reliability=result.get('source_reliability', 'MEDIUM'),
             source=source,
             source_id=source_id,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             processing_time=processing_time
         )
         db_session.add(fact_check)
@@ -293,14 +303,25 @@ def analyze_batch_claims():
             # Deduct
             token_balance.balance -= token_cost
             token_balance.unbilled_words = remainder_words
-            token_balance.last_updated = datetime.utcnow()
+            token_balance.last_updated = datetime.now(UTC)
             
-            # Call API with Context (reuse cache_name if pre-created)
+            # Call API with Context (reuse cache_name if pre-created or stored in user session).
+            # Guard against stale caches (expired TTL): retry without cache on failure.
             gemini_service = get_gemini_service()
             try:
-                api_results = gemini_service.analyze_claims_batch(
-                    texts_to_analyze, context=context, cache_name=cache_name
-                )
+                effective_cache = cache_name or user.current_media_cache or user.current_pitchdeck_cache
+                try:
+                    api_results = gemini_service.analyze_claims_batch(
+                        texts_to_analyze, context=context, cache_name=effective_cache
+                    )
+                except Exception:
+                    if effective_cache:
+                        logger.warning(f"Volatile cache {effective_cache} failed, retrying without cache")
+                        api_results = gemini_service.analyze_claims_batch(
+                            texts_to_analyze, context=context, cache_name=None
+                        )
+                    else:
+                        raise
                 
             except Exception as e:
                 # Refund
@@ -339,7 +360,7 @@ def analyze_batch_claims():
                     source_reliability=res.get('source_reliability', 'MEDIUM'),
                     source=source,
                     source_id=source_id,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(UTC),
                     processing_time=(time.time() - start_time) / len(api_results)
                 )
                 db_session.add(fact_check)

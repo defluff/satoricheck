@@ -121,9 +121,9 @@ class TestPitchdeckUploadClickToUpload:
         filename_display = page.locator(".pd-uploaded-filename")
         expect(filename_display).to_contain_text("test_deck.pdf")
         
-        # Deep Dive button should be enabled
-        deep_dive_btn = page.locator("#pd-deep-dive-btn")
-        expect(deep_dive_btn).not_to_be_disabled()
+        # Generate Overview button should be enabled
+        generate_btn = page.locator("#pd-generate-btn")
+        expect(generate_btn).not_to_be_disabled()
 
 
 class TestPitchdeckUploadDragAndDrop:

@@ -1,6 +1,6 @@
 import logging
 import json
-from datetime import datetime
+from datetime import datetime, UTC
 
 from flask import Blueprint, request, jsonify
 
@@ -40,7 +40,7 @@ def get_balance():
     
     # Check if a reward was granted today (for frontend toast)
     today_reward = None
-    start_of_day = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    start_of_day = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     recent_bonus = db_session.query(Transaction).filter(
         Transaction.user_id == user.id,
         Transaction.type == 'bonus',
@@ -90,7 +90,7 @@ def deduct_tokens():
         
         # Deduct tokens
         token_balance.balance -= amount
-        token_balance.last_updated = datetime.utcnow()
+        token_balance.last_updated = datetime.now(UTC)
         
         # Record transaction
         transaction = Transaction(
@@ -98,7 +98,7 @@ def deduct_tokens():
             type='deduction',
             amount=-amount,
             description=description,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(UTC)
         )
         db_session.add(transaction)
         

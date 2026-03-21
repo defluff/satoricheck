@@ -713,7 +713,7 @@ class TestPitchdeckServiceVisionCall:
             
             # Verify correct model endpoint and payload structure
             call_url = mock_post.call_args[0][0]
-            assert PitchdeckService.MODEL_VISION in call_url
+            assert PitchdeckService.MODEL_PRO in call_url
             
             payload = mock_post.call_args[1]['json']
             # Ensure PDF data is sent as inline_data with correct mime type
