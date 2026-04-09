@@ -150,3 +150,49 @@ class TestAuthRequired:
         """Token balance requires authentication."""
         response = client.get('/api/tokens/balance')
         assert response.status_code == 401
+
+
+class TestExtensionToken:
+    """Test extension token endpoint for browser extension auth."""
+
+    def test_extension_token_requires_auth(self, client):
+        """Extension token endpoint requires authentication."""
+        response = client.get('/api/auth/extension-token')
+        assert response.status_code == 401
+
+    def test_extension_token_returns_valid_token(self, auth_client, test_user):
+        """Authenticated user receives their api_token."""
+        response = auth_client.get('/api/auth/extension-token')
+        assert response.status_code == 200
+
+        data = response.get_json()
+        assert data['success'] is True
+        assert data['api_token'] == test_user.api_token
+        assert len(data['api_token']) == 64  # 32-byte hex
+
+    def test_extension_token_generates_if_missing(self, auth_client, test_user, db_session_fixture):
+        """If api_token is None (pre-migration user), one is generated on the fly."""
+        test_user.api_token = None
+        db_session_fixture.commit()
+
+        response = auth_client.get('/api/auth/extension-token')
+        assert response.status_code == 200
+
+        data = response.get_json()
+        assert data['success'] is True
+        assert len(data['api_token']) == 64
+
+        # Verify it was persisted
+        db_session_fixture.refresh(test_user)
+        assert test_user.api_token == data['api_token']
+
+    def test_extension_token_accessible_via_bearer(self, client, test_user):
+        """Extension token endpoint is accessible via Bearer token auth."""
+        response = client.get('/api/auth/extension-token', headers={
+            'Authorization': f'Bearer {test_user.api_token}'
+        })
+        assert response.status_code == 200
+
+        data = response.get_json()
+        assert data['api_token'] == test_user.api_token
+

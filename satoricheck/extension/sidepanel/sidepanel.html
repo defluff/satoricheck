@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SatoriCheck</title>
+    <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+    <!-- Header: brand + balance + streak -->
+    <header class="sp-header">
+        <div class="sp-brand">
+            <span class="sp-title">SatoriCheck</span>
+        </div>
+        <div class="sp-status">
+            <button id="sp-balance" class="sp-badge sp-badge-buy" title="Click to buy Check Points">— CP</button>
+            <span id="sp-streak" class="sp-badge sp-badge-streak" title="Daily streak">🔥 0</span>
+        </div>
+    </header>
+
+    <!-- Mode tabs -->
+    <nav class="sp-tabs">
+        <button class="sp-tab active" data-mode="factcheck">Fact Check</button>
+        <button class="sp-tab" data-mode="ai">AI Spotter</button>
+        <button class="sp-tab" data-mode="media">Authenticity</button>
+    </nav>
+
+    <!-- Input area: fact-check (default) -->
+    <section id="input-factcheck" class="sp-input-section">
+        <textarea id="sp-claim" class="sp-textarea"
+            placeholder="Paste or type a claim to fact-check…"
+            rows="3"></textarea>
+        <button id="sp-check-btn" class="sp-check-btn" disabled>
+            Check
+        </button>
+    </section>
+
+    <!-- Input area: AI detection -->
+    <section id="input-ai" class="sp-input-section hidden">
+        <textarea id="sp-ai-text" class="sp-textarea"
+            placeholder="Paste text to check if it's AI-generated (min 20 words)…"
+            rows="3"></textarea>
+        <button id="sp-ai-btn" class="sp-check-btn" disabled>
+            Detect AI
+        </button>
+    </section>
+
+    <!-- Input area: media URL -->
+    <section id="input-media" class="sp-input-section hidden">
+        <input type="url" id="sp-media-url" class="sp-url-input"
+            placeholder="Paste a public image or video URL (file upload at satoricheck.com)" />
+        <button id="sp-media-btn" class="sp-check-btn" disabled>
+            Analyze
+        </button>
+    </section>
+
+    <!-- Results feed -->
+    <section id="sp-results" class="sp-results">
+        <div class="sp-empty-state">
+            <span class="sp-empty-icon">🔍</span>
+            <p>Results will appear here</p>
+        </div>
+    </section>
+
+    <!-- Low balance warning (hidden by default) -->
+    <div id="sp-low-balance" class="sp-low-balance hidden">
+        <span>Low on Check Points</span>
+        <a href="#" id="sp-buy-link">Get more →</a>
+    </div>
+
+    <script src="../vendor/dompurify.min.js"></script>
+    <script src="sidepanel.js" type="module"></script>
+</body>
+</html>

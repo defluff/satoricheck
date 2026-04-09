@@ -102,6 +102,10 @@ class APIClient {
         });
     }
 
+    async getExtensionToken() {
+        return this.request('/auth/extension-token');
+    }
+
     // --- TOKEN & BILLING ENDPOINTS ---
 
     async getBalance() {

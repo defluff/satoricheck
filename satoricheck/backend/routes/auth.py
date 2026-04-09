@@ -333,6 +333,28 @@ def get_current_user():
     })
 
 
+@auth_bp.route('/extension-token', methods=['GET'])
+@login_required
+def get_extension_token():
+    """Return the user's API token for browser extension authentication.
+
+    The token is the existing api_token (64-char hex) already stored
+    on the User model. No new secrets are generated — this just
+    surfaces the value so the web app UI can show it for copy-paste.
+    """
+    user = request.current_user
+
+    if not user.api_token:
+        # Edge case: user created before api_token migration
+        user.api_token = secrets.token_hex(32)
+        db_session.commit()
+        logger.info(f"Generated missing api_token for user {user.email}")
+
+    return jsonify({
+        'success': True,
+        'api_token': user.api_token
+    })
+
 
 @auth_bp.route('/delete-account', methods=['POST'])
 @login_required
@@ -389,7 +411,14 @@ def delete_account():
 
 @auth_bp.route('/google')
 def google_login():
-    """Initiate Google OAuth login."""
+    """Initiate Google OAuth login.
+    
+    Stashes the ?ext=1 flag in the session so the OAuth round-trip
+    doesn't discard the extension-token-modal intent.
+    """
+    # Preserve extension redirect intent through the OAuth cycle
+    if request.args.get('ext') == '1':
+        session['ext_redirect'] = '1'
     redirect_uri = url_for('auth.google_callback', _external=True)
     return oauth.google.authorize_redirect(redirect_uri)
 
@@ -456,8 +485,14 @@ def google_callback():
         # Also set legacy session for backwards compatibility
         session['user_id'] = user.id
         
-        # Redirect to frontend with JWT cookie
-        redirect_url = '/?new_user=true' if is_new_user else '/'
+        # Redirect to frontend with JWT cookie.
+        # Re-attach ?ext=1 if the user came from the extension popup flow,
+        # so the web app shows the extension-token modal after login.
+        ext = session.pop('ext_redirect', None)
+        if is_new_user:
+            redirect_url = '/?new_user=true&ext=1' if ext else '/?new_user=true'
+        else:
+            redirect_url = '/?ext=1' if ext else '/'
         response = make_response(redirect(redirect_url))
         response.set_cookie(
             JWT_COOKIE_NAME,

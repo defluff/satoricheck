@@ -5,21 +5,22 @@ Fully vibecoded, AI-powered fact-checking app with live audio transcription, Met
 **Status:** In Production, Active Users.
 **Mission:** Provide instant, credible verification of claims using advanced AI and source grounding.
 
-## ✨ Features
+## Features
 
-- 🎤 Live audio with Standard (browser-based speech recognition) or Pro (Deepgram transcription)
-- 📊 Pitch Deck Check — Verify claims in startup pitch decks (Gemini)
-- 🤖 AI Fact-Checking — Google Gemini with web search grounding and Grok.
-- 🖼️ Media Authenticity — Analysis of images and videos for AI generation and manipulation
-- 🧠 Smart Agent — Auto-separates multiple claims for individual verification and meta level analysis.
-- 🃏 Social Sharing — Generate shareable cards for verified claims for X & Linkedin (Privacy-first)
-- 🔥 Streak System — Daily login rewards with CP bonuses
-- ⚡ Token Billing — Stripe integration for Check Points (CP)
-- 🔐 Google OAuth — One-click sign-in.
-- 🗑️ Account Deletion — GDPR-compliant data erasure with anti-abuse protection.
+- Live audio with Standard (browser-based speech recognition) or Pro (Deepgram transcription)
+- Pitch Deck Check — Verify claims in startup pitch decks (Gemini)
+- AI Fact-Checking — Google Gemini with web search grounding and Grok.
+- Media Authenticity — Analysis of images and videos for AI generation and manipulation
+- Smart Agent — Auto-separates multiple claims for individual verification and meta level analysis.
+- Social Sharing — Generate shareable cards for verified claims for X & Linkedin (Privacy-first)
+- Streak System — Daily login rewards with CP bonuses
+- Token Billing — Stripe integration for Check Points (CP)
+- Google OAuth — One-click sign-in.
+- Account Deletion — GDPR-compliant data erasure with anti-abuse protection.
+- Browser Extension — Universal highlighting and fact-checking integration for Chrome via API tokens.
 
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # 1. Enter project directory
@@ -38,7 +39,7 @@ python3 -m backend.server
 
 Visit **http://127.0.0.1:8000**
 
-## ⚙️ Configuration
+## Configuration
 
 ### Required Environment Variables
 
@@ -58,12 +59,13 @@ Check `.env.example` for full configuration options including Stripe, Deepgram, 
 
 Set `TEST_MODE=true` to skip API key validation and use a test user.
 
-## 🏗️ Architecture
+## Architecture
 
 ```mermaid
 flowchart TB
  subgraph Client["Frontend Client"]
         Browser["User Browser<br>Vanilla JS / HTML5"]
+        Extension["Browser Extension<br>Manifest V3"]
   end
  subgraph API["API Routes"]
         AuthBP["Auth BP"]
@@ -105,6 +107,7 @@ flowchart TB
   end
     Browser -- HTTP/REST --> AuthBP & BillingBP & FactBP & PitchBP & MediaBP
     Browser -- WS / WebSocket --> LiveBP
+    Extension -- HTTP/REST --> AuthBP & BillingBP & FactBP & MediaBP
     FactBP --> GeminiSvc
     PitchBP --> PitchSvc
     MediaBP --> GeminiSvc
@@ -124,6 +127,7 @@ flowchart TB
     ORM <--> DB
 
      Browser:::client
+     Extension:::client
      AuthBP:::route
      BillingBP:::route
      FactBP:::route
@@ -151,7 +155,7 @@ flowchart TB
 ```
 
 
-## 🚢 Deployment
+## Deployment
 
 ### Cloud Run / Heroku
 
@@ -176,7 +180,7 @@ Events to listen for:
 - `checkout.session.completed`
 - `invoice.payment_succeeded`
 
-## 📜 Legal
+## Legal
 
 - Privacy Policy: [View on GitHub Gist](https://gist.github.com/defluff/bccc4d328f850de6eec1521ba4c2be22)
 - Terms of Service: [View on GitHub Gist](https://gist.github.com/defluff/bccc4d328f850de6eec1521ba4c2be22)
@@ -188,7 +192,7 @@ Data handling:
 - Payments via Stripe (PCI-DSS compliant)
 - Account deletion removes all PII; SHA256 hash retained for anti-abuse
 
-## 📝 License
+## License
 
 **All Rights Reserved.**
 

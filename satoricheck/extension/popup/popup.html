@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SatoriCheck</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <!-- Logged-out state: token paste -->
+    <div id="state-disconnected">
+        <div class="popup-header">
+            <h1>SatoriCheck</h1>
+        </div>
+
+        <p class="popup-subtitle">Connect your account to start fact-checking.</p>
+
+        <div class="token-input-group">
+            <input type="text" id="token-input" placeholder="Paste your extension token"
+                spellcheck="false" autocomplete="off" />
+            <button id="connect-btn" class="btn-primary" disabled>Connect</button>
+        </div>
+
+        <p class="popup-help">
+            <a href="#" id="get-token-link">Get your token from satoricheck.com →</a>
+        </p>
+
+        <div id="connect-error" class="error-message hidden"></div>
+    </div>
+
+    <!-- Logged-in state: account info -->
+    <div id="state-connected" class="hidden">
+        <div class="popup-header">
+            <span class="popup-title">SatoriCheck</span>
+            <button class="popup-badge popup-badge-buy" id="balance-badge" title="Click to buy Check Points">— CP</button>
+        </div>
+
+        <div class="account-info">
+            <span class="account-email" id="account-email">user@example.com</span>
+            <span class="account-status">✅ Connected</span>
+        </div>
+
+        <button id="open-sidepanel-btn" class="btn-primary btn-full">
+            Open Fact Checker
+        </button>
+
+        <div class="popup-footer">
+            <a href="#" id="disconnect-btn" class="link-danger">Disconnect</a>
+        </div>
+    </div>
+
+    <script src="popup.js" type="module"></script>
+</body>
+</html>

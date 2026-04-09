@@ -361,6 +361,30 @@ class App {
             });
         }
 
+        // Extension token: Settings button
+        const showExtTokenBtn = document.getElementById('show-extension-token-btn');
+        if (showExtTokenBtn) {
+            showExtTokenBtn.addEventListener('click', () => {
+                this.showExtensionTokenModal();
+            });
+        }
+
+        // Extension token: close modal
+        const closeExtTokenModal = document.getElementById('close-extension-token-modal');
+        if (closeExtTokenModal) {
+            closeExtTokenModal.addEventListener('click', () => {
+                ui.hideModal('extension-token-modal');
+            });
+        }
+
+        // Extension token: copy button
+        const copyExtTokenBtn = document.getElementById('copy-extension-token-btn');
+        if (copyExtTokenBtn) {
+            copyExtTokenBtn.addEventListener('click', () => {
+                this.copyExtensionToken();
+            });
+        }
+
         // Close modals on overlay click
         document.querySelectorAll('.modal-overlay').forEach(overlay => {
             overlay.addEventListener('click', () => {
@@ -386,6 +410,14 @@ class App {
             // Small delay to ensure page is fully loaded
             setTimeout(() => {
                 ui.showModal('intro-modal');
+            }, 1000);
+        }
+
+        // Check for extension redirect (?ext=1) — show token modal after login
+        if (urlParams.get('ext') === '1') {
+            window.history.replaceState({}, '', window.location.pathname);
+            setTimeout(() => {
+                this.showExtensionTokenModal();
             }, 1000);
         }
 
@@ -816,6 +848,51 @@ class App {
         } else if (params.get('payment') === 'cancelled') {
             ui.showToast('Payment cancelled', 'warning');
             window.history.replaceState({}, document.title, window.location.pathname);
+        }
+    }
+
+    /**
+     * Fetch and display the extension token modal.
+     * Called from Settings button or ?ext=1 URL redirect.
+     */
+    async showExtensionTokenModal() {
+        const tokenInput = document.getElementById('extension-token-value');
+        if (tokenInput) tokenInput.value = 'Loading...';
+
+        ui.showModal('extension-token-modal');
+
+        try {
+            const response = await api.getExtensionToken();
+            if (response.success && tokenInput) {
+                tokenInput.value = response.api_token;
+            }
+        } catch (error) {
+            console.error('Failed to fetch extension token:', error);
+            if (tokenInput) tokenInput.value = 'Error — please try again';
+            ui.showToast('Failed to load extension token', 'error');
+        }
+    }
+
+    /**
+     * Copy the extension token to clipboard and give visual feedback.
+     */
+    async copyExtensionToken() {
+        const tokenInput = document.getElementById('extension-token-value');
+        const copyBtn = document.getElementById('copy-extension-token-btn');
+        if (!tokenInput || !tokenInput.value || tokenInput.value === 'Loading...') return;
+
+        try {
+            await navigator.clipboard.writeText(tokenInput.value);
+            if (copyBtn) {
+                const original = copyBtn.innerHTML;
+                copyBtn.innerHTML = '✅ Copied!';
+                setTimeout(() => { copyBtn.innerHTML = original; }, 2000);
+            }
+            ui.showToast('Token copied to clipboard', 'success');
+        } catch {
+            // Fallback: select input text
+            tokenInput.select();
+            ui.showToast('Select and copy the token manually', 'info');
         }
     }
 }

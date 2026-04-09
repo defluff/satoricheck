@@ -50,7 +50,7 @@ app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 CORS(app, supports_credentials=True, origins=[
     'https://satoricheck-829698588154.europe-west6.run.app',  # Cloud Run production
     'https://satoricheck.com',  # Future custom domain (if configured)
-    'chrome-extension://*',
+    'chrome-extension://*',  # TODO: pin to specific extension ID after store submission
     'http://localhost:*', 
     'http://127.0.0.1:*'
 ])
@@ -195,9 +195,7 @@ app.register_blueprint(live_pro_bp)
 from backend.routes.analytics import analytics_bp
 app.register_blueprint(analytics_bp)
 
-# Import and register Feedback blueprint (feature voting)
-from backend.routes.feedback import feedback_bp
-app.register_blueprint(feedback_bp)
+
 
 # Import and register Pitchdeck blueprint (PDF analysis)
 from backend.routes.pitchdeck import pitchdeck_bp
@@ -232,6 +230,28 @@ logger.info("✓ Database initialized")
 from apscheduler.schedulers.background import BackgroundScheduler
 from backend.routes.live_pro import cleanup_abandoned_sessions
 
+
+def cleanup_old_checks():
+    """Delete fact-checks and media checks older than 7 days.
+
+    Keeps the database lean — old claim results have no long-term
+    value and would otherwise grow unbounded across all users.
+    """
+    from datetime import timedelta
+    from backend.models import FactCheck, MediaCheck
+
+    cutoff = datetime.now(UTC) - timedelta(days=7)
+    try:
+        fc_count = db_session.query(FactCheck).filter(FactCheck.timestamp < cutoff).delete()
+        mc_count = db_session.query(MediaCheck).filter(MediaCheck.timestamp < cutoff).delete()
+        db_session.commit()
+        if fc_count or mc_count:
+            logger.info(f"Cleanup: deleted {fc_count} fact-checks, {mc_count} media-checks older than 7 days")
+    except Exception as e:
+        db_session.rollback()
+        logger.error(f"Cleanup job failed: {e}")
+
+
 scheduler = BackgroundScheduler()
 scheduler.add_job(
     func=cleanup_abandoned_sessions,
@@ -239,6 +259,14 @@ scheduler.add_job(
     seconds=60,
     id='cleanup_abandoned_sessions',
     name='Cleanup abandoned Live Pro sessions',
+    replace_existing=True
+)
+scheduler.add_job(
+    func=cleanup_old_checks,
+    trigger='interval',
+    hours=24,
+    id='cleanup_old_checks',
+    name='Delete fact-checks and media-checks older than 7 days',
     replace_existing=True
 )
 

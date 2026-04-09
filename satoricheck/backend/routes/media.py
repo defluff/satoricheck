@@ -40,6 +40,33 @@ URL_REGEX = re.compile(
     r'(?::\d+)?'  # optional port
     r'(?:/?|[/?]\S+)$', re.IGNORECASE)
 
+# Hostnames of platforms that serve HTML pages (not direct media files).
+# Maps hostname substrings to human-readable names for error messages.
+_PLATFORM_HOSTS = {
+    'dailymotion.com': 'Dailymotion',
+    'facebook.com': 'Facebook',
+    'fb.watch': 'Facebook',
+    'instagram.com': 'Instagram',
+    'reddit.com': 'Reddit',
+    'tiktok.com': 'TikTok',
+    'twitch.tv': 'Twitch',
+    'vimeo.com': 'Vimeo',
+    'x.com': 'X (Twitter)',
+    'twitter.com': 'X (Twitter)',
+    'youtu.be': 'YouTube',
+    'youtube.com': 'YouTube',
+}
+
+
+def _detect_platform(hostname: str) -> str | None:
+    """Return the platform name if the hostname matches a known video/social site."""
+    hostname = hostname.lower().removeprefix('www.')
+    for domain, name in _PLATFORM_HOSTS.items():
+        if hostname == domain or hostname.endswith(f'.{domain}'):
+            return name
+    return None
+
+
 @media_bp.route('/analyze-url', methods=['POST'])
 @login_required
 def analyze_url() -> tuple:
@@ -55,21 +82,49 @@ def analyze_url() -> tuple:
         if not URL_REGEX.match(url):
             raise APIError('Invalid URL format. Must start with http:// or https://', status_code=400)
             
-        # Optional: guess MIME type from URL path
+        # Determine MIME type: try URL extension first, then HEAD request
         parsed_path = urlparse(url).path
         mime_type, _ = mimetypes.guess_type(parsed_path)
+
+        # Fallback: extension-based heuristic for common suffixes
         if not mime_type:
-            # Fallback based on common extensions
-            if parsed_path.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+            lower_path = parsed_path.lower()
+            if lower_path.endswith(('.jpg', '.jpeg', '.png', '.webp')):
                 mime_type = 'image/jpeg'
-            elif parsed_path.lower().endswith(('.mp4', '.mov', '.webm')):
+            elif lower_path.endswith(('.mp4', '.mov', '.webm')):
                 mime_type = 'video/mp4'
-            else:
+
+        # Fallback: probe Content-Type via HEAD (handles CDN/API URLs with no extension)
+        if not mime_type:
+            import requests as http_requests
+            try:
+                head_resp = http_requests.head(url, timeout=5, allow_redirects=True)
+                ct = head_resp.headers.get('Content-Type', '')
+                # Strip parameters (e.g. "image/jpeg; charset=utf-8" → "image/jpeg")
+                ct_base = ct.split(';')[0].strip().lower()
+                if ct_base in ALLOWED_MIME_TYPES:
+                    mime_type = ct_base
+            except Exception as head_err:
+                logger.warning(f"HEAD probe failed for {url[:100]}: {head_err}")
+
+        if not mime_type or mime_type not in ALLOWED_MIME_TYPES:
+            # Check for known video/social platforms and give a helpful error
+            hostname = urlparse(url).hostname or ''
+            platform = _detect_platform(hostname)
+            if platform:
                 raise APIError(
-                    'Could not determine media type from URL. '
-                    'Supported: .jpg, .jpeg, .png, .webp, .mp4, .mov, .webm',
+                    f'{platform} links are not yet supported. '
+                    'Please paste a direct image or video URL '
+                    '(e.g. right-click an image → "Copy image address").',
                     status_code=400
                 )
+            raise APIError(
+                'This URL type is not supported. '
+                'Please paste a direct link to an image or video file '
+                '(e.g. right-click an image → "Copy image address"). '
+                'Supported formats: JPEG, PNG, WebP, MP4, MOV, WebM.',
+                status_code=400
+            )
         
         user = request.current_user
         
