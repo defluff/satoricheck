@@ -118,7 +118,7 @@ class APIClient {
 
     // Billing endpoints
     async createCheckoutSession(packageType) {
-        return this.request('/billing/create-checkout', {
+        return this.request('/billing/checkout', {
             method: 'POST',
             body: JSON.stringify({ package_type: packageType })
         });
