@@ -9,6 +9,7 @@ import re
 import socket
 import time
 
+import os
 import requests
 from datetime import datetime, UTC
 from enum import Enum
@@ -81,6 +82,28 @@ class GeminiService:
             'Content-Type': 'application/json',
             'x-goog-api-key': self.api_key
         }
+    
+    def _load_skill(self, skill_name: str) -> str:
+        """
+        Load an agent skill from the skills directory.
+        
+        Args:
+            skill_name: Name of the skill file (without .md extension)
+            
+        Returns:
+            str: Content of the skill file
+        """
+        skill_path = os.path.join(Config.SKILLS_DIR, f"{skill_name}.md")
+        try:
+            if not os.path.exists(skill_path):
+                logger.warning(f"Skill file not found: {skill_path}")
+                return ""
+                
+            with open(skill_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        except Exception as e:
+            logger.error(f"Error loading skill {skill_name}: {e}")
+            return ""
     
     @staticmethod
     def _is_private_ip(ip_str: str) -> bool:
@@ -1588,7 +1611,7 @@ If zero claims found, return: {{"claims": []}}"""
 
     def analyze_ai_content(self, text):
         """
-        Analyze text for AI-generation likelihood (similar to GPT Zero).
+        Analyze text for AI-generation likelihood using the AI Detection skill file.
         
         Args:
             text: The text to analyze
@@ -1596,53 +1619,37 @@ If zero claims found, return: {{"claims": []}}"""
         Returns:
             Dict containing AI probability and indicators
         """
-        prompt = f"""You are an expert AI text detector. Your job is to determine if text was written by an AI language model (like ChatGPT, Claude, Gemini) or by a human.
+        # Load the expert skill manual
+        skill_manual = self._load_skill("ai_detection")
+        
+        if not skill_manual:
+            logger.warning("AI Detection skill manual missing, falling back to basic prompt")
+            skill_header = "You are an expert AI text detector."
+        else:
+            skill_header = f"Using the following Expert Forensic Manual:\n\n{skill_manual}"
 
-STRONG AI INDICATORS (score +20 each if present):
-- "Furthermore," "Moreover," "In addition," "As a result," at sentence starts
-- Phrases like "significantly transformed," "remarkable efficiency," "unprecedented capacity"
-- Perfect parallel sentence structures
-- Generic corporate/academic tone with no personal voice
-- Every paragraph is roughly the same length
-- No contractions (using "cannot" instead of "can't")
-- Hedging phrases like "it is important to note," "one might argue"
-- Bullet-point-ready prose (lists disguised as paragraphs)
-- Overuse of "various," "numerous," "substantial," "enhance"
+        prompt = f"""{skill_header}
 
-STRONG HUMAN INDICATORS (score -15 each if present):
-- Typos, grammatical errors, or informal punctuation
-- Personal opinions ("I think," "in my experience")
-- Specific examples from real life
-- Slang, contractions, or casual language
-- Emotional reactions or humor
-- Run-on sentences or fragments
-- Inconsistent formatting or structure
-
-SCORING GUIDE:
-- 80-100%: Clearly AI (multiple strong AI indicators, corporate/smooth prose)
-- 60-79%: Likely AI (some AI patterns, too polished)
-- 40-59%: Uncertain (mixed signals)
-- 20-39%: Likely Human (some polish but genuine voice)
-- 0-19%: Clearly Human (obvious personal voice, imperfections)
+TASK:
+Analyze the text below and determine if it was written by an AI language model (like ChatGPT, Claude, Gemini) or by a human.
 
 TEXT TO ANALYZE:
 \"\"\"
 {text}
 \"\"\"
 
-Be decisive. The text above uses classic AI writing patterns if it:
-- Opens with broad generalizations about technology/society
-- Uses transition words like "Furthermore" or "Moreover"
-- Has perfectly balanced paragraphs
-- Lacks any personal voice or specific examples
+INSTRUCTIONS:
+1. Apply the Forensic Guidelines from the manual above.
+2. Be decisive. Avoid middle-ground probabilities like 50% unless truly ambiguous.
+3. Identify specific markers (linguistic, structural, lexical) found in THIS text.
 
 RESPOND WITH JSON ONLY:
 {{
-    "ai_probability": <0-100 integer - be decisive, avoid 50>,
+    "ai_probability": <0-100 integer>,
     "confidence": "HIGH" or "MEDIUM" or "LOW",
-    "ai_indicators": ["specific patterns found in THIS text"],
+    "ai_indicators": ["specific markers found in the text"],
     "human_indicators": ["human traits found, if any"],
-    "explanation": "2-sentence verdict"
+    "explanation": "2 sentence verdict summarizing the findings"
 }}"""
 
         try:

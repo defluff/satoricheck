@@ -103,14 +103,6 @@ def ws_proxy(ws, session_id: int) -> None:
 
     # 2. Setup Deepgram Client
     try:
-        # Configuration for the Deepgram Client
-        # SDK v3+ often accepts simple config or defaults.
-        # We'll rely on the client to handle keepalives default or pass via config dict if needed
-        # but for now, simple init to fix the ImportError
-        
-        # Create a websocket connection to Deepgram
-        # We use v("1") as per SDK v3.x conventions used in this codebase
-        
         # Robust SSL Fix: Set environment variable for the entire process/thread
         # This ensures underlying C-extensions (like those used by aiohttp/websockets) use the correct CA
         os.environ['SSL_CERT_FILE'] = certifi.where()

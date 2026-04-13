@@ -255,7 +255,7 @@ class CardUI {
 
         card.innerHTML = `
             <div class="card-header">
-                <span class="ai-badge">🤖 AI Detection <span class="beta-tag">β</span></span>
+                <span class="ai-badge">AI Detection</span>
                 <span class="card-meta">${new Date().toLocaleTimeString()}</span>
             </div>
             <p class="claim-text">"${this.escapeHtml(previewText)}"</p>
@@ -293,7 +293,7 @@ class CardUI {
             explanation.toLowerCase().includes('timeout');
 
         // For beta, always show a disclaimer
-        const disclaimer = '<em style="color: var(--color-text-muted); font-size: 0.75rem;">This is a beta feature. Results are estimates only.</em>';
+        const disclaimer = '<em style="color: var(--color-text-muted); font-size: 0.75rem;">AI detection can make errors.</em>';
 
         resultContainer.innerHTML = DOMPurify.sanitize(`
             <div class="ai-probability-container ${colorClass}">
@@ -311,14 +311,14 @@ class CardUI {
             
             ${!isError && result.ai_indicators && result.ai_indicators.length > 0 ? `
                 <div class="ai-indicators">
-                    <strong>🤖 AI Indicators:</strong>
+                    <strong>AI Indicators:</strong>
                     <ul>${result.ai_indicators.map(i => `<li>${this.escapeHtml(String(i))}</li>`).join('')}</ul>
                 </div>
             ` : ''}
             
             ${!isError && result.human_indicators && result.human_indicators.length > 0 ? `
                 <div class="human-indicators">
-                    <strong>👤 Human Indicators:</strong>
+                    <strong>Human Indicators:</strong>
                     <ul>${result.human_indicators.map(i => `<li>${this.escapeHtml(String(i))}</li>`).join('')}</ul>
                 </div>
             ` : ''}
