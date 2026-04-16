@@ -192,100 +192,34 @@ RAW VISION OUTPUT (Full Text):
         return pdf_bytes[:5] == b'%PDF-'
 
     def _build_analysis_prompt(self) -> str:
-        """Build the prompt for pitch deck analysis."""
-        return """You are an expert VC analyst reviewing a pitch deck. Analyze this presentation thoroughly.
+        """
+        Build the extraction prompt by injecting the vc_analyst skill file.
 
-TASK: Extract key information AND verifiable claims from this pitch deck.
+        The skill file (vc_analyst.md) is the single source of truth for all VC domain
+        knowledge: benchmark tiers, metric definitions, claim categories, and output schema.
+        This mirrors the ai_detection skill pattern used in GeminiService.analyze_ai_content.
 
-ANALYZE BOTH TEXT AND VISUALS:
-- Read all text content carefully
-- Interpret charts, graphs, and diagrams
-- Note team photos and product screenshots
-- Extract data from tables and infographics
+        Falls back to a minimal inline prompt if the skill file is missing, so the
+        service degrades gracefully rather than raising an error.
+        """
+        # Deferred import to avoid circular imports at module load time.
+        from backend.services import get_gemini_service
+        skill_manual = get_gemini_service()._load_skill("vc_analyst")
 
-REQUIRED OUTPUT (JSON format):
-{
-    "company_name": "The company/startup name",
-    "summary": "2-3 sentence summary of what the company does and their core product/service",
-    "usp": "Their unique selling proposition - what makes them different from competitors",
-    "industry": "The broad industry category (e.g., CleanTech, FinTech, HealthTech, SaaS, AI/ML, E-commerce)",
-    "sector": "The specific vertical or niche (e.g., Water Purification, Payment Processing, Diagnostics)",
-    "market_size": "Total addressable market size if mentioned (e.g., '$50B by 2030'). Include source if stated.",
-    "competition": ["Competitor 1", "Competitor 2"],
-    "team_highlights": "Brief note on founders/team if shown",
-    "funding_ask": "Amount they're raising if mentioned",
-    "verifiable_claims": [
-        {
-            "claim": "The exact claim as stated (e.g., 'Global water purification market will reach $60B by 2030')",
-            "category": "market_size | revenue | growth_rate | roi | customer_count | cost_savings | competitor | technology | other",
-            "source_cited": "Source mentioned in deck if any (e.g., 'Statista', 'Company data', null)",
-            "is_quantitative": true,
-            "context": "Brief context about where this claim appears (e.g., 'Market slide', 'Financial projections')"
-        }
-    ],
-    "vc_metrics": {
-        "monthly_revenue_arr": { "value": "€85K MRR", "assessment": "Good",       "detail": "..." },
-        "burn_multiple":      { "value": "1.2x",     "assessment": "Good",       "detail": "..." },
-        "nrr_percent":        { "value": "115%",     "assessment": "Elite",      "detail": "..." },
-        "cac_payback_months": { "value": "8",        "assessment": "Good",       "detail": "..." },
-        "ltv_cac_ratio":      { "value": "4:1",      "assessment": "Good",       "detail": "..." },
-        "runway_months":      { "value": "18",       "assessment": "Good",       "detail": "..." }
-    }
-}
+        if not skill_manual:
+            # Graceful fallback — service keeps working without the skill file.
+            logger.warning("[Pitchdeck] vc_analyst skill missing, using fallback prompt")
+            return (
+                "You are an expert VC analyst. Analyze this pitch deck PDF and return a JSON "
+                "object with: company_name, summary, usp, industry, sector, market_size, "
+                "competition, team_highlights, funding_ask, verifiable_claims, vc_metrics. "
+                "Respond ONLY with valid JSON."
+            )
 
-VC METRICS RULES:
-- This tool analyses STARTUP pitch decks (startups seeking investment from angels, VCs, or grant bodies).
-- Extract ONLY from figures explicitly stated in the deck. Do NOT infer or fabricate.
-- "assessment" must be exactly one of: "Elite", "Good", "Caution", "Red Flag", "Not Disclosed", "Pre-Revenue".
-- "value" is the raw figure verbatim from the deck (e.g. "€85K MRR", "£1.2M ARR", "1.2x", "18"). ALWAYS use the currency symbol and amount exactly as stated — do NOT convert to USD. If the metric cannot be extracted and the startup is NOT pre-revenue, set to null.
-- "detail" is ONE sentence (max 200 characters) from an investor's perspective on what this signals.
-
-PRE-REVENUE RULE — apply when the startup has no revenue yet:
-  monthly_revenue_arr → { "value": "Pre-Revenue", "assessment": "Pre-Revenue", "detail": "No revenue yet — investors are evaluating team, market size, and early traction signals." }
-  burn_multiple, nrr_percent, cac_payback_months, ltv_cac_ratio → null (require revenue to calculate).
-  runway_months → still extract if cash balance and monthly burn are both stated.
-
-BENCHMARK TIERS (2026):
-
-  Monthly Revenue / ARR (report MRR or ARR exactly as stated in the deck, including currency symbol):
-    Elite: >1M | Good: 100K–1M | Caution: <100K | Pre-Revenue: no revenue yet.
-    Thresholds apply in whatever currency the deck uses — do NOT convert. Use "Not Disclosed" only if revenue exists but no figure is stated.
-
-  Burn Multiple (Net Burn ÷ Net New ARR):
-    Elite: <1x | Good: 1.0–1.5x | Caution: 1.5–2x | Red Flag: >2x
-    → null if pre-revenue OR if burn rate and ARR growth are not both stated.
-
-  NRR / Net Revenue Retention (%):
-    Elite: >120% | Good: 100–120% | Caution: 80–100% | Red Flag: <80%
-    → null if pre-revenue OR if no churn, retention, or expansion revenue data stated.
-
-  CAC Payback (months to recover CAC from gross margin):
-    Elite: <6 mo | Good: 6–12 mo | Caution: 12–18 mo | Red Flag: >18 mo
-    → null if pre-revenue OR if CAC or payback period not stated.
-
-  LTV:CAC Ratio:
-    Elite: ≥5:1 | Good: 3–5:1 | Caution: 1.5–3:1 | Red Flag: <1.5:1
-    → null if pre-revenue OR if LTV or CAC not stated.
-
-  Cash Runway (months at current burn):
-    Elite: >24 mo | Good: 18–24 mo | Caution: 12–18 mo | Red Flag: <12 mo
-    → null if cash balance or monthly burn not stated.
-
-CLAIM EXTRACTION RULES:
-- Extract ALL quantitative claims (numbers, percentages, dollar amounts, growth rates)
-- Prioritize claims about: market size, revenue, growth rates, ROI, customer acquisition cost, unit economics
-- Include claims about competitor comparisons, technology advantages, or market positioning
-- Note if the deck cites a source (Statista, Gartner, SEC filings, etc.)
-- Maximum 10 claims, prioritize the most significant ones
-
-GENERAL RULES:
-- Be concise and factual
-- Only include information actually present in the deck
-- If a field is not mentioned, use null
-- Extract exact numbers/stats when shown
-- For industry/sector, infer from context if not explicitly stated
-
-Respond ONLY with valid JSON, no additional text."""
+        return (
+            f"Using the following Expert VC Analyst Manual:\n\n{skill_manual}\n\n"
+            "Analyze the attached pitch deck PDF and respond ONLY with valid JSON."
+        )
 
     def _call_gemini_vision(self, pdf_bytes: bytes, prompt: str) -> dict:
         """

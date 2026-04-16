@@ -253,7 +253,17 @@ class PitchdeckModule {
 
         // Populate Market & Competition
         document.getElementById('pd-industry').innerHTML = DOMPurify.sanitize(result.industry || '—');
-        document.getElementById('pd-sector').innerHTML = DOMPurify.sanitize(result.sector || '—');
+
+        // Only render sector + separator when a meaningful sector value exists.
+        // Gemini sometimes returns '.' or null when sector is implicit — suppress those.
+        const sectorEl = document.getElementById('pd-sector');
+        const separatorEl = sectorEl?.previousElementSibling; // .pd-separator span
+        const sectorValue = (result.sector || '').trim();
+        const hasSector = sectorValue && sectorValue !== '.' && sectorValue !== '—';
+        if (sectorEl) sectorEl.innerHTML = hasSector ? DOMPurify.sanitize(sectorValue) : '';
+        if (separatorEl?.classList.contains('pd-separator')) {
+            separatorEl.style.display = hasSector ? '' : 'none';
+        }
         document.getElementById('pd-market-size').innerHTML = DOMPurify.sanitize(result.market_size || 'Not specified');
 
         const competitionList = document.getElementById('pd-competition-list');
@@ -297,6 +307,9 @@ class PitchdeckModule {
 
         // Display extracted claims (no auto-verification)
         this.displayClaims(result);
+
+        // Display red flags below exec summary
+        this._displayRedFlags(result);
     }
 
     /**
@@ -478,6 +491,39 @@ class PitchdeckModule {
         }));
 
         console.log('[Pitchdeck] Displayed', claims.length, 'claims in', Object.keys(groupedClaims).length, 'categories');
+    }
+
+    /**
+     * Render the red flags section in the exec summary card.
+     * Hides the section entirely when the model returns no flags.
+     * @param {Object} analysisResult - The full analysis result
+     */
+    _displayRedFlags(analysisResult) {
+        const container = document.getElementById('pd-red-flags');
+        const list = document.getElementById('pd-red-flags-list');
+        if (!container || !list) return;
+
+        const flags = analysisResult.red_flags;
+
+        // Hide section when no red flags extracted or field absent
+        if (!Array.isArray(flags) || flags.length === 0) {
+            container.classList.add('hidden');
+            return;
+        }
+
+        list.innerHTML = '';
+
+        flags.forEach(flagText => {
+            if (typeof flagText !== 'string' || !flagText.trim()) return;
+            const li = document.createElement('li');
+            li.className = 'pd-red-flag-item';
+            // Use textContent — flag strings are plain text from the AI, no markup needed.
+            // This also avoids any XSS risk without needing DOMPurify here.
+            li.textContent = flagText.trim();
+            list.appendChild(li);
+        });
+
+        container.classList.remove('hidden');
     }
 
     /**

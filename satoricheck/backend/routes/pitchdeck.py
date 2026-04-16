@@ -146,6 +146,7 @@ def analyze_pitch_deck():
 
 @pitchdeck_bp.route('/verify-market', methods=['POST'])
 @login_required
+@limiter.limit("20 per hour")
 def verify_market_claims():
     """
     Fact-check market claims from a pitch deck analysis.
