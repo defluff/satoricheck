@@ -149,6 +149,9 @@ class PitchdeckModule {
         const marketLoading = document.getElementById('pd-market-loading');
         const marketResults = document.getElementById('pd-market-results');
 
+        // Declared outside try so the finally block can clear it
+        let timeoutId;
+
         try {
             // === SHOW LOADING STATE ===
             this.elements.generateBtn.disabled = true;
@@ -175,7 +178,7 @@ class PitchdeckModule {
             // The backend itself allows up to 180s per attempt — without this the
             // browser can drop the connection before the server finishes.
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 120_000); // 2 min (90s backend + margin)
+            timeoutId = setTimeout(() => controller.abort(), 120_000); // 2 min (90s backend + margin)
 
                 const result = await api.analyzePitchDeck(base64Data, controller.signal);
 
