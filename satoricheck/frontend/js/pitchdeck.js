@@ -167,8 +167,8 @@ class PitchdeckModule {
             marketLoading?.classList.remove('hidden');
             marketResults?.classList.add('hidden');
 
-            // === CONVERT FILE TO BASE64 ===
-            const base64Data = this.arrayBufferToBase64(this.uploadedFileData);
+            // === PDF DATA (already Base64 encoded natively) ===
+            const base64Data = this.uploadedFileData;
 
             // === CALL API ===
             // Use AbortController for a 2-minute client-side timeout.
@@ -707,20 +707,6 @@ class PitchdeckModule {
     }
 
     /**
-     * Convert ArrayBuffer to Base64 string
-     * @param {ArrayBuffer} buffer
-     * @returns {string}
-     */
-    arrayBufferToBase64(buffer) {
-        let binary = '';
-        const bytes = new Uint8Array(buffer);
-        for (let i = 0; i < bytes.byteLength; i++) {
-            binary += String.fromCharCode(bytes[i]);
-        }
-        return btoa(binary);
-    }
-
-    /**
      * Handle file upload - validates and reads the file into memory.
      * Privacy-first: Data stays in browser memory, never uploaded to server for storage.
      * @param {File} file - The uploaded file
@@ -748,13 +734,16 @@ class PitchdeckModule {
             return;
         }
 
-        // Read file into memory using FileReader (client-side only)
+        // Read file into memory natively directly into base64 to prevent UI thread lockups
         const reader = new FileReader();
 
         reader.onload = (e) => {
+            // Extract pure base64 string (remove data URL prefix)
+            const base64String = e.target.result.split(',')[1];
+            
             // Store file data in memory (ephemeral - discarded on session end)
             this.uploadedFile = file;
-            this.uploadedFileData = e.target.result;
+            this.uploadedFileData = base64String;
 
             // Update UI to show success state
             this.showUploadSuccess(file.name);
@@ -765,8 +754,8 @@ class PitchdeckModule {
             this.resetUpload();
         };
 
-        // Read as ArrayBuffer (for later PDF processing)
-        reader.readAsArrayBuffer(file);
+        // Read natively as Base64 Data URL (insanely fast compared to JS array buffers)
+        reader.readAsDataURL(file);
     }
 
     /**
