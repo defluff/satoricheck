@@ -1,3 +1,4 @@
+from typing import Union, Optional, List, Dict, Any
 """
 xAI Grok API service for social context in Smart Mode.
 Searches X/Twitter for quote sources and recent events.
@@ -26,7 +27,7 @@ def strip_invisible_chars(text: str) -> str:
     return invisible_pattern.sub('', text)
 
 
-def validate_social_url(url: str) -> str | None:
+def validate_social_url(url: str) -> Optional[str]:
     """Only allow known social media domains (SSRF protection)."""
     if not url:
         return None

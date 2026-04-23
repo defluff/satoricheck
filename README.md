@@ -22,6 +22,11 @@ Fully vibecoded, AI-powered fact-checking app with live audio transcription, Met
 
 ## Quick Start
 
+### Prerequisites
+**Python 3.11 or newer** 
+
+### Setup
+
 ```bash
 # 1. Enter project directory
 cd satoricheck

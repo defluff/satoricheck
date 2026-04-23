@@ -1,3 +1,4 @@
+from typing import Union, Optional, List, Dict, Any
 """
 WebSocket Proxy for Deepgram Live Pro.
 Routes audio from browser → backend → Deepgram using the official SDK.
@@ -36,7 +37,7 @@ def init_websocket_proxy(app) -> None:
     logger.info("✓ WebSocket proxy initialized (SDK Mode)")
 
 
-def _authenticate_ws_user(environ: dict) -> int | None:
+def _authenticate_ws_user(environ: dict) -> Optional[int]:
     """Extract and verify JWT from WebSocket handshake cookies.
 
     Returns the user_id if valid, None otherwise.

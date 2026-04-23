@@ -2,7 +2,7 @@
  * API client for the SatoriCheck extension.
  *
  * Reads the Bearer token from storage and attaches it to every
- * request. Configurable base URL to switch between localhost
+ * request. Configurable base URL to switch between 127.0.0.1
  * and production.
  *
  * @module api
@@ -11,9 +11,9 @@
 import { getToken } from './storage.js';
 import { fetchWithRetry } from './retry.js';
 
-// Toggle for development — change to localhost when testing locally
+// Toggle for development — change to 127.0.0.1 when testing locally
 const API_BASE = 'https://satoricheck.com/api';
-// const API_BASE = 'http://localhost:8000/api';
+// const API_BASE = 'http://127.0.0.1:8000/api';
 
 /** Default timeout per request attempt (ms). Used for fast endpoints (auth, balance). */
 const DEFAULT_TIMEOUT_MS = 20000;
