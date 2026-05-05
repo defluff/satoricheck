@@ -26,8 +26,8 @@
 
 /* Primary button */
 .btn-primary {
-    background: var(--gradient-primary);
-    color: white;
+    background: var(--color-primary);
+    color: var(--color-primary-text, white);
     padding: var(--spacing-sm) var(--spacing-lg);
     box-shadow: var(--shadow-md);
 }

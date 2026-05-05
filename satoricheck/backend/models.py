@@ -1,5 +1,5 @@
 """
-Database models for SatoriCheck.
+Database models for Authenix.
 """
 from datetime import datetime, UTC
 from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, Index

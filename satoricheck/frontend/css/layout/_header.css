@@ -35,6 +35,18 @@
     -webkit-text-fill-color: initial;
 }
 
+.logo-img {
+    height: 40px;
+    width: auto;
+    /* Display the original black logo for light theme */
+    filter: none;
+    transition: filter var(--transition-fast);
+}
+
+[data-theme="dark"] .logo-img {
+    filter: brightness(0) invert(1);
+}
+
 .header-actions {
     display: flex;
     align-items: center;

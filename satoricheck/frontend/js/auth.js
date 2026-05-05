@@ -44,7 +44,7 @@ class AuthManager {
             alert(
                 '⚠️ In-App Browser Detected\n\n' +
                 'Google Sign-In is not supported in this browser.\n\n' +
-                'Please open SatoriCheck in Safari or Chrome:\n' +
+                'Please open Authenix in Safari or Chrome:\n' +
                 '• Tap the ⋮ or ⋯ menu\n' +
                 '• Select "Open in Safari" or "Open in Browser"'
             );

@@ -1,9 +1,9 @@
 /* _toggle-switch.css - Toggle switches including smart agent variant */
 
 .toggle-switch {
-    display: flex;
+    display: flex !important;
     align-items: center;
-    gap: 6px;
+    gap: 12px;
     cursor: pointer;
     user-select: none;
 }

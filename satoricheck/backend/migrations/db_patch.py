@@ -1,5 +1,5 @@
 """
-Universal Database Patch for SatoriCheck.
+Universal Database Patch for Authenix.
 Fixes missing last_billed_at column in live_pro_sessions.
 Works for both SQLite (Local) and PostgreSQL (Production).
 """

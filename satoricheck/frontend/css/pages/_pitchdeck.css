@@ -30,8 +30,8 @@
 }
 
 .module-nav-btn.active {
-    background: var(--gradient-primary);
-    color: white;
+    background: var(--color-primary);
+    color: var(--color-primary-text, white);
     box-shadow: 0 2px 8px var(--glow-primary);
 }
 
@@ -54,7 +54,7 @@
 }
 
 .pd-upload-zone {
-    background: rgba(53, 59, 74, 0.6);
+    background: var(--color-upload-bg);
     border: 2px dashed var(--color-border);
     border-radius: var(--radius-xl);
     padding: var(--spacing-xl) var(--spacing-lg);
@@ -535,9 +535,9 @@
     font-weight: 600;
     padding: 4px 12px;
     border-radius: var(--radius-sm);
-    background: var(--gradient-primary);
+    background: var(--color-primary);
     border: none;
-    color: white;
+    color: var(--color-primary-text, white);
     cursor: pointer;
     transition: all 0.2s ease;
 }
@@ -596,9 +596,9 @@
     font-weight: 600;
     padding: 4px 12px;
     border-radius: var(--radius-sm);
-    background: var(--gradient-primary);
+    background: var(--color-primary);
     border: none;
-    color: white;
+    color: var(--color-primary-text, white);
     cursor: pointer;
     transition: all 0.2s ease;
     flex-shrink: 0;

@@ -66,7 +66,7 @@ connectBtn.addEventListener('click', async () => {
         await clearAuth();
 
         connectError.textContent = error.status === 401
-            ? 'Invalid token. Please copy a fresh one from satoricheck.com'
+            ? 'Invalid token. Please copy a fresh one from authenix.ai'
             : `Connection failed: ${error.message}`;
         connectError.classList.remove('hidden');
 
@@ -78,7 +78,7 @@ connectBtn.addEventListener('click', async () => {
 // Open satoricheck.com?ext=1 to get a token
 getTokenLink.addEventListener('click', (e) => {
     e.preventDefault();
-    chrome.tabs.create({ url: 'https://satoricheck.com?ext=1' });
+    chrome.tabs.create({ url: 'https://authenix.ai?ext=1' });
 });
 
 // Open side panel
@@ -106,7 +106,7 @@ balanceBadge.addEventListener('click', async () => {
             chrome.tabs.create({ url: result.url });
         }
     } catch {
-        chrome.tabs.create({ url: 'https://satoricheck.com' });
+        chrome.tabs.create({ url: 'https://authenix.ai' });
     }
 });
 

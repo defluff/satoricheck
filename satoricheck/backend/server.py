@@ -1,5 +1,5 @@
 """
-SatoriCheck - Live Fact Checker Backend Server
+Authenix - Live Fact Checker Backend Server
 Clean, modular Flask application with robust error handling.
 """
 import os
@@ -72,7 +72,7 @@ def check_maintenance_mode():
         # Return 503 Service Unavailable for everything else
         return jsonify({
             'error': 'Maintenance Mode',
-            'message': 'SatoriCheck is currently undergoing maintenance. Please try again later.'
+            'message': 'Authenix is currently undergoing maintenance. Please try again later.'
         }), 503
 
 @app.before_request
@@ -298,7 +298,7 @@ def shutdown_session(exception=None):
 def main():
     """Main entry point."""
     logger.info("=" * 60)
-    logger.info("SatoriCheck - Live Fact Checker")
+    logger.info("Authenix - Live Fact Checker")
     logger.info("=" * 60)
     
     if Config.TEST_MODE:

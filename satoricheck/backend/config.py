@@ -1,5 +1,5 @@
 """
-Configuration management for SatoriCheck.
+Configuration management for Authenix.
 Loads environment variables and provides app configuration.
 """
 import os

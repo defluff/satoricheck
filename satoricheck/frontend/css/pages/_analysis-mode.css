@@ -29,10 +29,6 @@
 
 .analysis-mode-btn.active {
     background: var(--color-primary);
-    color: white;
+    color: var(--color-primary-text, white);
     box-shadow: var(--shadow-sm);
-}
-
-.analysis-mode-btn[data-mode="aidetect"].active {
-    background: linear-gradient(135deg, #9333ea, #7c3aed);
 }

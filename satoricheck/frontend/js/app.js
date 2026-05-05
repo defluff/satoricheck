@@ -23,6 +23,14 @@ class App {
         // Initialize auth first
         await auth.init();
 
+        // Initialize Theme
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+        const darkModeToggle = document.getElementById('dark-mode-toggle');
+        if (darkModeToggle) {
+            darkModeToggle.checked = (savedTheme === 'dark');
+        }
+
         // Set up all event listeners
         this.setupEventListeners();
 
@@ -55,10 +63,10 @@ class App {
                 if (liveProIndicator) liveProIndicator.classList.add('hidden');
             });
         } else {
-            // Hide Live Pro button if not available
-            const liveProBtn = document.getElementById('mode-live-pro');
-            if (liveProBtn) {
-                liveProBtn.style.display = 'none';
+            // Hide Live Pro toggle if not available
+            const proToggle = document.getElementById('pro-mode-toggle-container');
+            if (proToggle) {
+                proToggle.style.display = 'none';
             }
         }
 
@@ -82,30 +90,25 @@ class App {
         // Factcheck event listeners
         factcheck.setupEventListeners();
 
-        // Transcription mode selector
-        const modeStandard = document.getElementById('mode-standard');
-        const modeLivePro = document.getElementById('mode-live-pro');
+        // Transcription mode selector (Pro Toggle)
+        const proToggle = document.getElementById('mode-live-pro-toggle');
         const liveProIndicator = document.getElementById('live-pro-indicator');
 
-        if (modeStandard && modeLivePro) {
-            modeStandard.addEventListener('click', () => {
-                this.liveProMode = false;
-                modeStandard.classList.add('active');
-                modeLivePro.classList.remove('active');
-                liveProIndicator?.classList.add('hidden');
-                ui.elements.micBtn.classList.remove('live-pro-active');
-            });
+        if (proToggle) {
+            proToggle.addEventListener('change', () => {
+                if (proToggle.checked) {
+                    // Check if we should skip confirmation modal
+                    const hideModal = localStorage.getItem('hideLiveProModal') === 'true';
 
-            modeLivePro.addEventListener('click', () => {
-                // Check if we should skip confirmation modal
-                const hideModal = localStorage.getItem('hideLiveProModal') === 'true';
-
-                if (hideModal) {
-                    // Activate directly
-                    this.activateLiveProMode();
+                    if (hideModal) {
+                        this.activateLiveProMode();
+                    } else {
+                        ui.showModal('live-pro-modal');
+                    }
                 } else {
-                    // Show confirmation modal
-                    ui.showModal('live-pro-modal');
+                    this.liveProMode = false;
+                    liveProIndicator?.classList.add('hidden');
+                    ui.elements.micBtn.classList.remove('live-pro-active');
                 }
             });
         }
@@ -158,12 +161,18 @@ class App {
         if (cancelLiveProBtn) {
             cancelLiveProBtn.addEventListener('click', () => {
                 ui.hideModal('live-pro-modal');
+                this.liveProMode = false;
+                const proToggle = document.getElementById('mode-live-pro-toggle');
+                if (proToggle) proToggle.checked = false;
             });
         }
 
         if (closeLiveProModal) {
             closeLiveProModal.addEventListener('click', () => {
                 ui.hideModal('live-pro-modal');
+                this.liveProMode = false;
+                const proToggle = document.getElementById('mode-live-pro-toggle');
+                if (proToggle) proToggle.checked = false;
             });
         }
 
@@ -199,7 +208,23 @@ class App {
         ui.elements.settingsBtn.addEventListener('click', async () => {
             ui.showModal('settings-modal');
             await ui.updateAudioDevices();
+            
+            // Sync toggle state just in case
+            const darkModeToggle = document.getElementById('dark-mode-toggle');
+            if (darkModeToggle) {
+                darkModeToggle.checked = document.documentElement.getAttribute('data-theme') === 'dark';
+            }
         });
+
+        // Dark Mode Toggle
+        const darkModeToggle = document.getElementById('dark-mode-toggle');
+        if (darkModeToggle) {
+            darkModeToggle.addEventListener('change', () => {
+                const theme = darkModeToggle.checked ? 'dark' : 'light';
+                document.documentElement.setAttribute('data-theme', theme);
+                localStorage.setItem('theme', theme);
+            });
+        }
 
         // Close settings modal
         ui.elements.closeSettingsModal.addEventListener('click', () => {
@@ -429,12 +454,11 @@ class App {
      * Activate Live Pro mode - updates UI and sets mode flag
      */
     activateLiveProMode() {
-        const modeStandard = document.getElementById('mode-standard');
-        const modeLivePro = document.getElementById('mode-live-pro');
-
         this.liveProMode = true;
-        modeLivePro?.classList.add('active');
-        modeStandard?.classList.remove('active');
+        const proToggle = document.getElementById('mode-live-pro-toggle');
+        if (proToggle) {
+            proToggle.checked = true;
+        }
         // Toast removed to avoid confusion (Live Pro isn't 'Active' until Mic is clicked)
     }
 

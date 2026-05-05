@@ -54,8 +54,8 @@
 }
 
 .ma-tab-btn.active {
-    background: var(--gradient-primary);
-    color: white;
+    background: var(--color-primary);
+    color: var(--color-primary-text, white);
     box-shadow: 0 2px 8px var(--glow-primary);
 }
 
@@ -66,7 +66,7 @@
 
 /* --- Drop Zone — mirrors .pd-upload-zone --- */
 .ma-drop-zone {
-    background: rgba(53, 59, 74, 0.6);
+    background: var(--color-upload-bg);
     border: 2px dashed var(--color-border);
     border-radius: var(--radius-xl);
     padding: var(--spacing-xl) var(--spacing-lg);
@@ -176,7 +176,7 @@
 
 /* --- URL Panel --- */
 .ma-url-panel {
-    background: rgba(53, 59, 74, 0.6);
+    background: var(--color-upload-bg);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-xl);
     padding: var(--spacing-xl) var(--spacing-lg);
@@ -236,8 +236,8 @@
     justify-content: center;
     gap: var(--spacing-sm);
     padding: var(--spacing-sm) var(--spacing-xl);
-    background: var(--gradient-primary);
-    color: white;
+    background: var(--color-primary);
+    color: var(--color-primary-text, white);
     border: none;
     border-radius: var(--radius-lg);
     font-size: 1rem;

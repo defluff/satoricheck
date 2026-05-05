@@ -153,7 +153,7 @@ class GeminiService:
             # Enforce NO REDIRECTS to prevent SSRF bypass via redirect to private IP
             # We follow redirects manually if they pass validation.
             response = requests.head(url, timeout=3, allow_redirects=False, headers={
-                'User-Agent': 'Mozilla/5.0 (compatible; SatoriCheck/1.0)'
+                'User-Agent': 'Mozilla/5.0 (compatible; Authenix/1.0)'
             })
             
             if 300 <= response.status_code < 400:
@@ -1741,7 +1741,7 @@ RESPOND WITH JSON ONLY:
             resp = requests.get(
                 str(media_input),
                 timeout=30,
-                headers={'User-Agent': 'Mozilla/5.0 (compatible; SatoriCheck/1.0)'},
+                headers={'User-Agent': 'Mozilla/5.0 (compatible; Authenix/1.0)'},
                 stream=True
             )
             resp.raise_for_status()

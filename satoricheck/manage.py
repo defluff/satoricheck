@@ -1,5 +1,5 @@
 """
-SatoriCheck Admin CLI
+Authenix Admin CLI
 Use this script to manually manage users and token balances.
 
 Usage:
@@ -108,7 +108,7 @@ def cleanup_users(keep_email):
         print(f"✅ Deleted {deleted_count} users. Kept: {keep_email}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="SatoriCheck Admin CLI")
+    parser = argparse.ArgumentParser(description="Authenix Admin CLI")
     subparsers = parser.add_subparsers(dest='command')
 
     # list-users

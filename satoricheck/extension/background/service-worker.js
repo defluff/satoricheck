@@ -2,7 +2,7 @@
  * Background service worker — extension entry point.
  *
  * Responsibilities:
- *   - Register context menu item ("Fact-check with SatoriCheck")
+ *   - Register context menu item ("Fact-check with Authenix")
  *   - Route context menu clicks to the side panel
  *   - Handle messages from popup, side panel, and content script
  *   - Restrict storage access to trusted contexts
@@ -25,7 +25,7 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false })
 chrome.runtime.onInstalled.addListener(() => {
     chrome.contextMenus.create({
         id: 'satori-factcheck',
-        title: 'Fact-check with SatoriCheck',
+        title: 'Fact-check with Authenix',
         contexts: ['selection'],
     });
 });
@@ -54,7 +54,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
             // Panel not ready yet — SIDE_PANEL_READY handshake will deliver
         });
     } catch (error) {
-        console.error('[SatoriCheck] Failed to open side panel:', error);
+        console.error('[Authenix] Failed to open side panel:', error);
         pendingSelection = null;
     }
 });

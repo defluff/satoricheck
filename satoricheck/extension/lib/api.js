@@ -1,5 +1,5 @@
 /**
- * API client for the SatoriCheck extension.
+ * API client for the Authenix extension.
  *
  * Reads the Bearer token from storage and attaches it to every
  * request. Configurable base URL to switch between 127.0.0.1

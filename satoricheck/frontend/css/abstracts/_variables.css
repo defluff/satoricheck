@@ -1,36 +1,40 @@
 /* _variables.css - Design tokens: colors, spacing, shadows, transitions */
 
 :root {
-    /* Colors - Premium Lighter Theme */
-    --color-bg: #2a2f3a;
-    --color-surface: #353b4a;
-    --color-surface-elevated: #424957;
-    --color-border: #4f5665;
-    --color-text: #f0f2f5;
-    --color-text-secondary: #c5cad5;
-    --color-text-muted: #9aa0b0;
+    /* Colors - Premium Light Theme */
+    --color-bg: #FFFAFA; /* Snow White */
+    --color-surface: #FFFFFF; /* Pure White */
+    --color-surface-elevated: #F0F4F8; /* Very light slate */
+    --color-border: #D1D5DB; /* Defined borders */
+    --color-text: #111827; /* High contrast black */
+    --color-text-secondary: #4B5563; /* Slate gray */
+    --color-text-muted: #6B7280; /* Muted gray */
 
     /* Accent Colors */
-    --color-primary: #3b82f6;
-    --color-primary-hover: #2563eb;
-    --color-secondary: #8b5cf6;
-    --color-success: #10b981;
-    --color-error: #ef4444;
-    --color-warning: #f59e0b;
-    --color-info: #3b82f6;
+    --color-primary: #ADD8E6; /* Light Blue Accent */
+    --color-primary-hover: #87CEEB;
+    --color-primary-text: #111827; /* Dark text for contrast */
+    --color-secondary: #6D8196; /* Slate Accent */
+    --color-success: #10B981;
+    --color-error: #EF4444;
+    --color-warning: #F59E0B;
+    --color-info: #000080;
 
     /* Verdict Colors */
-    --color-true: #10b981;
-    --color-false: #ef4444;
-    --color-misleading: #f59e0b;
-    --color-not-verified: #3b82f6;
-    --color-not-claim: #6b7280;
+    --color-true: #10B981;
+    --color-false: #EF4444;
+    --color-misleading: #F59E0B;
+    --color-not-verified: #000080;
+    --color-not-claim: #9CA3AF;
+
+    /* Upload Zone Background */
+    --color-upload-bg: rgba(173, 216, 230, 0.25); /* Icy Blue subtle */
 
     /* Gradients */
-    --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    --gradient-success: linear-gradient(135deg, #10b981 0%, #059669 100%);
-    --gradient-error: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-    --gradient-surface: linear-gradient(180deg, rgba(26, 29, 35, 0) 0%, rgba(18, 20, 24, 0.8) 100%);
+    --gradient-primary: linear-gradient(135deg, #000080 0%, #ADD8E6 100%);
+    --gradient-success: linear-gradient(135deg, #10B981 0%, #059669 100%);
+    --gradient-error: linear-gradient(135deg, #EF4444 0%, #DC2626 100%);
+    --gradient-surface: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(255, 250, 250, 0.8) 100%);
 
     /* Spacing */
     --spacing-xs: 0.25rem;
@@ -45,12 +49,75 @@
     --radius-lg: 0.75rem;
     --radius-xl: 1rem;
 
-    /* Shadows */
+    /* Shadows - Optimized for light mode */
     --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
-    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.4);
-    --shadow-glow: 0 0 20px var(--color-primary-glow);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.15);
+    --shadow-glow: 0 0 20px rgba(0, 0, 128, 0.15);
+
+    /* Background Colors - Semi-transparent */
+    --bg-success-subtle: rgba(16, 185, 129, 0.1);
+    --bg-success-hover: rgba(16, 185, 129, 0.05);
+    --bg-primary-subtle: rgba(0, 0, 128, 0.1);
+    --bg-primary-hover: rgba(0, 0, 128, 0.05);
+    --bg-error-subtle: rgba(239, 68, 68, 0.08);
+    --bg-warning-subtle: rgba(245, 158, 11, 0.1);
+    --bg-warning-hover: rgba(245, 158, 11, 0.03);
+
+    /* Glows and Shadows (Navy Blue theme) */
+    --glow-primary: rgba(0, 0, 128, 0.2);
+    --glow-primary-strong: rgba(0, 0, 128, 0.3);
+    --glow-primary-light: rgba(0, 0, 128, 0.1);
+    --glow-primary-zero: rgba(0, 0, 128, 0);
+    --glow-success: rgba(16, 185, 129, 0.15);
+    --glow-warning: rgba(245, 158, 11, 0.15);
+    --glow-warning-strong: rgba(245, 158, 11, 0.3);
+    --glow-secondary: rgba(109, 129, 150, 0.3);
+
+    /* Overlay */
+    --overlay-dark: rgba(0, 0, 0, 0.4);
+    --overlay-darker: rgba(0, 0, 0, 0.6);
+
+    /* Transitions */
+    --transition-fast: 150ms ease;
+    --transition-base: 250ms ease;
+    --transition-slow: 350ms ease;
+}
+
+:root[data-theme="dark"] {
+    /* Colors - Premium Dark Theme */
+    --color-bg: #2f3441;
+    --color-surface: #3b4252;
+    --color-surface-elevated: #48505e;
+    --color-border: #565e6e;
+    --color-text: #f0f2f5;
+    --color-text-secondary: #cdd2dc;
+    --color-text-muted: #a3a9b8;
+
+    /* Accent Colors */
+    --color-primary: #3b82f6;
+    --color-primary-hover: #2563eb;
+    --color-primary-text: #ffffff;
+    --color-secondary: #8b5cf6;
+    --color-success: #10b981;
+    --color-error: #ef4444;
+    --color-warning: #f59e0b;
+    --color-info: #3b82f6;
+
+    /* Verdict Colors */
+    --color-true: #10b981;
+    --color-false: #ef4444;
+    --color-misleading: #f59e0b;
+    --color-not-verified: #3b82f6;
+    --color-not-claim: #6b7280;
+
+    /* Upload Zone Background */
+    --color-upload-bg: rgba(53, 59, 74, 0.6);
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    --gradient-surface: linear-gradient(180deg, rgba(26, 29, 35, 0) 0%, rgba(18, 20, 24, 0.8) 100%);
 
     /* Background Colors - Semi-transparent */
     --bg-success-subtle: rgba(16, 185, 129, 0.15);
@@ -74,9 +141,4 @@
     /* Overlay */
     --overlay-dark: rgba(0, 0, 0, 0.8);
     --overlay-darker: rgba(0, 0, 0, 0.9);
-
-    /* Transitions */
-    --transition-fast: 150ms ease;
-    --transition-base: 250ms ease;
-    --transition-slow: 350ms ease;
 }

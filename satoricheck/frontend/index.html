@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SatoriCheck - Live Fact Checker</title>
+    <title>Authenix - Live Fact Checker</title>
     <meta name="description" content="Real-time AI-powered fact-checking with live audio transcription">
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="css/main.css?v=3">
@@ -20,7 +20,7 @@
     <header class="app-header">
         <div class="header-content">
             <h1 class="app-logo">
-                SatoriCheck
+                <img src="assets/logo-authenix.png" alt="Authenix" class="logo-img" width="40" height="40">
             </h1>
 
             <!-- Module Navigation Toggle -->
@@ -95,19 +95,16 @@
                                 <span class="toggle-slider"></span>
                                 <span class="toggle-label">Auto</span>
                             </label>
+                            
+                            <label class="toggle-switch" id="pro-mode-toggle-container" title="Premium Deepgram (1 CP/min)">
+                                <input type="checkbox" id="mode-live-pro-toggle">
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">⚡ Pro</span>
+                            </label>
                         </div>
 
-                        <!-- Right group: Transcription mode + Mic + Check -->
+                        <!-- Right group: Mic + Check -->
                         <div class="control-group">
-                            <div class="transcription-mode-selector" id="transcription-mode-selector">
-                                <button class="mode-btn active" id="mode-standard" title="Free browser transcription">
-                                    Standard
-                                </button>
-                                <button class="mode-btn mode-pro" id="mode-live-pro"
-                                    title="Premium Deepgram (1 CP/min)">
-                                    ⚡ Pro
-                                </button>
-                            </div>
 
 
 
@@ -620,6 +617,17 @@
         <div class="modal-content">
             <button class="modal-close" id="close-settings-modal">×</button>
             <h2>Settings</h2>
+            
+            <div class="settings-section">
+                <h3>Display</h3>
+                <div class="form-group">
+                    <label class="toggle-switch" title="Enable Dark Mode">
+                        <input type="checkbox" id="dark-mode-toggle">
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">Dark Mode</span>
+                    </label>
+                </div>
+            </div>
 
             <div class="settings-section">
                 <h3>Account</h3>
@@ -653,7 +661,7 @@
 
             <div class="settings-section">
                 <h3>Extension Access</h3>
-                <p class="settings-help">Use this token to connect the SatoriCheck browser extension to your account.</p>
+                <p class="settings-help">Use this token to connect the Authenix browser extension to your account.</p>
                 <button class="btn-secondary" id="show-extension-token-btn">Show Extension Token</button>
             </div>
 
@@ -670,7 +678,7 @@
         <div class="modal-content">
             <button class="modal-close" id="close-extension-token-modal">×</button>
             <h2>🔌 Extension Token</h2>
-            <p class="modal-subtitle">Paste this token in the SatoriCheck browser extension to activate it.</p>
+            <p class="modal-subtitle">Paste this token in the Authenix browser extension to activate it.</p>
 
             <div class="extension-token-display">
                 <input type="text" id="extension-token-value" class="extension-token-input" readonly
@@ -769,8 +777,8 @@
             <h2>❓ Help & About</h2>
 
             <div class="help-section">
-                <h3>About SatoriCheck</h3>
-                <p>SatoriCheck is an indie AI-powered fact-checking tool that helps you verify claims in real-time.</p>
+                <h3>About Authenix</h3>
+                <p>Authenix is an AI-powered fact-checking tool that helps you verify claims in real-time.</p>
                 <p>Built in Switzerland with ❤️<br><strong>Andreas</strong></p>
             </div>
 
@@ -807,7 +815,7 @@
     <div class="modal hidden" id="intro-modal">
         <div class="modal-overlay"></div>
         <div class="modal-content intro-content">
-            <h2>👋 Welcome to SatoriCheck!</h2>
+            <h2>👋 Welcome to Authenix!</h2>
 
             <div class="intro-features">
                 <div class="intro-feature">
@@ -822,7 +830,7 @@
                     <span class="intro-icon">📊</span>
                     <div>
                         <strong>Pitch Decks worth checking</strong>
-                        <p>Upload a Pitch Deck and Satori will analys its claims, summarise it and look for important
+                        <p>Upload a Pitch Deck and Authenix will analyse its claims, summarise it and look for important
                             metrics while at it.</p>
                     </div>
                 </div>
@@ -830,7 +838,7 @@
                     <span class="intro-icon">🔍</span>
                     <div>
                         <strong>Media AI Authenticity Check</strong>
-                        <p>You can upload media files such as images, video or video links and Satori will check if it
+                        <p>You can upload media files such as images, video or video links and Authenix will check if it
                             has traits of being ai generated content. </p>
                     </div>
                 </div>
@@ -851,7 +859,7 @@
 
             <div class="intro-disclaimer">
                 <p><strong>Disclaimer:</strong> Detection methods may not always produce accurate or consistent results.
-                    Outputs should be interpreted with caution and in appropriate context. SatoriCheck does not assume
+                    Outputs should be interpreted with caution and in appropriate context. Authenix does not assume
                     responsibility for any inaccuracies or misclassifications. I expect my users to use common sense and
                     be critical.</p>
             </div>
@@ -877,7 +885,7 @@
             <div class="share-card-footer">
                 <div class="share-card-branding">
                     <span class="share-card-branding-icon">🔍</span>
-                    <span>satoricheck.com</span>
+                    <span>authenix.ai</span>
                 </div>
                 <span class="share-card-disclaimer">AI-generated analysis. May contain errors.</span>
             </div>

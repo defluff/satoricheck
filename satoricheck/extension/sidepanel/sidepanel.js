@@ -1,5 +1,5 @@
 /**
- * Side panel script — multi-mode fact-check UI for the SatoriCheck extension.
+ * Side panel script — multi-mode fact-check UI for the Authenix extension.
  *
  * Modes:
  *   - factcheck: Standard fact-check (verdict cards)
@@ -53,7 +53,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             </div>
         `;
         document.getElementById('sp-connect-cta')?.addEventListener('click', () => {
-            chrome.tabs.create({ url: 'https://satoricheck.com?ext=1' });
+            chrome.tabs.create({ url: 'https://authenix.ai?ext=1' });
         });
         return;
     }
@@ -106,7 +106,7 @@ async function loadUserInfo() {
 
         applyBalanceUI(balance, streak);
     } catch (error) {
-        console.error('[SatoriCheck] Failed to load user info:', error);
+        console.error('[Authenix] Failed to load user info:', error);
         // Show a visible error state — "— CP" is indistinguishable from a zero balance
         balanceEl.textContent = '⚠ CP';
         balanceEl.title = 'Failed to load balance — click to retry';
@@ -523,7 +523,7 @@ async function openCheckout() {
     } catch (error) {
         // If checkout fails (e.g. Stripe not configured in TEST_MODE),
         // fall back to opening the web app.
-        console.error('[SatoriCheck] Checkout failed:', error.message);
-        chrome.tabs.create({ url: 'https://satoricheck.com' });
+        console.error('[Authenix] Checkout failed:', error.message);
+        chrome.tabs.create({ url: 'https://authenix.ai' });
     }
 }

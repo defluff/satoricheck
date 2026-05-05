@@ -85,9 +85,9 @@ def export_fact_checks():
             # Create response
             output.seek(0)
             
-            filename = f"satoricheck_export_{datetime.now(UTC).strftime('%Y%m%d')}.csv"
+            filename = f"authenix_export_{datetime.now(UTC).strftime('%Y%m%d')}.csv"
             if source_filter:
-                filename = f"satoricheck_{source_filter}_{datetime.now(UTC).strftime('%Y%m%d')}.csv"
+                filename = f"authenix_{source_filter}_{datetime.now(UTC).strftime('%Y%m%d')}.csv"
                 
             response = make_response(output.getvalue())
             response.headers['Content-Type'] = 'text/csv'

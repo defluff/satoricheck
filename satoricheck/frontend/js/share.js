@@ -67,10 +67,10 @@ function prepareShareCard(verdictData) {
 async function handleShare(verdictData, platform = 'Download') {
     console.log('[Share] Starting share:', platform);
 
-    // Generate user-friendly filename: SatoriCheck-VERDICT-YYYYMMDD.png
+    // Generate user-friendly filename: Authenix-VERDICT-YYYYMMDD.png
     const verdict = verdictData.verdict || 'Verdict';
     const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-    const filename = `SatoriCheck-${verdict}-${date}.png`;
+    const filename = `Authenix-${verdict}-${date}.png`;
 
     // 1. Prepare the share card with verdict data
     if (!prepareShareCard(verdictData)) {
@@ -146,8 +146,8 @@ async function handleShare(verdictData, platform = 'Download') {
             const file = new File([blob], filename, { type: 'image/png' });
             await navigator.share({
                 files: [file],
-                title: 'SatoriCheck Verdict',
-                text: 'Fact-checked with SatoriCheck'
+                title: 'Authenix Verdict',
+                text: 'Fact-checked with Authenix'
             });
             window.ui?.showToast('Shared!', 'success');
         } else {
@@ -163,7 +163,7 @@ async function handleShare(verdictData, platform = 'Download') {
         }
         console.error('[Share] Share failed:', shareError);
         // Fallback to download
-        await downloadBlob(blob, 'satoricheck-verdict.png');
+        await downloadBlob(blob, 'authenix-verdict.png');
         window.ui?.showToast('Share failed. Image downloaded instead.', 'warning');
     }
 
@@ -197,7 +197,7 @@ function openShareIntent(platform) {
         return;
     }
 
-    const shareText = encodeURIComponent('Fact-checked with SatoriCheck 🔍 https://satoricheck.com');
+    const shareText = encodeURIComponent('Fact-checked with Authenix 🔍 https://authenix.ai');
     const url = baseUrl + shareText;
 
     const popup = window.open(url, '_blank', 'width=600,height=600');
