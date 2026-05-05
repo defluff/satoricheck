@@ -260,24 +260,25 @@ def stripe_webhook():
         if event['type'] == 'checkout.session.completed':
             session = event['data']['object']
             
-            # Extract metadata
-            metadata = session.get('metadata', {})
+            # Extract metadata — use attribute access (stripe-python v15: StripeObject no
+            # longer inherits from dict, so .get() / ['key'] raise AttributeError).
+            metadata = getattr(session, 'metadata', None) or {}
             if metadata and 'user_id' in metadata:
                 user_id = int(metadata['user_id'])
                 package_type = metadata.get('package_type')
                 tokens = int(metadata.get('tokens', 0))
                 
                 # Fulfill purchase using centralized helper
-                # session is event['data']['object'] which might be a dict in tests
-                session_id = session.get('id')
-                customer_id = session.get('customer')
+                session_id = getattr(session, 'id', None)
+                customer_id = getattr(session, 'customer', None)
                 _fulfill_purchase(user_id, package_type, tokens, session_id, customer_id, db_session)
                 logger.info(f"Webhook: Fulfilled order for user {user_id}")
         
         # Handle subscription renewal (Wizard Refills)
         if event['type'] == 'invoice.payment_succeeded':
             invoice = event['data']['object']
-            customer_id = invoice['customer']
+            # Attribute access for stripe-python v15 compatibility
+            customer_id = getattr(invoice, 'customer', None)
             
             # Find user by customer ID
             transaction = db_session.query(Transaction).filter_by(

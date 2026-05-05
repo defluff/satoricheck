@@ -119,20 +119,25 @@ def mock_gemini(mocker):
 
 @pytest.fixture
 def mock_stripe_webhook_payload():
-    """Generate mock Stripe webhook payload."""
+    """Generate mock Stripe webhook payload simulating stripe-python v15+."""
+    from types import SimpleNamespace
+
     def _generate(user_id, package_type='battery_small', tokens=86, session_id='cs_test_123'):
+        # The 'object' is now a SimpleNamespace for dot-notation access
+        obj = SimpleNamespace(
+            id=session_id,
+            customer='cus_test_123',
+            metadata={
+                'user_id': str(user_id),
+                'package_type': package_type,
+                'tokens': str(tokens)
+            }
+        )
+        # Top level is still a dict
         return {
             'type': 'checkout.session.completed',
             'data': {
-                'object': {
-                    'id': session_id,
-                    'customer': 'cus_test_123',
-                    'metadata': {
-                        'user_id': str(user_id),
-                        'package_type': package_type,
-                        'tokens': str(tokens)
-                    }
-                }
+                'object': obj
             }
         }
     return _generate

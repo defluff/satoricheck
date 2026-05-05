@@ -367,7 +367,7 @@ def delete_account():
         logger.warning(f"DELETING ACCOUNT: {user_email} (ID: {user.id})")
         
         # Imports to ensure we have all models needed for cleanup
-        from backend.models import TokenBalance, Streak, Transaction, FactCheck, LiveProSession, DeletedUser
+        from backend.models import MediaCheck, TokenBalance, Streak, Transaction, FactCheck, LiveProSession, DeletedUser
         
         # 1. Create a tombstone record to prevent bonus abuse on re-signup
         # We store SHA256 of email to be GDPR/Privacy compliant (no PII kept)
@@ -379,14 +379,18 @@ def delete_account():
             tombstone = DeletedUser(email_hash=email_hash)
             db_session.add(tombstone)
 
-        # 2. Delete dependent records explicitly (though cascade should handle it)
+        # 2. Delete all dependent records explicitly.
+        # SQLAlchemy relationships do not have cascade='all, delete-orphan' set,
+        # so we must delete each child table manually to satisfy FK constraints
+        # and ensure GDPR compliance (no orphaned user data survives).
+        db_session.query(MediaCheck).filter_by(user_id=user.id).delete()
         db_session.query(TokenBalance).filter_by(user_id=user.id).delete()
         db_session.query(Streak).filter_by(user_id=user.id).delete()
         db_session.query(Transaction).filter_by(user_id=user.id).delete()
         db_session.query(FactCheck).filter_by(user_id=user.id).delete()
         db_session.query(LiveProSession).filter_by(user_id=user.id).delete()
         
-        # 2. Delete the user
+        # 3. Delete the user
         db_session.delete(user)
         db_session.commit()
         

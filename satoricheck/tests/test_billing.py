@@ -21,17 +21,19 @@ class TestStripeWebhook:
         
         # Mock Stripe signature verification
         with patch('stripe.Webhook.construct_event') as mock_construct:
-            payload = mock_stripe_webhook_payload(
+            event = mock_stripe_webhook_payload(
                 user_id=test_user.id,
                 package_type='battery_small',
                 tokens=86,
                 session_id='cs_test_unique_123'
             )
-            mock_construct.return_value = payload
+            mock_construct.return_value = event
             
+            # The raw body is irrelevant — construct_event is mocked.
+            # Pass a stub so json.dumps doesn't need to serialize StripeObjects.
             response = client.post(
                 '/api/billing/webhook',
-                data=json.dumps(payload),
+                data=b'{"stub": true}',
                 content_type='application/json',
                 headers={'Stripe-Signature': 'test_sig'}
             )
@@ -62,17 +64,19 @@ class TestStripeWebhook:
             user_id=test_user.id
         ).first().balance
         
-        payload = mock_stripe_webhook_payload(
+        event = mock_stripe_webhook_payload(
             user_id=test_user.id,
             tokens=100,
             session_id='cs_test_duplicate_456'
         )
         
-        with patch('stripe.Webhook.construct_event', return_value=payload):
+        # Raw body is irrelevant — construct_event is mocked.
+        stub_body = b'{"stub": true}'
+        with patch('stripe.Webhook.construct_event', return_value=event):
             # Send webhook twice
-            client.post('/api/billing/webhook', data=json.dumps(payload),
+            client.post('/api/billing/webhook', data=stub_body,
                        content_type='application/json', headers={'Stripe-Signature': 'sig'})
-            client.post('/api/billing/webhook', data=json.dumps(payload),
+            client.post('/api/billing/webhook', data=stub_body,
                        content_type='application/json', headers={'Stripe-Signature': 'sig'})
         
         # Should only add 100 once, not 200
