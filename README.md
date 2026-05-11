@@ -1,6 +1,9 @@
-# SatoriCheck
+# Authenix
 
-Fully vibecoded, AI-powered fact-checking app with live audio transcription, Meta Analysis for quote claims, Pitch Deck fact verification, media ai/authenticity analysis  and Stripe billing, using antigravity IDE.
+> [!NOTE]
+> **Authenix** is the new name for the project formerly known as **SatoriCheck**. While the branding and frontend have been updated, internal codebase references (folders, database files) may still use the legacy name to ensure stability during the transition.
+
+Fully vibecoded, AI-powered fact-checking app with live audio transcription, Meta Analysis for quote claims, Pitch Deck fact verification, media ai/authenticity analysis and Stripe billing, using antigravity IDE.
 
 **Status:** In Production, Active Users.
 **Mission:** Provide instant, credible verification of claims using advanced AI and source grounding.
