@@ -90,14 +90,13 @@ def analyze_claim():
         
         # Always use the agentic path (smart_agent is now the default, not a flag)
         try:
-            # Auto-inject valid volatile cache if present.
-            # Guard against stale caches (expired TTL): retry without cache on failure.
-            active_cache = user.current_media_cache or user.current_pitchdeck_cache
+            # Check if cache_name is explicitly passed in the request payload
+            active_cache = data.get('cache_name')
             try:
                 result = gemini_service.analyze_claim(analysis_text, smart_agent=True, cache_name=active_cache)
             except Exception:
                 if active_cache:
-                    logger.warning(f"Volatile cache {active_cache} failed, retrying without cache")
+                    logger.warning(f"Explicit cache {active_cache} failed, retrying without cache")
                     result = gemini_service.analyze_claim(analysis_text, smart_agent=True, cache_name=None)
                 else:
                     raise
@@ -305,11 +304,11 @@ def analyze_batch_claims():
             token_balance.unbilled_words = remainder_words
             token_balance.last_updated = datetime.now(UTC)
             
-            # Call API with Context (reuse cache_name if pre-created or stored in user session).
+            # Call API with Context (only reuse cache_name if explicitly provided).
             # Guard against stale caches (expired TTL): retry without cache on failure.
             gemini_service = get_gemini_service()
             try:
-                effective_cache = cache_name or user.current_media_cache or user.current_pitchdeck_cache
+                effective_cache = cache_name
                 try:
                     api_results = gemini_service.analyze_claims_batch(
                         texts_to_analyze, context=context, cache_name=effective_cache

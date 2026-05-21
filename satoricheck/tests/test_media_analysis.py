@@ -1,7 +1,5 @@
 """
 Media Analysis Service & API Tests.
-
-Follows TDD approach - tests written before backend implementation.
 Covers:
 - URL Validation (Regex & SSRF)
 - Token Deduction
@@ -11,7 +9,6 @@ Covers:
 import pytest
 from unittest.mock import patch, MagicMock
 import json
-import base64
 
 class TestMediaAnalysisService:
     """Unit tests for MediaAnalysis logic."""
@@ -23,48 +20,56 @@ class TestMediaAnalysisService:
         Then: Returns structured JSON matching UI requirements (verdict, confidence, criteria)
         """
         from backend.services.gemini_service import GeminiService
-        service = GeminiService()
         
         test_url = "https://example.com/deepfake.jpg"
         
         # Mock Gemini response for analysis
-        mock_analysis_response = {
-            'candidates': [{
-                'content': {
-                    'parts': [{'text': json.dumps({
-                        'verdict': 'ai',
-                        'confidence': 87,
-                        'explanation': 'Biological anomalies detected.',
-                        'criteria': {
-                            'physics': {'signal': 'suspicious', 'fill': 82, 'desc': 'Inconsistent shadows.'},
-                            'bio': {'signal': 'suspicious', 'fill': 91, 'desc': 'Finger count anomaly.'},
-                            'context': {'signal': 'uncertain', 'fill': 55, 'desc': 'Plausible composition.'},
-                            'compression': {'signal': 'suspicious', 'fill': 78, 'desc': 'Noise distribution anomaly.'},
-                            'metadata': {'signal': 'uncertain', 'fill': 40, 'desc': 'No EXIF metadata.'}
-                        }
-                    })}]
-                }
-            }]
-        }
+        mock_analysis_text = json.dumps({
+            'verdict': 'ai',
+            'confidence': 87,
+            'explanation': 'Biological anomalies detected.',
+            'criteria': {
+                'physics': {'signal': 'suspicious', 'fill': 82, 'desc': 'Inconsistent shadows.'},
+                'bio': {'signal': 'suspicious', 'fill': 91, 'desc': 'Finger count anomaly.'},
+                'context': {'signal': 'uncertain', 'fill': 55, 'desc': 'Plausible composition.'},
+                'compression': {'signal': 'suspicious', 'fill': 78, 'desc': 'Noise distribution anomaly.'},
+                'metadata': {'signal': 'uncertain', 'fill': 40, 'desc': 'No EXIF metadata.'}
+            }
+        })
 
-        # Mock embedding response
-        mock_embedding_response = {
-            'embeddings': [{'values': [0.1, 0.2, 0.3]}]
-        }
-
-        with patch('requests.post') as mock_post, \
+        with patch('backend.services.gemini.client.genai.Client') as mock_client_class, \
              patch('requests.get') as mock_get, \
              patch('backend.services.gemini_service.GeminiService._validate_url', return_value=True), \
              patch('backend.services.gemini_service.GeminiService.create_cache', return_value=None):
-            # Mock URL download (B2 fix: URLs are now downloaded and inlined as base64)
+            
+            mock_client = MagicMock()
+            mock_client_class.return_value = mock_client
+            
+            service = GeminiService()
+            service.client = mock_client
+            
+            # Mock URL download
             mock_get.return_value = MagicMock(
                 status_code=200,
                 content=b'\x89PNG\r\n\x1a\n'  # Minimal PNG header bytes
             )
             mock_get.return_value.raise_for_status = MagicMock()
 
+            # Mock generate_content response
+            part = MagicMock()
+            part.thought = False
+            part.text = mock_analysis_text
+            content = MagicMock()
+            content.parts = [part]
+            candidate = MagicMock()
+            candidate.content = content
+            response = MagicMock()
+            response.candidates = [candidate]
+            response.text = mock_analysis_text
+            
+            mock_client.models.generate_content.return_value = response
+
             # 1. Test Analysis
-            mock_post.return_value = MagicMock(status_code=200, json=lambda: mock_analysis_response)
             result = service.analyze_media_authenticity(test_url, 'url')
             
             assert result['verdict'] == 'ai'
@@ -72,7 +77,12 @@ class TestMediaAnalysisService:
             assert 'criteria' in result
             
             # 2. Test Embedding
-            mock_post.return_value = MagicMock(status_code=200, json=lambda: mock_embedding_response)
+            mock_embedding_obj = MagicMock()
+            mock_embedding_obj.values = [0.1, 0.2, 0.3]
+            mock_embed_response = MagicMock()
+            mock_embed_response.embeddings = [mock_embedding_obj]
+            mock_client.models.embed_content.return_value = mock_embed_response
+            
             emb = service.get_media_embedding(test_url, "image/jpeg", input_type='url')
             assert len(emb) == 3
 
@@ -105,8 +115,6 @@ class TestMediaAnalysisAPI:
         """Successful analysis should deduct 1 CP from user balance."""
         from backend.models import TokenBalance
         
-        # Initial balance is 100 from test_user fixture
-        
         # Mock the service to avoid real API calls
         mock_res = {'verdict': 'authentic', 'confidence': 99}
         
@@ -127,7 +135,7 @@ class TestMediaAnalysisAPI:
         assert bal.balance == 99
 
     def test_analyze_url_rejects_invalid_regex(self, auth_client):
-        """Should reject obvious non-URLs early."""
+        """Should reject early."""
         response = auth_client.post('/api/media/analyze-url', json={
             'url': 'not-a-url'
         })

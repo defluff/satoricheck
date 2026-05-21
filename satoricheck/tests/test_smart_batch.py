@@ -7,53 +7,53 @@ import pytest
 from unittest.mock import MagicMock, patch
 from backend.services.gemini_service import GeminiService, ClaimPriority
 
-
 @pytest.fixture
 def gemini_service():
-    return GeminiService()
+    with patch('backend.services.gemini.client.genai.Client') as mock_client_class:
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
+        service = GeminiService()
+        service.client = mock_client
+        return service
 
+def make_mock_response(text):
+    part = MagicMock()
+    part.thought = False
+    part.text = text
+    
+    content = MagicMock()
+    content.parts = [part]
+    
+    candidate = MagicMock()
+    candidate.content = content
+    
+    response = MagicMock()
+    response.candidates = [candidate]
+    response.text = text
+    response.function_calls = []
+    return response
 
-@patch('backend.services.gemini_service.requests.post')
-def test_analyze_claims_batch_no_context(mock_post, gemini_service):
+def test_analyze_claims_batch_no_context(gemini_service):
     """Verify batch analysis handles claims without context."""
-    # Mock the API response
-    mock_post.return_value.status_code = 200
-    mock_post.return_value.raise_for_status = MagicMock()
-    mock_post.return_value.json.return_value = {
-        "candidates": [{
-            "content": {
-                "parts": [{
-                    "text": '{"results": [{"claim_index": 1, "verdict": "TRUE", "sources": ["http://x.com"]}]}'
-                }]
-            }
-        }]
-    }
+    gemini_service.client.models.generate_content.return_value = make_mock_response(
+        '{"results": [{"claim_index": 1, "verdict": "TRUE", "sources": ["http://x.com"]}]}'
+    )
     
     claims = ["Sky is blue"]
     results = gemini_service.analyze_claims_batch(claims)
     
     assert len(results) == 1
     assert results[0]["verdict"] == "TRUE"
+    assert gemini_service.client.models.generate_content.call_count == 1
 
-
-@patch('backend.services.gemini_service.requests.post')
-def test_analyze_claims_batch_with_context_cache(mock_post, gemini_service):
+def test_analyze_claims_batch_with_context_cache(gemini_service):
     """Verify batch analysis with context creates cache when large enough."""
+    gemini_service.client.models.generate_content.return_value = make_mock_response(
+        '{"results": [{"claim_index": 1, "verdict": "TRUE", "strategy_used": "CONTEXT_CHECK", "sources": ["http://example.com"]}]}'
+    )
+    
     # Mock Cache Creation
     gemini_service.create_cache = MagicMock(return_value="cachedContents/12345")
-    
-    # Mock API response
-    mock_post.return_value.status_code = 200
-    mock_post.return_value.raise_for_status = MagicMock()
-    mock_post.return_value.json.return_value = {
-        "candidates": [{
-            "content": {
-                "parts": [{
-                    "text": '{"results": [{"claim_index": 1, "verdict": "TRUE", "strategy_used": "CONTEXT_CHECK", "sources": ["http://example.com"]}]}'
-                }]
-            }
-        }]
-    }
     
     claims = ["The consulate opened in Nuuk."]
     context = "Reference text about Nuuk consulate..." * 150  # >4000 chars
@@ -67,23 +67,13 @@ def test_analyze_claims_batch_with_context_cache(mock_post, gemini_service):
     assert len(results) == 1
     assert results[0]["verdict"] == "TRUE"
 
-
-@patch('backend.services.gemini_service.requests.post')
-def test_analyze_claims_batch_reuses_precreated_cache(mock_post, gemini_service):
+def test_analyze_claims_batch_reuses_precreated_cache(gemini_service):
     """Verify batch analysis reuses a pre-created cache_name instead of creating a new one."""
+    gemini_service.client.models.generate_content.return_value = make_mock_response(
+        '{"results": [{"claim_index": 1, "verdict": "FALSE", "sources": ["http://src.com"]}]}'
+    )
+    
     gemini_service.create_cache = MagicMock()
-
-    mock_post.return_value.status_code = 200
-    mock_post.return_value.raise_for_status = MagicMock()
-    mock_post.return_value.json.return_value = {
-        "candidates": [{
-            "content": {
-                "parts": [{
-                    "text": '{"results": [{"claim_index": 1, "verdict": "FALSE", "sources": ["http://src.com"]}]}'
-                }]
-            }
-        }]
-    }
 
     claims = ["Claim A"]
     context = "X" * 5000  # Large context
@@ -95,38 +85,25 @@ def test_analyze_claims_batch_reuses_precreated_cache(mock_post, gemini_service)
     gemini_service.create_cache.assert_not_called()
     assert results[0]["verdict"] == "FALSE"
 
-    # Verify cachedContent was injected into payload
-    call_args = mock_post.call_args
-    payload = call_args.kwargs.get('json') or call_args[1].get('json')
-    assert payload["cachedContent"] == cache_name
+    # Verify cachedContent was injected into config
+    call_args = gemini_service.client.models.generate_content.call_args
+    config = call_args.kwargs.get('config')
+    assert config.cached_content == cache_name
 
-
-@patch('backend.services.gemini_service.requests.post')
-def test_analyze_claims_batch_sub_batches_large_lists(mock_post, gemini_service):
+def test_analyze_claims_batch_sub_batches_large_lists(gemini_service):
     """Verify large claim lists are split into sub-batches."""
-    mock_post.return_value.status_code = 200
-    mock_post.return_value.raise_for_status = MagicMock()
-    mock_post.return_value.json.return_value = {
-        "candidates": [{
-            "content": {
-                "parts": [{
-                    "text": '{"results": [{"claim_index": 1, "verdict": "TRUE", "sources": ["http://a.com"]}]}'
-                }]
-            }
-        }]
-    }
+    gemini_service.client.models.generate_content.return_value = make_mock_response(
+        '{"results": [{"claim_index": 1, "verdict": "TRUE", "sources": ["http://a.com"]}]}'
+    )
 
     # 10 claims > MAX_CLAIMS_PER_PROMPT (8), so should split into 2 sub-batches
     claims = [f"Claim {i}" for i in range(10)]
     results = gemini_service.analyze_claims_batch(claims)
 
     assert len(results) == 10
-    # All results should be populated (no None values)
     assert all(r is not None for r in results)
-    # Agentic loop should have been called twice (2 sub-batches of 8 + 2)
-    # Note: triage also makes a call, so total = 1 triage + 2 agentic = 3
-    assert mock_post.call_count >= 2
-
+    # 2 sub-batches + 1 triage call = 3 total calls
+    assert gemini_service.client.models.generate_content.call_count == 3
 
 def test_claim_priority_enum():
     """Verify ClaimPriority enum for Funnel architecture."""
@@ -135,22 +112,11 @@ def test_claim_priority_enum():
     assert ClaimPriority.DEFERRED == "deferred"
     assert ClaimPriority.SKIP == "skip"
 
-
-@patch('backend.services.gemini_service.requests.post')
-def test_triage_for_stream_classifies_claims(mock_post, gemini_service):
+def test_triage_for_stream_classifies_claims(gemini_service):
     """Verify triage_for_stream calls Flash-Lite and returns structured results."""
-    # Mock Flash-Lite triage response
-    mock_post.return_value.status_code = 200
-    mock_post.return_value.raise_for_status = MagicMock()
-    mock_post.return_value.json.return_value = {
-        "candidates": [{
-            "content": {
-                "parts": [{
-                    "text": '[{"index": 1, "priority": "IMMEDIATE", "strategy": "SOCIAL_VERIFY"}, {"index": 2, "priority": "NORMAL", "strategy": "SEARCH_VERIFY"}]'
-                }]
-            }
-        }]
-    }
+    gemini_service.client.models.generate_content.return_value = make_mock_response(
+        '[{"index": 1, "priority": "IMMEDIATE", "strategy": "SOCIAL_VERIFY"}, {"index": 2, "priority": "NORMAL", "strategy": "SEARCH_VERIFY"}]'
+    )
     
     claims = ["Breaking news claim", "Historical fact"]
     results = gemini_service.triage_for_stream(claims)
@@ -162,11 +128,9 @@ def test_triage_for_stream_classifies_claims(mock_post, gemini_service):
     assert results[1]["claim"] == "Historical fact"
     assert results[1]["priority"] == ClaimPriority.NORMAL
 
-
-@patch('backend.services.gemini_service.requests.post')
-def test_triage_fallback_on_error(mock_post, gemini_service):
+def test_triage_fallback_on_error(gemini_service):
     """Verify triage falls back to NORMAL priority on API error."""
-    mock_post.side_effect = Exception("API Error")
+    gemini_service.client.models.generate_content.side_effect = Exception("API Error")
     
     claims = ["Some claim"]
     results = gemini_service.triage_for_stream(claims)
@@ -175,35 +139,62 @@ def test_triage_fallback_on_error(mock_post, gemini_service):
     assert len(results) == 1
     assert results[0]["priority"] == ClaimPriority.NORMAL
 
-
 def test_normalize_claim_text():
     """Verify claim text normalization strips punctuation, collapses whitespace, lowercases."""
     assert GeminiService._normalize_claim_text("GDP grew 4% in 2024.") == "gdp grew 4% in 2024"
     assert GeminiService._normalize_claim_text("GDP grew 4% in 2024!") == "gdp grew 4% in 2024"
     assert GeminiService._normalize_claim_text("  GDP  grew  4%  ") == "gdp grew 4%"
-    # Same claim, different punctuation
     assert GeminiService._normalize_claim_text("The sky is blue.") == GeminiService._normalize_claim_text("The sky is blue")
 
-
-@patch('backend.services.gemini_service.requests.post')
-def test_identify_claims_single_chunk_no_summary(mock_post, gemini_service):
+def test_identify_claims_single_chunk_no_summary(gemini_service):
     """Verify short text skips context summary generation."""
-    mock_post.return_value.status_code = 200
-    mock_post.return_value.raise_for_status = MagicMock()
-    mock_post.return_value.json.return_value = {
-        "candidates": [{
-            "content": {
-                "parts": [{
-                    "text": '{"claims": ["Water boils at 100C"]}'
-                }]
-            }
-        }]
-    }
+    gemini_service.client.models.generate_content.return_value = make_mock_response(
+        '{"claims": ["Water boils at 100C"]}'
+    )
 
     short_text = "Water boils at 100 degrees Celsius at sea level."
     claims = gemini_service.identify_claims(short_text)
 
     assert len(claims) == 1
     assert "100" in claims[0]
-    # Only 1 API call (no summary call since single chunk)
-    assert mock_post.call_count == 1
+    assert gemini_service.client.models.generate_content.call_count == 1
+
+
+def test_analyze_claims_batch_cache_conflict_retry(gemini_service):
+    """Verify that when a cache conflict occurs during batch analysis,
+    the service catches the exception, clears the cache reference, and retries."""
+    
+    # The batch verification response
+    batch_response = make_mock_response(
+        '{"results": [{"claim_index": 1, "verdict": "FALSE", "sources": ["http://src.com"]}]}'
+    )
+    
+    recorded_configs = []
+    def side_effect(*args, **kwargs):
+        cfg = kwargs.get('config')
+        recorded_configs.append(cfg.cached_content if cfg else None)
+        if len(recorded_configs) == 1:
+            raise Exception("400 Cache conflict tools")
+        return batch_response
+
+    gemini_service.client.models.generate_content.side_effect = side_effect
+    
+    claims = ["Claim A"]
+    context = "Some large context"
+    cache_name = "cachedContents/conflict-cache"
+    
+    results = gemini_service.analyze_claims_batch(claims, context=context, cache_name=cache_name)
+    
+    # Verify result
+    assert len(results) == 1
+    assert results[0]["verdict"] == "FALSE"
+    
+    # Verify generate_content called 2 times (no triage call since len(claims) <= 2)
+    assert gemini_service.client.models.generate_content.call_count == 2
+    
+    # Verify cached_content at the time of each call
+    assert len(recorded_configs) == 2
+    assert recorded_configs[0] == "cachedContents/conflict-cache"
+    assert recorded_configs[1] is None
+
+

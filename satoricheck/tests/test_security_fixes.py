@@ -159,7 +159,7 @@ class TestValidateUrlSSRF:
 
     def _get_service(self):
         """Create a GeminiService with a mocked API key."""
-        with patch('backend.services.gemini_service.Config') as mock_config:
+        with patch('backend.services.gemini.client.Config') as mock_config:
             mock_config.GEMINI_API_KEY = 'fake-key'
             from backend.services.gemini_service import GeminiService
             return GeminiService()
@@ -194,7 +194,7 @@ class TestValidateUrlSSRF:
         service = self._get_service()
         assert service._validate_url('http://[::1]/admin') is False
 
-    @patch('backend.services.gemini_service.socket.getaddrinfo')
+    @patch('backend.services.gemini.client.socket.getaddrinfo')
     def test_blocks_localhost_hostname(self, mock_getaddrinfo):
         """Must block 'localhost' hostname that resolves to 127.0.0.1."""
         mock_getaddrinfo.return_value = [
@@ -203,8 +203,8 @@ class TestValidateUrlSSRF:
         service = self._get_service()
         assert service._validate_url('http://localhost/admin') is False
 
-    @patch('backend.services.gemini_service.socket.getaddrinfo')
-    @patch('backend.services.gemini_service.requests.head')
+    @patch('backend.services.gemini.client.socket.getaddrinfo')
+    @patch('backend.services.gemini.client.requests.head')
     def test_allows_public_url(self, mock_head, mock_getaddrinfo):
         """Must allow legitimate public URLs."""
         mock_getaddrinfo.return_value = [
@@ -240,7 +240,7 @@ class TestWebSocketAuth:
         with app.app_context():
             token = create_token(42, 'test@example.com')
             environ = {
-                'HTTP_COOKIE': f'satoricheck_jwt={token}',
+                'HTTP_COOKIE': f'satori_token={token}',
             }
             user_id = _authenticate_ws_user(environ)
             assert user_id == 42
@@ -260,7 +260,7 @@ class TestWebSocketAuth:
 
         with app.app_context():
             environ = {
-                'HTTP_COOKIE': 'satoricheck_jwt=invalid.token.here',
+                'HTTP_COOKIE': 'satori_token=invalid.token.here',
             }
             user_id = _authenticate_ws_user(environ)
             assert user_id is None
@@ -283,7 +283,7 @@ class TestWebSocketAuth:
                 expired_payload, Config.SECRET_KEY, algorithm='HS256'
             )
             environ = {
-                'HTTP_COOKIE': f'satoricheck_jwt={expired_token}',
+                'HTTP_COOKIE': f'satori_token={expired_token}',
             }
             user_id = _authenticate_ws_user(environ)
             assert user_id is None
@@ -296,7 +296,7 @@ class TestWebSocketAuth:
 class TestStandardCacheIDOR:
     """_analyze_claim_standard cache lookup must be scoped to calling user."""
 
-    @patch('backend.services.gemini_service.requests.post')
+    @patch('requests.post')
     def test_standard_cache_does_not_return_other_users_results(
         self, mock_post, app, db_session_fixture
     ):
