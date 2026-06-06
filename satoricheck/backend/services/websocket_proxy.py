@@ -24,8 +24,9 @@ from backend.models import LiveProSession
 
 logger = logging.getLogger(__name__)
 
-# JWT cookie name — must match auth.py
-JWT_COOKIE_NAME = 'satori_token'
+# JWT cookie name — imported from auth to avoid duplication drift
+# Cannot import directly due to circular dependency, so we keep in sync manually
+JWT_COOKIE_NAME = 'authenix_token'
 
 
 # Create blueprint for WebSocket routes

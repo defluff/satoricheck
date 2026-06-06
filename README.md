@@ -1,7 +1,7 @@
 # Authenix
 
 > [!NOTE]
-> **Authenix** is the new name for the project formerly known as **SatoriCheck**. While the branding and frontend have been updated, internal codebase references (folders, database files) may still use the legacy name to ensure stability during the transition.
+> **Authenix** was formerly known as **SatoriCheck**. The internal project folder retains the legacy name to avoid unnecessary Docker/import churn.
 
 Fully vibecoded, AI-powered fact-checking app with live audio transcription, Meta Analysis for quote claims, Pitch Deck fact verification, media ai/authenticity analysis and Stripe billing, using antigravity IDE.
 
@@ -177,7 +177,7 @@ web: gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 backend.server:a
 ```env
 TEST_MODE=false
 ENV=production
-DATABASE_URL=postgresql://user:pass@host:5432/satoricheck
+DATABASE_URL=postgresql://user:pass@host:5432/authenix
 ```
 
 ### Stripe Webhook

@@ -48,10 +48,11 @@ app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
 # Enable CORS (Production + Extension + Local)
 CORS(app, supports_credentials=True, origins=[
-    'https://satoricheck-829698588154.europe-west6.run.app',  # Cloud Run production
-    'https://satoricheck.com',  # Future custom domain (if configured)
+    'https://authenix.ai',  # Production custom domain
+    'https://satoricheck-829698588154.europe-west6.run.app',  # Legacy Cloud Run (remove after Phase 2)
+    # TODO: add new Cloud Run URL after service creation: 'https://authenix-XXXXX.run.app'
     'chrome-extension://*',  # TODO: pin to specific extension ID after store submission
-    'http://localhost:*', 
+    'http://localhost:*',
     'http://127.0.0.1:*'
 ])
 

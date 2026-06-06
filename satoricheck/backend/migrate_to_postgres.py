@@ -29,12 +29,12 @@ from backend.models import Base, User, TokenBalance, Streak, Transaction, FactCh
 
 
 # Configuration
-SQLITE_URL = 'sqlite:///satoricheck.db'
+SQLITE_URL = 'sqlite:///authenix.db'
 POSTGRES_URL = os.getenv('DATABASE_URL')
 
 if not POSTGRES_URL or 'postgresql' not in POSTGRES_URL:
     print("❌ Error: Set DATABASE_URL to a PostgreSQL connection string")
-    print("   Example: DATABASE_URL=postgresql://user:pass@localhost:5432/satoricheck")
+    print("   Example: DATABASE_URL=postgresql://user:pass@localhost:5432/authenix")
     sys.exit(1)
 
 
@@ -117,7 +117,7 @@ def migrate():
     print("1. Update .env with DATABASE_URL pointing to PostgreSQL")
     print("2. Restart the server")
     print("3. Verify the app works correctly")
-    print("4. (Optional) Delete satoricheck.db after confirming migration")
+    print("4. (Optional) Delete the local .db file after confirming migration")
 
 
 if __name__ == '__main__':

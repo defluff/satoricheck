@@ -1,5 +1,5 @@
 """
-Pytest configuration and fixtures for SatoriCheck integration tests.
+Pytest configuration and fixtures for Authenix integration tests.
 Uses isolated SQLite database and mocked external services.
 """
 import pytest

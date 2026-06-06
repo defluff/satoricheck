@@ -38,7 +38,7 @@ class Config:
     # Application
     TEST_MODE = os.getenv('TEST_MODE', 'false').lower() == 'true'
     MAINTENANCE_MODE = os.getenv('MAINTENANCE_MODE', 'false').lower() == 'true'
-    DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///satoricheck.db')
+    DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///authenix.db')
     
     # Scheduler auth (Cloud Scheduler cron jobs)
     SCHEDULER_SECRET = os.getenv('SCHEDULER_SECRET', secrets.token_hex(32))

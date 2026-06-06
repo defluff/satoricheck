@@ -240,7 +240,7 @@ class TestWebSocketAuth:
         with app.app_context():
             token = create_token(42, 'test@example.com')
             environ = {
-                'HTTP_COOKIE': f'satori_token={token}',
+                'HTTP_COOKIE': f'authenix_token={token}',
             }
             user_id = _authenticate_ws_user(environ)
             assert user_id == 42
@@ -260,7 +260,7 @@ class TestWebSocketAuth:
 
         with app.app_context():
             environ = {
-                'HTTP_COOKIE': 'satori_token=invalid.token.here',
+                'HTTP_COOKIE': 'authenix_token=invalid.token.here',
             }
             user_id = _authenticate_ws_user(environ)
             assert user_id is None
@@ -283,7 +283,7 @@ class TestWebSocketAuth:
                 expired_payload, Config.SECRET_KEY, algorithm='HS256'
             )
             environ = {
-                'HTTP_COOKIE': f'satori_token={expired_token}',
+                'HTTP_COOKIE': f'authenix_token={expired_token}',
             }
             user_id = _authenticate_ws_user(environ)
             assert user_id is None

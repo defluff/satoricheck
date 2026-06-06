@@ -75,7 +75,7 @@ connectBtn.addEventListener('click', async () => {
     }
 });
 
-// Open satoricheck.com?ext=1 to get a token
+// Open authenix.ai?ext=1 to get a token
 getTokenLink.addEventListener('click', (e) => {
     e.preventDefault();
     chrome.tabs.create({ url: 'https://authenix.ai?ext=1' });

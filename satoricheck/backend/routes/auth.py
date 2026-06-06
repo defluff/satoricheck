@@ -30,7 +30,7 @@ def get_limiter():
     return limiter
 
 # Cookie settings
-JWT_COOKIE_NAME = 'satori_token'
+JWT_COOKIE_NAME = 'authenix_token'
 JWT_COOKIE_SECURE = Config.ENV != 'development'  # True in production
 JWT_COOKIE_HTTPONLY = True
 JWT_COOKIE_SAMESITE = 'Lax'
@@ -45,7 +45,7 @@ def login_required(f):
         # Check if in test mode
         if Config.TEST_MODE:
             # Auto-create test user if not exists
-            user = db_session.query(User).filter_by(email='test@satoricheck.com').first()
+            user = db_session.query(User).filter_by(email='test@authenix.ai').first()
             if not user:
                 user = create_test_user()
             request.current_user = user
@@ -123,7 +123,7 @@ def create_test_user():
     
     password_hash = bcrypt.hashpw('test123'.encode('utf-8'), bcrypt.gensalt())
     user = User(
-        email='test@satoricheck.com',
+        email='test@authenix.ai',
         password_hash=password_hash.decode('utf-8'),
         created_at=datetime.now(UTC)
     )

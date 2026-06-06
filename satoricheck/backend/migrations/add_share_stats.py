@@ -16,9 +16,9 @@ def migrate_sqlite():
     import sqlite3
     from pathlib import Path
     
-    DB_PATH = Path(__file__).parent.parent / 'satoricheck.db'
+    DB_PATH = Path(__file__).parent.parent / 'authenix.db'
     if not DB_PATH.exists():
-        DB_PATH = Path(__file__).parent.parent.parent / 'satoricheck.db'
+        DB_PATH = Path(__file__).parent.parent.parent / 'authenix.db'
     
     if not DB_PATH.exists():
         print("⊙ SQLite database not found, skipping SQLite migration")
