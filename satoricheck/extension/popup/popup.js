@@ -75,10 +75,10 @@ connectBtn.addEventListener('click', async () => {
     }
 });
 
-// Open authenix.ai?ext=1 to get a token
+// Open the web app to get a token (Cloud Run URL — update if domain mapping is set up)
 getTokenLink.addEventListener('click', (e) => {
     e.preventDefault();
-    chrome.tabs.create({ url: 'https://authenix.ai?ext=1' });
+    chrome.tabs.create({ url: 'https://satoricheck-829698588154.europe-west6.run.app?ext=1' });
 });
 
 // Open side panel

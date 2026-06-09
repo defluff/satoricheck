@@ -11,8 +11,8 @@
 import { getToken } from './storage.js';
 import { fetchWithRetry } from './retry.js';
 
-const API_BASE = 'https://authenix.ai/api';
-// const API_BASE = 'https://satoricheck.com/api';  // Legacy — remove after Phase 2
+const API_BASE = 'https://satoricheck-829698588154.europe-west6.run.app/api';
+// const API_BASE = 'https://authenix.ai/api';  // Future: use after domain mapping
 // const API_BASE = 'http://127.0.0.1:8000/api';
 
 /** Default timeout per request attempt (ms). Used for fast endpoints (auth, balance). */
