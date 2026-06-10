@@ -13,11 +13,11 @@
  */
 
 const STORAGE_KEYS = {
-    API_TOKEN: 'satori_api_token',     // Legacy plaintext (migration only)
+    API_TOKEN: 'authenix_api_token',   // Legacy plaintext (migration only)
     ENCRYPTED_TOKEN: '_t',             // { iv: number[], data: number[] }
     ENCRYPTION_KEY: '_ek',             // Exported AES-GCM key bytes
     TOKEN_TIMESTAMP: '_ts',            // Unix ms — when token was stored
-    USER_EMAIL: 'satori_user_email',
+    USER_EMAIL: 'authenix_user_email',
 };
 
 /** Token expires after 30 days (client-side enforcement). */

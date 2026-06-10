@@ -106,7 +106,7 @@ balanceBadge.addEventListener('click', async () => {
             chrome.tabs.create({ url: result.url });
         }
     } catch {
-        chrome.tabs.create({ url: 'https://authenix.ai' });
+        chrome.tabs.create({ url: 'https://satoricheck-829698588154.europe-west6.run.app' });
     }
 });
 

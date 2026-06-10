@@ -12,8 +12,7 @@
   ],
   "host_permissions": [
     "https://authenix.ai/*",
-    "https://satoricheck-829698588154.europe-west6.run.app/*",
-    "https://satoricheck.com/*"
+    "https://satoricheck-829698588154.europe-west6.run.app/*"
   ],
   "action": {
     "default_popup": "popup/popup.html",

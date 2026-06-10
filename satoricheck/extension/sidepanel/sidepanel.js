@@ -31,7 +31,7 @@ let currentBalance = null;
 let currentMode = 'factcheck';
 let isProcessing = false;
 
-const BALANCE_CACHE_KEY = 'satori_balance_cache';
+const BALANCE_CACHE_KEY = 'authenix_balance_cache';
 const BALANCE_CACHE_TTL_MS = 60000; // 60 seconds
 
 // --- Init ---
@@ -53,7 +53,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             </div>
         `;
         document.getElementById('sp-connect-cta')?.addEventListener('click', () => {
-            chrome.tabs.create({ url: 'https://authenix.ai?ext=1' });
+            chrome.tabs.create({ url: 'https://satoricheck-829698588154.europe-west6.run.app?ext=1' });
         });
         return;
     }
@@ -524,6 +524,6 @@ async function openCheckout() {
         // If checkout fails (e.g. Stripe not configured in TEST_MODE),
         // fall back to opening the web app.
         console.error('[Authenix] Checkout failed:', error.message);
-        chrome.tabs.create({ url: 'https://authenix.ai' });
+        chrome.tabs.create({ url: 'https://satoricheck-829698588154.europe-west6.run.app' });
     }
 }

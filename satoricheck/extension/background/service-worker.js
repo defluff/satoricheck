@@ -24,14 +24,14 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false })
 // --- Context menu ---
 chrome.runtime.onInstalled.addListener(() => {
     chrome.contextMenus.create({
-        id: 'satori-factcheck',
+        id: 'authenix-factcheck',
         title: 'Fact-check with Authenix',
         contexts: ['selection'],
     });
 });
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-    if (info.menuItemId !== 'satori-factcheck' || !tab?.id) return;
+    if (info.menuItemId !== 'authenix-factcheck' || !tab?.id) return;
 
     const selectedText = (info.selectionText || '').trim().slice(0, 10000);
     if (!selectedText) return;
