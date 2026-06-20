@@ -97,7 +97,7 @@ class PitchdeckService:
         # =================================================================
         
         # Call Gemini Vision API with Retries
-        prompt = self._build_analysis_prompt()
+        system_instruction, user_prompt = self._build_analysis_prompt()
         
         # 2 retries max: each attempt can take up to TIMEOUT seconds.
         # 3 retries × 180s = 9 min of blocking — capped at 2 × 180s = 6 min worst case.
@@ -108,7 +108,7 @@ class PitchdeckService:
         for attempt in range(max_retries):
             try:
                 logger.info(f"[Pitchdeck] Sending analysis request (Attempt {attempt + 1}/{max_retries})")
-                raw_result = self._call_gemini_vision(pdf_bytes, prompt)
+                raw_result = self._call_gemini_vision(pdf_bytes, system_instruction, user_prompt)
                 break  # Success
                 
             except requests.exceptions.Timeout:
@@ -191,16 +191,9 @@ RAW VISION OUTPUT (Full Text):
             return False
         return pdf_bytes[:5] == b'%PDF-'
 
-    def _build_analysis_prompt(self) -> str:
+    def _build_analysis_prompt(self) -> tuple:
         """
-        Build the extraction prompt by injecting the vc_analyst skill file.
-
-        The skill file (vc_analyst.md) is the single source of truth for all VC domain
-        knowledge: benchmark tiers, metric definitions, claim categories, and output schema.
-        This mirrors the ai_detection skill pattern used in GeminiService.analyze_ai_content.
-
-        Falls back to a minimal inline prompt if the skill file is missing, so the
-        service degrades gracefully rather than raising an error.
+        Build the system instruction (if skill is loaded) and user query prompt.
         """
         # Deferred import to avoid circular imports at module load time.
         from backend.services import get_gemini_service
@@ -209,35 +202,40 @@ RAW VISION OUTPUT (Full Text):
         if not skill_manual:
             # Graceful fallback — service keeps working without the skill file.
             logger.warning("[Pitchdeck] vc_analyst skill missing, using fallback prompt")
-            return (
-                "You are an expert VC analyst. Analyze this pitch deck PDF and return a JSON "
+            system_instruction = "You are an expert VC analyst."
+            user_prompt = (
+                "Analyze this pitch deck PDF and return a JSON "
                 "object with: company_name, summary, usp, industry, sector, market_size, "
                 "competition, team_highlights, funding_ask, verifiable_claims, vc_metrics. "
                 "Respond ONLY with valid JSON."
             )
+        else:
+            system_instruction = skill_manual
+            user_prompt = "Analyze the attached pitch deck PDF and respond ONLY with valid JSON."
 
-        return (
-            f"Using the following Expert VC Analyst Manual:\n\n{skill_manual}\n\n"
-            "Analyze the attached pitch deck PDF and respond ONLY with valid JSON."
-        )
+        return system_instruction, user_prompt
 
-    def _call_gemini_vision(self, pdf_bytes: bytes, prompt: str) -> dict:
+    def _call_gemini_vision(self, pdf_bytes: bytes, system_instruction: Optional[str] = None, user_prompt: Optional[str] = None) -> dict:
         """
-        Call Gemini Vision API with PDF as inline data.
+        Call Gemini Vision API with PDF as inline data and system instruction.
         
         Args:
             pdf_bytes: Raw PDF bytes
-            prompt: Analysis prompt
+            system_instruction: System instruction/manual
+            user_prompt: Analysis query prompt
             
         Returns:
             Raw API response dict
         """
+        # Backward compatibility swap if called with only 2 arguments: (pdf_bytes, prompt)
+        if user_prompt is None:
+            user_prompt = system_instruction
+            system_instruction = None
+
         # Encode PDF as base64 for inline data
         pdf_base64 = base64.standard_b64encode(pdf_bytes).decode('utf-8')
         
         # Build multimodal request with PDF.
-        # No thinkingConfig: pitchdeck analysis is structured extraction (read → emit JSON),
-        # not a reasoning task. Thinking mode adds 60-90s latency with no accuracy benefit here.
         payload = {
             "contents": [{
                 "parts": [
@@ -248,11 +246,20 @@ RAW VISION OUTPUT (Full Text):
                         }
                     },
                     {
-                        "text": prompt
+                        "text": user_prompt
                     }
                 ]
             }]
         }
+        
+        if system_instruction:
+            payload["systemInstruction"] = {
+                "parts": [
+                    {
+                        "text": system_instruction
+                    }
+                ]
+            }
         
         url = self._get_api_url(self.MODEL_PRO)
         
@@ -288,17 +295,9 @@ RAW VISION OUTPUT (Full Text):
                     
                 text += part.get('text', '')
             
-            # Clean markdown code blocks
-            text = text.strip()
-            if text.startswith('```json'): # Common start with markdown
-                text = text[7:]
-            elif text.startswith('```'):
-                text = text[3:]
-            
-            if text.endswith('```'): # Handle end of block
-                text = text[:-3]
-            
-            text = text.strip()
+            # Clean markdown code blocks using shared utility
+            from backend.services import get_gemini_service
+            text = get_gemini_service()._extract_json(text)
             
             result = json.loads(text)
             

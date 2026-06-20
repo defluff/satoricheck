@@ -53,14 +53,14 @@ class GeminiServiceBatch(GeminiServiceUtils):
             logger.error(f"Error deleting cache {cache_name}: {e}")
             return False
 
-    def generate_with_cache(self, cache_name: str, prompt: str) -> dict:
+    def generate_with_cache(self, cache_name: str, prompt: str, config: types.GenerateContentConfig = None) -> dict:
         """Generate content referencing an existing Context Cache."""
         if not self.client:
             raise Exception("Gemini client not initialized")
         try:
-            config = types.GenerateContentConfig(
-                cached_content=cache_name
-            )
+            if not config:
+                config = types.GenerateContentConfig()
+            config.cached_content = cache_name
             response = self.client.models.generate_content(
                 model=self.MODEL_PRO,
                 contents=prompt,
@@ -163,33 +163,20 @@ class GeminiServiceBatch(GeminiServiceUtils):
 
     def _run_agentic_batch(self, prompt, claims_to_verify, grok, cache_name=None):
         """Execute the agentic loop for a single batch of claims."""
-        grok_tool_dict = grok.get_tool_definition()
-        grok_tool = types.Tool(
-            function_declarations=[
-                types.FunctionDeclaration(
-                    name=grok_tool_dict.get("name"),
-                    description=grok_tool_dict.get("description"),
-                    parameters=types.Schema(
-                        type="OBJECT",
-                        properties={
-                            k: types.Schema(
-                                type=v.get("type", "STRING").upper(),
-                                description=v.get("description", "")
-                            )
-                            for k, v in grok_tool_dict.get("parameters", {}).get("properties", {}).items()
-                        },
-                        required=grok_tool_dict.get("parameters", {}).get("required", [])
-                    )
-                )
-            ]
-        )
+        grok_tool = self._build_grok_tool(grok)
         google_search_tool = types.Tool(google_search=types.GoogleSearch())
         
         conversation = [
             types.Content(role="user", parts=[types.Part.from_text(text=prompt)])
         ]
         
+        system_instruction = self._load_skill(
+            "batch_verification",
+            fallback="You are an expert fact-checker. Verify claims accurately and minimize API calls."
+        )
+
         config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
             tools=[google_search_tool, grok_tool],
             tool_config=types.ToolConfig(
                 include_server_side_tool_invocations=True
@@ -210,24 +197,14 @@ class GeminiServiceBatch(GeminiServiceUtils):
                 logger.info(f"Agentic turn {turn + 1}/{max_turns}...")
                 
                 if self.client:
-                    try:
-                        response = self.client.models.generate_content(
-                            model=self.MODEL_PRO,
-                            contents=conversation,
-                            config=config
-                        )
-                    except Exception as e:
-                        if config.cached_content:
-                            logger.warning(f"Cache {config.cached_content} failed/conflicted in batch turn {turn + 1}, clearing cache and retrying immediately: {e}")
-                            config.cached_content = None
-                            cache_name = None  # Clear so subsequent turns and closing turn skip caching
-                            response = self.client.models.generate_content(
-                                model=self.MODEL_PRO,
-                                contents=conversation,
-                                config=config
-                            )
-                        else:
-                            raise
+                    response, cache_cleared = self._generate_with_cache_fallback(
+                        model=self.MODEL_PRO,
+                        contents=conversation,
+                        config=config,
+                        context_label=f"batch turn {turn + 1}"
+                    )
+                    if cache_cleared:
+                        cache_name = None
                 else:
                     raise Exception("Gemini client not initialized")
                 
@@ -276,12 +253,9 @@ class GeminiServiceBatch(GeminiServiceUtils):
                             types.Content(role="tool", parts=[function_response_part])
                         )
                     continue  # Next turn
-
+ 
                 # Extract text (skip thoughts)
-                final_text = ""
-                for part in content.parts:
-                    if not getattr(part, 'thought', False) and part.text:
-                        final_text += part.text
+                final_text = self._extract_text_from_parts(content.parts)
                 
                 if final_text:
                     return self._parse_thinking_batch_response(response, len(claims_to_verify))
@@ -297,6 +271,7 @@ class GeminiServiceBatch(GeminiServiceUtils):
             try:
                 logger.info("Agentic closing turn (producing final answer from tool results)...")
                 closing_config = types.GenerateContentConfig(
+                    system_instruction=system_instruction,
                     thinking_config=types.ThinkingConfig(include_thoughts=True),
                     tool_config=types.ToolConfig(
                         function_calling_config=types.FunctionCallingConfig(
@@ -307,23 +282,12 @@ class GeminiServiceBatch(GeminiServiceUtils):
                 if cache_name:
                     closing_config.cached_content = cache_name
                     
-                try:
-                    response = self.client.models.generate_content(
-                        model=self.MODEL_PRO,
-                        contents=conversation,
-                        config=closing_config
-                    )
-                except Exception as e:
-                    if closing_config.cached_content:
-                        logger.warning(f"Cache {closing_config.cached_content} failed/conflicted in batch closing turn, clearing cache and retrying immediately: {e}")
-                        closing_config.cached_content = None
-                        response = self.client.models.generate_content(
-                            model=self.MODEL_PRO,
-                            contents=conversation,
-                            config=closing_config
-                        )
-                    else:
-                        raise
+                response, _ = self._generate_with_cache_fallback(
+                    model=self.MODEL_PRO,
+                    contents=conversation,
+                    config=closing_config,
+                    context_label="batch closing turn"
+                )
                 if response.candidates:
                     return self._parse_thinking_batch_response(response, len(claims_to_verify))
             except Exception as e:
@@ -337,9 +301,9 @@ class GeminiServiceBatch(GeminiServiceUtils):
             "explanation": "Agentic analysis failed",
             "sources": []
         } for _ in claims_to_verify]
-
+ 
     def _build_agentic_batch_prompt(self, claims, inline_context=None, strategy_hints=None):
-        """Build agentic prompt with economic strategy selection and triage hints."""
+        """Build the user prompt containing target claims list and any inline context."""
         if strategy_hints:
             claims_lines = []
             for i, c in enumerate(claims):
@@ -353,59 +317,19 @@ class GeminiServiceBatch(GeminiServiceUtils):
         context_block = ""
         if inline_context:
             context_block = f"""
-
+ 
 SOURCE DOCUMENT CONTEXT:
 ---
 {inline_context}
 ---
 """
         
-        return f"""You are an expert fact-checker. Your goals:
-1. VERIFY claims accurately
-2. MINIMIZE unnecessary API calls (economic efficiency)
-
-AVAILABLE VERIFICATION STRATEGIES (choose per-claim):
-
-| Strategy | Cost | Use When |
-|----------|------|----------|
-| CONTEXT_CHECK | FREE | Claim is about the source document above |
-| KNOWLEDGE_CHECK | FREE | Simple well-known fact, 95%+ confident |
-| SEARCH_VERIFY | 1 search | Need sources, statistics, recent events |
-| SOCIAL_VERIFY | 1 Grok call | Viral claims, quotes, breaking news |
-
-CLAIMS TO ANALYZE:
+        return f"""CLAIMS TO ANALYZE:
 {claims_str}
 {context_block}
-
-INSTRUCTIONS:
-1. For each claim, pick the most cost-effective strategy that ensures accuracy
-2. ALWAYS provide 1-5 working source URLs for EVERY claim (no exceptions)
-3. If using KNOWLEDGE_CHECK but unsure about sources, switch to SEARCH_VERIFY
-4. Use SOCIAL_VERIFY when claims involve quotes, viral content, breaking news, or @handles
-
-OUTPUT FORMAT:
-Return JSON with results in the EXACT same order as input claims:
-{{
-  "results": [
-    {{
-      "claim_index": 1,
-      "strategy_used": "SEARCH_VERIFY",
-      "verdict": "TRUE|FALSE|MISLEADING|COULD_NOT_VERIFY|FUTURE_PROJECTION",
-      "explanation": "Brief explanation (max 3 sentences)",
-      "fallacy": null or "fallacy name (e.g. Hyperbole, Straw Man, False Dichotomy)",
-      "is_quote_claim": true or false,
-      "quote_attribution": "Person name or null",
-      "quote_verified": true or false or null,
-      "quote_source": "Where/when they said it or null",
-      "meta_truth_verdict": "TRUE|FALSE|MISLEADING|COULD_NOT_VERIFY or null",
-      "sources": ["https://authoritative-source.com/article"],
-      "social_context": "Optional: only include if SOCIAL_VERIFY was used"
-    }}
-  ]
-}}
-
-CRITICAL: Every claim MUST have at least 1 source URL. No exceptions."""
-
+ 
+For each claim, select the appropriate strategy from your guidelines, verify it, and respond with a JSON results array in the same order."""
+ 
     def _parse_thinking_batch_response(self, response_data, expected_count):
         """Parse the one-shot thinking response into structured results."""
         try:
@@ -423,10 +347,8 @@ CRITICAL: Every claim MUST have at least 1 source URL. No exceptions."""
                 if not response_data.candidates:
                     raise ValueError("No candidates in response")
                 candidate = response_data.candidates[0]
-                for part in candidate.content.parts:
-                    if not getattr(part, 'thought', False) and part.text:
-                        content_text += part.text
-
+                content_text = self._extract_text_from_parts(candidate.content.parts)
+ 
             json_text = self._extract_json(content_text)
             result_data = json.loads(json_text)
             results = result_data.get('results', [])
@@ -482,7 +404,7 @@ CRITICAL: Every claim MUST have at least 1 source URL. No exceptions."""
                 "explanation": "Failed to parse model response",
                 "sources": []
             } for _ in range(expected_count)]
-
+ 
     def triage_for_stream(self, claims: list, stream_context: str = None) -> list:
         """Fast triage using Flash-Lite to categorize claims by priority and strategy."""
         if not claims:
@@ -494,9 +416,17 @@ CRITICAL: Every claim MUST have at least 1 source URL. No exceptions."""
         if stream_context:
             context_hint = f"\nSOURCE CONTEXT: {stream_context[:200]}"
         
-        prompt = f"""Categorize each claim for fact-check priority.
-
-CLAIMS:
+        system_instruction = (
+            "You are a fact-checking triage assistant. Categorize each input claim for fact-check priority "
+            "and strategy based on the instructions. Respond ONLY with a JSON array, one object per claim."
+        )
+        
+        config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            temperature=1.0,
+        )
+        
+        prompt = f"""CLAIMS TO CATEGORIZE:
 {claims_str}
 {context_hint}
 
@@ -504,14 +434,11 @@ For each claim, classify:
 - priority: SKIP (opinion/trivial), IMMEDIATE (breaking/viral), NORMAL (standard), DEFERRED (low-priority)
 - strategy: KNOWLEDGE_CHECK (well-known fact), SEARCH_VERIFY (needs sources), SOCIAL_VERIFY (viral/social)
 
-Return ONLY a JSON array, one object per claim:
+Return ONLY a JSON array matching:
 [{{"index": 1, "priority": "NORMAL", "strategy": "SEARCH_VERIFY"}}, ...]"""
-
+ 
         try:
             if self.client:
-                config = types.GenerateContentConfig(
-                    temperature=1.0,
-                )
                 response = self.client.models.generate_content(
                     model=self.MODEL_FAST,
                     contents=prompt,

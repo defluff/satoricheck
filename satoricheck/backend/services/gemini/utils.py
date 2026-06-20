@@ -66,10 +66,7 @@ class GeminiServiceUtils(GeminiServiceClient):
                 if not candidate.content or not candidate.content.parts:
                     raise ValueError("No content/parts in candidate")
                 
-                # Retrieve first non-thought text part
-                for part in candidate.content.parts:
-                    if not getattr(part, 'thought', False) and part.text:
-                        content_text += part.text
+                content_text = self._extract_text_from_parts(candidate.content.parts)
 
             # Extract and parse JSON using unified helper
             json_text = self._extract_json(content_text)
@@ -194,6 +191,14 @@ Respond with ONLY the summary, no JSON."""
         return None
 
     @staticmethod
+    def _extract_text_from_parts(parts) -> str:
+        """Extract concatenated text from response parts, skipping thought parts."""
+        return "".join(
+            part.text for part in parts
+            if not getattr(part, 'thought', False) and part.text
+        )
+
+    @staticmethod
     def _normalize_claim_text(claim):
         """Normalize claim text for deduplication. Lowercases and strips punctuation."""
         normalized = claim.strip().lower()
@@ -223,54 +228,33 @@ mentions "Biden" and this chunk says "He", replace "He" with "Biden".
 
 """
             
-            prompt = f"""You are a meticulous fact-checker assistant. Your job is to extract EVERY verifiable factual claim from this text.
-
-{preamble}TEXT TO ANALYZE (Part {i+1}/{len(chunks)}):
+            system_instruction = self._load_skill(
+                "claim_extraction",
+                fallback="You are a meticulous fact-checker assistant. Your job is to extract EVERY verifiable factual claim from this text."
+            )
+                
+            config = types.GenerateContentConfig(system_instruction=system_instruction)
+            
+            prompt = f"""{preamble}TEXT TO ANALYZE (Part {i+1}/{len(chunks)}):
 \"\"\"
 {chunk}
 \"\"\"
 
 YOUR TASK:
-Go through the text SENTENCE BY SENTENCE, keep the context of the whole text. For each sentence, ask: "Does this contain a factual claim that can be verified as true or false?"
-
-EXTRACTION RULES:
-1. RESOLVE PRONOUNS: Replace "they", "it", "this", "that", "he", "she" with the actual noun
-   - Original: "They are mammals" → Extract: "Dolphins are mammals"
-   
-2. STANDALONE CLAIMS: Each claim must make sense on its own without the original text
-   - Original: "This is a lot" → Extract: "40 grams of sugar per serving is a lot"
-   
-3. MULTIPLE CLAIMS PER SENTENCE: If a sentence has 2+ claims, extract each separately
-   - "Dolphins lay eggs AND are the best pets" → 2 separate claims
-   
-4. DO NOT SKIP THE LAST SENTENCE - check it for claims too!
- 
-5. INCLUDE claims about:
-   - Scientific facts ("dolphins are mammals")
-   - Statistics ("eggs are the best investment of past 20 years")  
-   - Technical claims ("pop() removes the last item")
-   - Comparisons ("X is better than Y")
- 
-6. EXCLUDE only:
-   - Pure opinions with no factual basis ("I like eggs")
-   - Questions ("what is pop()?")
-   - Commands/instructions ("click the button")
-
-RESPOND WITH JSON ONLY - extract up to 15 claims per chunk:
-{{"claims": ["claim 1", "claim 2", "claim 3", ...]}}
-
-If zero claims found, return: {{"claims": []}}"""
+Go through the text SENTENCE BY SENTENCE, keeping the context of the whole text. Extract up to 15 claims from this chunk according to your guidelines and respond with JSON only matching:
+{{"claims": ["claim 1", "claim 2", ...]}}"""
 
             try:
                 if self.client:
                     response = self.client.models.generate_content(
                         model=self.MODEL_FAST,
-                        contents=prompt
+                        contents=prompt,
+                        config=config
                     )
-                    content = response.text.strip()
-                    content = self._extract_json(content)
+                    content_res = response.text.strip()
+                    content_res = self._extract_json(content_res)
                     
-                    result = json.loads(content.strip())
+                    result = json.loads(content_res.strip())
                     claims = result.get('claims', [])
                     
                     for claim in claims:
@@ -285,22 +269,19 @@ If zero claims found, return: {{"claims": []}}"""
                 logger.warning(f"Smart Agent chunk {i+1} failed: {e}", exc_info=True)
         
         final_claims = list(seen_normalized.values())
-        logger.info(f"Smart Agent total distinct claims found: {len(final_claims)}")
+        logger.info(f"Smart Agent total distinct claims found: {final_claims}")
         return final_claims
 
     def analyze_ai_content(self, text):
         """Analyze text for AI-generation likelihood using the AI Detection skill file."""
-        skill_manual = self._load_skill("ai_detection")
-        
-        if not skill_manual:
-            logger.warning("AI Detection skill manual missing, falling back to basic prompt")
-            skill_header = "You are an expert AI text detector."
-        else:
-            skill_header = f"Using the following Expert Forensic Manual:\n\n{skill_manual}"
+        system_instruction = self._load_skill(
+            "ai_detection",
+            fallback="You are an expert AI text detector."
+        )
+            
+        config = types.GenerateContentConfig(system_instruction=system_instruction)
 
-        prompt = f"""{skill_header}
-
-TASK:
+        prompt = f"""TASK:
 Analyze the text below and determine if it was written by an AI language model (like ChatGPT, Claude, Gemini) or by a human.
 
 TEXT TO ANALYZE:
@@ -309,7 +290,7 @@ TEXT TO ANALYZE:
 \"\"\"
 
 INSTRUCTIONS:
-1. Apply the Forensic Guidelines from the manual above.
+1. Apply the Forensic Guidelines from the manual.
 2. Be decisive. Avoid middle-ground probabilities like 50% unless truly ambiguous.
 3. Identify specific markers (linguistic, structural, lexical) found in THIS text.
 
@@ -326,11 +307,12 @@ RESPOND WITH JSON ONLY:
             if self.client:
                 response = self.client.models.generate_content(
                     model=self.MODEL_FAST,
-                    contents=prompt
+                    contents=prompt,
+                    config=config
                 )
-                content = response.text.strip()
-                content = self._extract_json(content)
-                result = json.loads(content.strip())
+                content_res = response.text.strip()
+                content_res = self._extract_json(content_res)
+                result = json.loads(content_res.strip())
                 
                 if 'ai_probability' not in result:
                     result['ai_probability'] = 50

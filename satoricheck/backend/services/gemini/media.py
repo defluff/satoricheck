@@ -88,29 +88,21 @@ class GeminiServiceMedia(GeminiServiceClaims):
             else:
                 part = self._prepare_media_part(media_input, mime_type, input_type)
 
-            prompt = (
-                "Act as a Senior Forensic Media Analyst specializing in deepfake and synthetic content detection. "
-                "Conduct a rigorous multi-layered analysis of this media to determine its authenticity. "
-                "Reason step-by-step through the following forensic layers:\n\n"
-                "1. Global Logic & Contextual Plausibility: Is the scenario logically plausible for the actors/location? Check for audio-visual flow vs logical 'slicing'.\n"
-                "2. Physical & Environmental Logic: Evaluate lighting and shadow physics. Check for 'melting' backdrops or flickering edge artifacts.\n"
-                "3. Cinematic vs AI Artifacts: Distinguish intentional camera tricks (blocking, cuts) from AI hallucination (pixel warping, object ghosting).\n"
-                "4. Anatomical & Biometric Indicators: Analyze eye movements, skin, and mouth-sync. Look for ear/hand anomalies.\n"
-                "5. Media Heuristics & Platform Evidence: AI videos are often shorter than 20-30 seconds due to cost. Also, check for SynthID watermarks.\n\n"
-                "Respond ONLY with a JSON object containing:\n"
-                "- verdict: 'AI Generated', 'Likely Manipulated', or 'Appears Authentic'\n"
-                "- confidence: 0-100 (overall certainty of verdict)\n"
-                "- explanation: A forensic summary of your reasoning, addressing specific logic, context, and visual artifacts observed.\n"
-                "- criteria: A dictionary with keys 'physics', 'bio', 'context', 'compression', and 'metadata'. Each criterion must contain:\n"
-                "    * tag: Choose exactly one of 'High Signal' (clear problem), 'Med Signal' (suspicious/uncertain), or 'Clean' (appears authentic).\n"
-                "    * score: 0-100 (representing the strength or certainty of that specific signal).\n"
-                "    * detail: A concise string explaining the verdict for that specific criterion."
+            system_instruction = self._load_skill(
+                "media_forensics",
+                fallback="Act as a Senior Forensic Media Analyst specializing in deepfake and synthetic content detection."
             )
+            
+            config = types.GenerateContentConfig(
+                system_instruction=system_instruction
+            )
+            
+            prompt = "Conduct a rigorous multi-layered analysis of this media to determine its authenticity and respond with JSON matching the required schema."
 
             cache_name = self.create_cache(part)
             
             if cache_name:
-                result_data = self.generate_with_cache(cache_name, prompt)
+                result_data = self.generate_with_cache(cache_name, prompt, config=config)
                 parsed = json.loads(self._extract_json(result_data['text']))
                 parsed['cache_name'] = cache_name
                 return parsed
@@ -119,7 +111,8 @@ class GeminiServiceMedia(GeminiServiceClaims):
                 # Use modern Client SDK
                 response = self.client.models.generate_content(
                     model=self.MODEL_PRO,
-                    contents=[part, prompt]
+                    contents=[part, prompt],
+                    config=config
                 )
                 text = response.text
                 

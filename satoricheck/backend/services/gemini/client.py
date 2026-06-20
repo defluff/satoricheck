@@ -1,6 +1,8 @@
+import functools
 import ipaddress
 import logging
 import os
+import re
 import socket
 import requests
 from enum import Enum
@@ -23,6 +25,26 @@ _BLOCKED_METADATA_IPS = frozenset({
     '169.254.169.254',  # AWS / GCP instance metadata
     'fd00:ec2::254',    # AWS IMDSv2 IPv6
 })
+
+
+@functools.lru_cache(maxsize=16)
+def _read_skill_file(skill_name: str) -> str | None:
+    """Read a skill markdown file from disk (cached).
+
+    Returns file contents on success, None on failure.
+    Cached at module level so repeated calls skip disk I/O.
+    """
+    skill_path = os.path.join(Config.SKILLS_DIR, f"{skill_name}.md")
+    try:
+        with open(skill_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        logger.warning(f"Skill file not found: {skill_path}")
+        return None
+    except Exception as e:
+        logger.error(f"Error loading skill {skill_name}: {e}")
+        return None
+
 
 class GeminiServiceClient:
     """Base client for Gemini Service utilizing the modern google-genai SDK."""
@@ -64,18 +86,97 @@ class GeminiServiceClient:
             'x-goog-api-key': self.api_key
         }
 
-    def _load_skill(self, skill_name: str) -> str:
-        """Load an agent skill from the skills directory."""
-        skill_path = os.path.join(Config.SKILLS_DIR, f"{skill_name}.md")
+    def _load_skill(self, skill_name: str, fallback: str = "") -> str:
+        """Load an agent skill markdown file as a system instruction string.
+
+        Results are cached in memory (LRU, max 16 skills) to avoid redundant
+        disk reads on every API call.  Call ``_read_skill_file.cache_clear()``
+        if you need to hot-reload skills at runtime.
+
+        Args:
+            skill_name: Basename of the skill file (without .md extension).
+            fallback:   String returned when the skill file is missing or unreadable.
+
+        Returns:
+            Skill file contents, or *fallback* on any failure.
+        """
+        # Defensive: reject path separators to prevent directory traversal.
+        if re.search(r'[/\\]', skill_name) or '..' in skill_name:
+            logger.error(f"Invalid skill name (path traversal attempt): {skill_name}")
+            return fallback
+
+        content = _read_skill_file(skill_name)
+        return content if content is not None else fallback
+
+    @staticmethod
+    def _build_grok_tool(grok) -> types.Tool:
+        """Build a Gemini-compatible Tool declaration from the Grok service definition.
+
+        Centralises the dict→types.Tool conversion so callers don't duplicate
+        the 18-line construction block.
+        """
+        tool_dict = grok.get_tool_definition()
+        return types.Tool(
+            function_declarations=[
+                types.FunctionDeclaration(
+                    name=tool_dict.get("name"),
+                    description=tool_dict.get("description"),
+                    parameters=types.Schema(
+                        type="OBJECT",
+                        properties={
+                            k: types.Schema(
+                                type=v.get("type", "STRING").upper(),
+                                description=v.get("description", "")
+                            )
+                            for k, v in tool_dict.get("parameters", {}).get("properties", {}).items()
+                        },
+                        required=tool_dict.get("parameters", {}).get("required", [])
+                    )
+                )
+            ]
+        )
+
+    def _generate_with_cache_fallback(
+        self, model: str, contents, config: types.GenerateContentConfig, context_label: str = ""
+    ):
+        """Call generate_content, automatically clearing cached_content on failure and retrying.
+
+        This centralises the try→catch→clear-cache→retry pattern used across
+        agentic loops in claims.py and batch.py.
+
+        Args:
+            model:         Model identifier (e.g. self.MODEL_PRO).
+            contents:      Prompt or conversation history.
+            config:        GenerateContentConfig (may include cached_content).
+            context_label: Descriptive label for log messages.
+
+        Returns:
+            Tuple of (response, cache_was_cleared: bool).
+
+        Raises:
+            Exception: If the call fails even without cache.
+        """
+        if not self.client:
+            raise Exception("Gemini client not initialized")
+
         try:
-            if not os.path.exists(skill_path):
-                logger.warning(f"Skill file not found: {skill_path}")
-                return ""
-            with open(skill_path, 'r', encoding='utf-8') as f:
-                return f.read()
+            response = self.client.models.generate_content(
+                model=model, contents=contents, config=config
+            )
+            return response, False
         except Exception as e:
-            logger.error(f"Error loading skill {skill_name}: {e}")
-            return ""
+            if config.cached_content:
+                logger.warning(
+                    f"Cache {config.cached_content} failed/conflicted"
+                    f"{' in ' + context_label if context_label else ''}, "
+                    f"clearing cache and retrying: {e}"
+                )
+                config.cached_content = None
+                response = self.client.models.generate_content(
+                    model=model, contents=contents, config=config
+                )
+                return response, True
+            raise
 
     @staticmethod
     def _is_private_ip(ip_str: str) -> bool:
