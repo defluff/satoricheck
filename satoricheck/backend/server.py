@@ -123,7 +123,7 @@ def set_security_headers(response):
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "img-src 'self' data: https:; "
-        "connect-src 'self' wss: https://api.deepgram.com https://generativelanguage.googleapis.com https://api.stripe.com https://cdn.jsdelivr.net; "
+        "connect-src 'self' wss: https://generativelanguage.googleapis.com https://api.stripe.com https://cdn.jsdelivr.net; "
         "frame-src https://js.stripe.com; "
         "frame-ancestors 'none';"
     )
@@ -207,7 +207,7 @@ from backend.routes.media import media_bp
 app.register_blueprint(media_bp)
 
 
-# Initialize WebSocket proxy for Live Pro (keeps Deepgram key server-side)
+# Initialize WebSocket proxy for Live Pro (Gemini Live API, key stays server-side)
 from backend.services.websocket_proxy import init_websocket_proxy
 init_websocket_proxy(app)
 
@@ -218,9 +218,9 @@ from backend.services import init_services
 init_services()
 logger.info("✓ External API services initialized")
 
-# Initialize Deepgram service
-from backend.services.deepgram_service import init_deepgram_service
-init_deepgram_service()
+# Initialise transcription service (Gemini Live API — replaces Deepgram)
+from backend.services.transcription_service import init_transcription_service
+init_transcription_service()
 
 # Initialize database (create tables if they don't exist)
 logger.info("Initializing database...")

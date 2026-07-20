@@ -1,6 +1,6 @@
 /**
- * Live Pro Audio Module
- * Handles Deepgram WebSocket streaming for premium transcription
+ * Live Audio Module
+ * Handles real-time Gemini Live WebSocket streaming for premium transcription
  */
 
 import api from './api.js';
@@ -40,7 +40,7 @@ class LiveProManager {
             this.cpPerMinute = config.cp_per_minute || 1;
 
             if (!this.available) {
-                // Live Pro not available (Deepgram not configured)
+                // Live Audio not available (Gemini API key not configured)
             }
 
             // Add beforeunload handler to cleanup session if user closes tab
@@ -102,7 +102,7 @@ class LiveProManager {
             stream.getTracks().forEach(track => track.stop()); // Release immediately, just checking permission
         } catch (permError) {
             console.error('Microphone permission denied:', permError);
-            ui.showToast('Microphone access is required for Live Pro', 'error');
+            ui.showToast('Microphone access is required for Live Audio', 'error');
             return false;
         }
 
@@ -118,15 +118,14 @@ class LiveProManager {
             this.sessionId = session.session_id;
 
             // Get audio stream
-            // Get audio stream with strict constraints for Deepgram compatibility
-            // Force 16kHz Mono to avoid Opux/WebM complexity in the proxy
+            // Audio constraints: 16kHz mono for Gemini Live API PCM compatibility
             const constraints = {
                 audio: {
                     deviceId: deviceId ? { exact: deviceId } : undefined,
                     channelCount: 1,
                     sampleRate: 16000,
                     echoCancellation: false,
-                    noiseSuppression: false, // Let Deepgram handle this
+                    noiseSuppression: false, // Gemini Live handles noise suppression
                     autoGainControl: false
                 }
             };
@@ -151,7 +150,7 @@ class LiveProManager {
             this.sessionStartTime = Date.now();
             this.totalSeconds = 0;
 
-            ui.showToast('⚡ Live Pro active', 'success');
+            ui.showToast('⚡ Live Audio active', 'success');
 
             return true;
 
@@ -160,10 +159,10 @@ class LiveProManager {
             this.cleanup();
 
             if (error.message.includes('Insufficient')) {
-                ui.showToast('Not enough CP for Live Pro', 'error');
+                ui.showToast('Not enough CP for Live Audio', 'error');
                 ui.showModal('buy-tokens-modal');
             } else {
-                ui.showToast('Failed to start Live Pro: ' + error.message, 'error');
+                ui.showToast('Failed to start Live Audio: ' + error.message, 'error');
             }
 
             return false;
@@ -193,7 +192,7 @@ class LiveProManager {
             };
 
             this.webSocket.onclose = async (event) => {
-                console.log('Deepgram WebSocket closed:', event.code, event.reason);
+                console.log('WebSocket closed:', event.code, event.reason);
 
                 if (this.isActive && !this.isRetrying) {
                     // Check if we should retry (Code 1006 is abnormal closure)
@@ -225,7 +224,7 @@ class LiveProManager {
                     } else {
                         // Max retries reached
                         this.stop();
-                        ui.showToast('Live Pro connection lost', 'warning');
+                        ui.showToast('Live Audio connection lost', 'warning');
                     }
                 }
             };
@@ -242,7 +241,7 @@ class LiveProManager {
     }
 
     /**
-     * Handle transcript from Deepgram
+     * Handle transcript from Gemini Live API
      */
     handleTranscript(data) {
         try {
@@ -258,12 +257,12 @@ class LiveProManager {
                 }
             }
         } catch (error) {
-            console.error('Error parsing Deepgram response:', error);
+            console.error('Error parsing transcript response:', error);
         }
     }
 
     /**
-     * Start streaming audio to Deepgram
+     * Start streaming audio to Gemini Live API
      */
     startStreaming() {
         // Use MediaRecorder to capture audio
@@ -308,7 +307,7 @@ class LiveProManager {
                     }
                 } else if (result.status === 'insufficient_balance') {
                     // Out of credits
-                    ui.showToast('Out of CP! Stopping Live Pro...', 'warning');
+                    ui.showToast('Out of CP! Stopping Live Audio...', 'warning');
                     await this.stop();
                 }
             } catch (error) {
@@ -345,7 +344,7 @@ class LiveProManager {
             this.onStopCallback();
         }
 
-        ui.showToast(`Live Pro stopped (${Math.floor(finalSeconds / 60)}m ${finalSeconds % 60}s)`, 'info');
+        ui.showToast(`Live Audio stopped (${Math.floor(finalSeconds / 60)}m ${finalSeconds % 60}s)`, 'info');
     }
 
     /**

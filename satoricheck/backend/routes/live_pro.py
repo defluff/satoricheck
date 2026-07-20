@@ -12,7 +12,7 @@ from backend.models import TokenBalance, Transaction, LiveProSession
 from backend.routes.auth import login_required
 from backend.config import Config
 from backend.error_handlers import APIError
-from backend.services.deepgram_service import get_deepgram_service
+from backend.services.transcription_service import get_transcription_service
 
 logger = logging.getLogger(__name__)
 
@@ -25,21 +25,21 @@ active_sessions = {}
 @live_pro_bp.route('/config', methods=['GET'])
 @login_required
 def get_live_pro_config() -> tuple:
-    """Get Live Pro configuration and availability."""
+    """Return Live Pro availability and pricing for the authenticated user."""
     user = request.current_user
-    deepgram = get_deepgram_service()
-    
+    transcription = get_transcription_service()
+
     # Get user's token balance
     token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
     balance = token_balance.balance if token_balance else 0
-    
+
+    # Note: websocket_url is not returned here — the client always connects
+    # to /api/livepro/ws/<session_id> which is issued by /start.
     return jsonify({
         'success': True,
-        'available': deepgram.is_available(),
+        'available': transcription.is_available(),
         'cp_per_minute': Config.LIVE_PRO_CP_PER_MINUTE,
         'balance': balance,
-        'websocket_url': deepgram.get_websocket_url() if deepgram.is_available() else None
-        # SECURITY: auth_header removed - implement WebSocket proxy instead
     })
 
 
@@ -48,9 +48,9 @@ def get_live_pro_config() -> tuple:
 def start_session() -> tuple:
     """Start a Live Pro transcription session."""
     user = request.current_user
-    deepgram = get_deepgram_service()
-    
-    if not deepgram.is_available():
+    transcription = get_transcription_service()
+
+    if not transcription.is_available():
         raise APIError('Live Pro is not available', status_code=503)
     
     # ABUSE PREVENTION: Check for existing active session (1 per user limit)
@@ -97,15 +97,14 @@ def start_session() -> tuple:
     
     logger.info(f"Live Pro session {session.id} started for user {user.email}, balance: {token_balance.balance} CP")
     
-    # Build the proxy WebSocket URL (browser connects here, we proxy to Deepgram)
-    # Use wss:// in production, ws:// in development
+    # Build the proxy WebSocket URL (browser connects to our proxy, not Gemini directly)
     ws_protocol = 'wss' if Config.ENV == 'production' else 'ws'
     proxy_url = f"{ws_protocol}://{request.host}/api/livepro/ws/{session.id}"
     
     return jsonify({
         'success': True,
         'session_id': session.id,
-        'websocket_url': proxy_url,  # Points to OUR proxy, not Deepgram directly
+        'websocket_url': proxy_url,  # Points to OUR proxy, not Gemini directly
         'cp_per_minute': Config.LIVE_PRO_CP_PER_MINUTE,
         'balance': token_balance.balance,
         'max_duration_seconds': 7200  # Inform client of 2-hour limit

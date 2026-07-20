@@ -25,6 +25,8 @@ class Config:
     GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
     GEMINI_MODEL_PRO = os.getenv('GEMINI_MODEL_PRO', 'gemini-3.1-pro-preview')
     GEMINI_MODEL_FLASH = os.getenv('GEMINI_MODEL_FLASH', 'gemini-3-flash-preview')
+    # Model used for the Gemini Live real-time transcription (Live Pro feature)
+    GEMINI_LIVE_MODEL = os.getenv('GEMINI_LIVE_MODEL', 'gemini-2.0-flash-live-001')
 
     # Google OAuth
     GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')
@@ -46,9 +48,6 @@ class Config:
     # Server
     PORT = int(os.getenv('PORT', 8000))
     HOST = os.getenv('HOST', '127.0.0.1')
-    
-    # Deepgram (for Live Pro transcription)
-    DEEPGRAM_API_KEY = os.getenv('DEEPGRAM_API_KEY')
     
     # xAI Grok API (for Social Context in Smart Mode)
     GROK_API_KEY = os.getenv('GROK_API_KEY')
@@ -98,7 +97,7 @@ class Config:
     MEDIA_ANALYSIS_COST = 1  # 1 CP per media analysis
     
     # Live Pro: Time-based billing
-    LIVE_PRO_CP_PER_MINUTE = 1  # 1 CP = 1 minute of Deepgram transcription
+    LIVE_PRO_CP_PER_MINUTE = 1  # 1 CP = 1 minute of Gemini Live transcription
     
     # Signup bonus
     SIGNUP_BONUS_TOKENS = 3  # Freemium: 3 free CP to test the app
