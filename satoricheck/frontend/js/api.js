@@ -134,34 +134,7 @@ class APIClient {
         return this.request('/billing/packages');
     }
 
-    // --- LIVE PRO ENDPOINTS ---
 
-    async getLiveProConfig() {
-        return this.request('/live-pro/config');
-    }
-
-    async startLiveProSession(language = 'en', deviceId = null) {
-        return this.request('/live-pro/start', {
-            method: 'POST',
-            body: JSON.stringify({ language, device_id: deviceId })
-        });
-    }
-
-    async liveProHeartbeat(sessionId) {
-        return this.request('/live-pro/heartbeat', {
-            method: 'POST',
-            body: JSON.stringify({ session_id: sessionId })
-        });
-    }
-
-    async endLiveProSession(sessionId) {
-        return this.request('/live-pro/end', {
-            method: 'POST',
-            body: JSON.stringify({ session_id: sessionId })
-        });
-    }
-
-    // --- FACT-CHECK ENDPOINTS ---
 
     async analyzeText(text, context = null) {
         const payload = { text };

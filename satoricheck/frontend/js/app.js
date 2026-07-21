@@ -9,12 +9,10 @@ import audio from './audio.js';
 import factcheck from './factcheck.js';
 import selection from './selection.js';
 import api from './api.js';
-import livepro from './livepro.js';
 import pitchdeck from './pitchdeck.js';
 
 class App {
     constructor() {
-        this.liveProMode = false; // Standard mode by default
         this.analysisMode = localStorage.getItem('analysisMode') || 'factcheck'; // 'factcheck' or 'aidetect'
     }
 
@@ -45,30 +43,6 @@ class App {
             factcheck.handleAutoCheck(transcript);
         });
 
-        // Initialize Live Pro
-        const liveProAvailable = await livepro.init();
-        if (liveProAvailable) {
-            // Set up Live Pro transcript handler
-            livepro.onTranscript((transcript, isFinal) => {
-                ui.appendTranscript(transcript, isFinal);
-                if (isFinal) {
-                    factcheck.handleAutoCheck(transcript);
-                }
-            });
-
-            // Handle automatic stops (connection loss, etc)
-            livepro.onStop(() => {
-                ui.elements.micBtn.classList.remove('active', 'live-pro-active');
-                const liveProIndicator = document.getElementById('live-pro-indicator');
-                if (liveProIndicator) liveProIndicator.classList.add('hidden');
-            });
-        } else {
-            // Hide Live Pro toggle if not available
-            const proToggle = document.getElementById('pro-mode-toggle-container');
-            if (proToggle) {
-                proToggle.style.display = 'none';
-            }
-        }
 
         // Initialize shop packages from backend
         try {
@@ -89,29 +63,6 @@ class App {
 
         // Factcheck event listeners
         factcheck.setupEventListeners();
-
-        // Transcription mode selector (Pro Toggle)
-        const proToggle = document.getElementById('mode-live-pro-toggle');
-        const liveProIndicator = document.getElementById('live-pro-indicator');
-
-        if (proToggle) {
-            proToggle.addEventListener('change', () => {
-                if (proToggle.checked) {
-                    // Check if we should skip confirmation modal
-                    const hideModal = localStorage.getItem('hideLiveProModal') === 'true';
-
-                    if (hideModal) {
-                        this.activateLiveProMode();
-                    } else {
-                        ui.showModal('live-pro-modal');
-                    }
-                } else {
-                    this.liveProMode = false;
-                    liveProIndicator?.classList.add('hidden');
-                    ui.elements.micBtn.classList.remove('live-pro-active');
-                }
-            });
-        }
 
         // Analysis Mode Toggle (Fact Check vs AI Detect)
         const analysisModeToggle = document.getElementById('analysis-mode-toggle');
@@ -141,74 +92,22 @@ class App {
             });
         }
 
-        // Live Pro confirmation modal handlers
-        const activateLiveProBtn = document.getElementById('activate-live-pro');
-        const cancelLiveProBtn = document.getElementById('cancel-live-pro');
-        const closeLiveProModal = document.getElementById('close-live-pro-modal');
-        const hideModalCheckbox = document.getElementById('hide-live-pro-modal-checkbox');
 
-        if (activateLiveProBtn) {
-            activateLiveProBtn.addEventListener('click', () => {
-                // Save preference if checkbox is checked
-                if (hideModalCheckbox?.checked) {
-                    localStorage.setItem('hideLiveProModal', 'true');
-                }
-                ui.hideModal('live-pro-modal');
-                this.activateLiveProMode();
-            });
-        }
-
-        if (cancelLiveProBtn) {
-            cancelLiveProBtn.addEventListener('click', () => {
-                ui.hideModal('live-pro-modal');
-                this.liveProMode = false;
-                const proToggle = document.getElementById('mode-live-pro-toggle');
-                if (proToggle) proToggle.checked = false;
-            });
-        }
-
-        if (closeLiveProModal) {
-            closeLiveProModal.addEventListener('click', () => {
-                ui.hideModal('live-pro-modal');
-                this.liveProMode = false;
-                const proToggle = document.getElementById('mode-live-pro-toggle');
-                if (proToggle) proToggle.checked = false;
-            });
-        }
-
-        // Microphone button - handles both Standard and Live Pro modes
+        // Microphone button — starts/stops standard Web Speech Recognition
         ui.elements.micBtn.addEventListener('click', async () => {
-            if (this.liveProMode) {
-                // Live Pro mode
-                if (livepro.isActive) {
-                    await livepro.stop();
-                    ui.elements.micBtn.classList.remove('active', 'live-pro-active');
-                    liveProIndicator?.classList.add('hidden');
-                } else {
-                    const deviceId = ui.selectedMicId || null;
-                    const started = await livepro.start(deviceId);
-                    if (started) {
-                        ui.elements.micBtn.classList.add('active', 'live-pro-active');
-                        liveProIndicator?.classList.remove('hidden');
-                    }
+            if (!audio.recognition) {
+                const initialized = audio.init();
+                if (!initialized) {
+                    return;
                 }
-            } else {
-                // Standard mode (browser SpeechRecognition)
-                if (!audio.recognition) {
-                    const initialized = audio.init();
-                    if (!initialized) {
-                        return;
-                    }
-                }
-                audio.start();
             }
+            audio.start();
         });
 
         // Settings button
-        ui.elements.settingsBtn.addEventListener('click', async () => {
+        ui.elements.settingsBtn.addEventListener('click', () => {
             ui.showModal('settings-modal');
-            await ui.updateAudioDevices();
-            
+
             // Sync toggle state just in case
             const darkModeToggle = document.getElementById('dark-mode-toggle');
             if (darkModeToggle) {
@@ -231,49 +130,6 @@ class App {
             ui.hideModal('settings-modal');
         });
 
-        // Mic selection change
-        if (ui.elements.micSelect) {
-            ui.elements.micSelect.addEventListener('change', async (e) => {
-                const deviceId = e.target.value;
-                localStorage.setItem('selectedMicId', deviceId);
-                ui.selectedMicId = deviceId;
-
-                // Ping the device to ensure browser has permission and 'focuses' it
-                if (deviceId) {
-                    try {
-                        const stream = await navigator.mediaDevices.getUserMedia({
-                            audio: { deviceId: { exact: deviceId } }
-                        });
-                        // Stop tracks immediately, we just wanted to 'activate' the device choice in browser
-                        stream.getTracks().forEach(track => track.stop());
-                        ui.showToast('Microphone updated', 'success');
-                    } catch (error) {
-                        console.error('Mic selection error:', error);
-                        ui.showToast('Could not switch to that microphone', 'warning');
-                    }
-                }
-            });
-        }
-
-        // Request microphone access button
-        const requestMicAccessBtn = document.getElementById('request-mic-access-btn');
-        if (requestMicAccessBtn) {
-            requestMicAccessBtn.addEventListener('click', async () => {
-                requestMicAccessBtn.disabled = true;
-                requestMicAccessBtn.textContent = 'Requesting...';
-
-                const granted = await ui.requestMicPermission();
-
-                if (granted) {
-                    ui.showToast('Microphone access granted! Device list updated.', 'success');
-                    requestMicAccessBtn.textContent = '✓ Access Granted';
-                } else {
-                    ui.showToast('Microphone permission denied. Enable in browser settings.', 'error');
-                    requestMicAccessBtn.disabled = false;
-                    requestMicAccessBtn.textContent = 'Request Access';
-                }
-            });
-        }
 
         // Token balance click - show buy modal
         ui.elements.tokenCount.parentElement.addEventListener('click', () => {
@@ -450,17 +306,6 @@ class App {
         this.checkPaymentStatus();
     }
 
-    /**
-     * Activate Live Pro mode - updates UI and sets mode flag
-     */
-    activateLiveProMode() {
-        this.liveProMode = true;
-        const proToggle = document.getElementById('mode-live-pro-toggle');
-        if (proToggle) {
-            proToggle.checked = true;
-        }
-        // Toast removed to avoid confusion (Live Pro isn't 'Active' until Mic is clicked)
-    }
 
     /**
      * Switch between the three main views: factcheck, pitchdeck, media.

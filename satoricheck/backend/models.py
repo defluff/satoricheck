@@ -20,9 +20,7 @@ class User(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     last_login = Column(DateTime)
     
-    # Live Pro preferences
-    hide_live_pro_modal = Column(Boolean, default=False)
-    
+
     # Volatile Cache Tracking (Clears on new uploads to prevent bloat)
     current_media_cache = Column(String(255))
     current_pitchdeck_cache = Column(String(255))
@@ -32,7 +30,6 @@ class User(Base):
     streak = relationship('Streak', back_populates='user', uselist=False)
     transactions = relationship('Transaction', back_populates='user')
     fact_checks = relationship('FactCheck', back_populates='user')
-    live_pro_sessions = relationship('LiveProSession', back_populates='user')
     media_checks = relationship('MediaCheck', back_populates='user')
     
     def __repr__(self):
@@ -141,41 +138,6 @@ class FactCheck(Base):
     def __repr__(self):
         return f'<FactCheck id={self.id} verdict={self.verdict}>'
 
-
-class LiveProSession(Base):
-    """Live Pro transcription sessions for accurate billing tracking."""
-    __tablename__ = 'live_pro_sessions'
-    
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
-    
-    # Session timing
-    started_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
-    last_heartbeat = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
-    last_billed_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
-    ended_at = Column(DateTime)
-    
-    # Billing tracking
-    cp_consumed = Column(Integer, default=0)
-    duration_seconds = Column(Integer, default=0)
-    
-    # Session status
-    status = Column(String(20), default='active')  # 'active', 'completed', 'abandoned'
-    
-    # Metadata
-    language = Column(String(10), default='en')
-    device_id = Column(String(255))  # Audio device used
-    
-    user = relationship('User', back_populates='live_pro_sessions')
-    
-    # Composite index for active session queries
-    __table_args__ = (
-        Index('ix_livepro_user_status', 'user_id', 'status'),
-        Index('ix_livepro_heartbeat', 'last_heartbeat'),
-    )
-    
-    def __repr__(self):
-        return f'<LiveProSession id={self.id} user_id={self.user_id} status={self.status}>'
 
 
 class DeletedUser(Base):

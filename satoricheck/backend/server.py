@@ -188,9 +188,6 @@ app.register_blueprint(billing_bp)
 app.register_blueprint(factcheck_bp)
 app.register_blueprint(export_bp)
 
-# Import and register Live Pro blueprint
-from backend.routes.live_pro import live_pro_bp
-app.register_blueprint(live_pro_bp)
 
 # Import and register Analytics blueprint (share tracking)
 from backend.routes.analytics import analytics_bp
@@ -207,9 +204,6 @@ from backend.routes.media import media_bp
 app.register_blueprint(media_bp)
 
 
-# Initialize WebSocket proxy for Live Pro (Gemini Live API, key stays server-side)
-from backend.services.websocket_proxy import init_websocket_proxy
-init_websocket_proxy(app)
 
 logger.info("✓ Blueprints registered")
 
@@ -218,9 +212,6 @@ from backend.services import init_services
 init_services()
 logger.info("✓ External API services initialized")
 
-# Initialise transcription service (Gemini Live API — replaces Deepgram)
-from backend.services.transcription_service import init_transcription_service
-init_transcription_service()
 
 # Initialize database (create tables if they don't exist)
 logger.info("Initializing database...")
@@ -229,7 +220,6 @@ logger.info("✓ Database initialized")
 
 # Initialize background scheduler for cleanup tasks
 from apscheduler.schedulers.background import BackgroundScheduler
-from backend.routes.live_pro import cleanup_abandoned_sessions
 
 
 def cleanup_old_checks():
@@ -254,14 +244,6 @@ def cleanup_old_checks():
 
 
 scheduler = BackgroundScheduler()
-scheduler.add_job(
-    func=cleanup_abandoned_sessions,
-    trigger='interval',
-    seconds=60,
-    id='cleanup_abandoned_sessions',
-    name='Cleanup abandoned Live Pro sessions',
-    replace_existing=True
-)
 scheduler.add_job(
     func=cleanup_old_checks,
     trigger='interval',

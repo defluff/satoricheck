@@ -6,7 +6,7 @@
 import toastUI from './ui/toast-ui.js';
 import modalUI from './ui/modal-ui.js';
 import exportUI from './ui/export-ui.js';
-import audioUI from './ui/audio-ui.js';
+
 import transcriptUI from './ui/transcript-ui.js';
 import billingUI from './ui/billing-ui.js';
 import streakUI from './ui/streak-ui.js';
@@ -18,7 +18,6 @@ class UIManager {
         this.toast = toastUI;
         this.modal = modalUI;
         this.export = exportUI;
-        this.audio = audioUI;
         this.transcript = transcriptUI;
         this.billing = billingUI;
         this.streak = streakUI;
@@ -45,13 +44,9 @@ class UIManager {
             // Modals & Settings
             closeBuyModal: document.getElementById('close-buy-modal'),
             closeSettingsModal: document.getElementById('close-settings-modal'),
-            micSelect: document.getElementById('mic-select'),
             manageBillingBtn: document.getElementById('manage-billing-btn'),
             userEmail: document.getElementById('user-email')
         };
-
-        // Store selected mic ID (legacy compatibility)
-        this.selectedMicId = localStorage.getItem('selectedMicId') || null;
 
         // Strip formatting on paste
         if (this.elements.transcriptContainer) {
@@ -117,14 +112,6 @@ class UIManager {
         this.transcript.setListeningState(isListening);
     }
 
-    // ===== Audio Delegation =====
-    updateAudioDevices() {
-        return this.audio.updateAudioDevices();
-    }
-
-    requestMicPermission() {
-        return this.audio.requestMicPermission();
-    }
 
     // ===== Card Delegation =====
     createCard(claim, isPending = false) {

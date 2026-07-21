@@ -225,68 +225,7 @@ class TestValidateUrlSSRF:
         assert service._validate_url('gopher://evil.com') is False
 
 
-# =============================================================================
-# Fix 3: WebSocket auth helper
-# =============================================================================
 
-class TestWebSocketAuth:
-    """WebSocket proxy must authenticate the connecting user."""
-
-    def test_authenticate_ws_user_valid_jwt(self, app):
-        """Valid JWT cookie should return user_id."""
-        from backend.services.websocket_proxy import _authenticate_ws_user
-        from backend.jwt_utils import create_token
-
-        with app.app_context():
-            token = create_token(42, 'test@example.com')
-            environ = {
-                'HTTP_COOKIE': f'authenix_token={token}',
-            }
-            user_id = _authenticate_ws_user(environ)
-            assert user_id == 42
-
-    def test_authenticate_ws_user_no_cookie(self, app):
-        """Missing JWT cookie should return None."""
-        from backend.services.websocket_proxy import _authenticate_ws_user
-
-        with app.app_context():
-            environ = {}
-            user_id = _authenticate_ws_user(environ)
-            assert user_id is None
-
-    def test_authenticate_ws_user_invalid_jwt(self, app):
-        """Invalid/tampered JWT should return None."""
-        from backend.services.websocket_proxy import _authenticate_ws_user
-
-        with app.app_context():
-            environ = {
-                'HTTP_COOKIE': 'authenix_token=invalid.token.here',
-            }
-            user_id = _authenticate_ws_user(environ)
-            assert user_id is None
-
-    def test_authenticate_ws_user_expired_jwt(self, app):
-        """Expired JWT should return None."""
-        import jwt as pyjwt
-        from datetime import timedelta
-        from backend.config import Config
-        from backend.services.websocket_proxy import _authenticate_ws_user
-
-        with app.app_context():
-            expired_payload = {
-                'user_id': 42,
-                'email': 'test@example.com',
-                'iat': datetime.utcnow() - timedelta(days=30),
-                'exp': datetime.utcnow() - timedelta(days=1),
-            }
-            expired_token = pyjwt.encode(
-                expired_payload, Config.SECRET_KEY, algorithm='HS256'
-            )
-            environ = {
-                'HTTP_COOKIE': f'authenix_token={expired_token}',
-            }
-            user_id = _authenticate_ws_user(environ)
-            assert user_id is None
 
 
 # =============================================================================

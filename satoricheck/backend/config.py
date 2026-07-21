@@ -96,9 +96,6 @@ class Config:
     TOKENS_PER_CP_UNIT = 1
     MEDIA_ANALYSIS_COST = 1  # 1 CP per media analysis
     
-    # Live Pro: Time-based billing
-    LIVE_PRO_CP_PER_MINUTE = 1  # 1 CP = 1 minute of Gemini Live transcription
-    
     # Signup bonus
     SIGNUP_BONUS_TOKENS = 3  # Freemium: 3 free CP to test the app
     

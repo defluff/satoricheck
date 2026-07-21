@@ -367,7 +367,7 @@ def delete_account():
         logger.warning(f"DELETING ACCOUNT: {user_email} (ID: {user.id})")
         
         # Imports to ensure we have all models needed for cleanup
-        from backend.models import MediaCheck, TokenBalance, Streak, Transaction, FactCheck, LiveProSession, DeletedUser
+        from backend.models import MediaCheck, TokenBalance, Streak, Transaction, FactCheck, DeletedUser
         
         # 1. Create a tombstone record to prevent bonus abuse on re-signup
         # We store SHA256 of email to be GDPR/Privacy compliant (no PII kept)
@@ -388,7 +388,7 @@ def delete_account():
         db_session.query(Streak).filter_by(user_id=user.id).delete()
         db_session.query(Transaction).filter_by(user_id=user.id).delete()
         db_session.query(FactCheck).filter_by(user_id=user.id).delete()
-        db_session.query(LiveProSession).filter_by(user_id=user.id).delete()
+
         
         # 3. Delete the user
         db_session.delete(user)

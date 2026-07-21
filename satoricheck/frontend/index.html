@@ -95,12 +95,6 @@
                                 <span class="toggle-slider"></span>
                                 <span class="toggle-label">Auto</span>
                             </label>
-                            
-                            <label class="toggle-switch" id="pro-mode-toggle-container" title="Live Audio — Gemini powered (1 CP/min)">
-                                <input type="checkbox" id="mode-live-pro-toggle">
-                                <span class="toggle-slider"></span>
-                                <span class="toggle-label">⚡ Pro</span>
-                            </label>
                         </div>
 
                         <!-- Right group: Mic + Check -->
@@ -643,21 +637,7 @@
                 </div>
             </div>
 
-            <div class="settings-section">
-                <h3>Audio Settings</h3>
-                <div class="form-group">
-                    <label for="mic-select">Microphone Input</label>
-                    <div class="mic-select-row">
-                        <select id="mic-select" class="form-control">
-                            <option value="">Default System Microphone</option>
-                        </select>
-                        <button class="btn-secondary btn-compact" id="request-mic-access-btn"
-                            title="Request microphone access to see all devices">Request Access</button>
-                    </div>
-                </div>
-                <p class="settings-help">Note: Selecting a specific microphone helps when using virtual audio cables.
-                </p>
-            </div>
+
 
             <div class="settings-section">
                 <h3>Extension Access</h3>
@@ -723,39 +703,6 @@
     </div>
 
 
-    <!-- Live Pro Confirmation Modal -->
-
-    <div class="modal hidden" id="live-pro-modal">
-        <div class="modal-overlay"></div>
-        <div class="modal-content live-pro-modal-content">
-            <button class="modal-close" id="close-live-pro-modal">×</button>
-            <div class="live-pro-modal-header">
-                <span class="live-pro-icon">⚡</span>
-                <h2>Activate Live Audio?</h2>
-            </div>
-
-            <p class="live-pro-cost">Live Audio uses <strong>1 CP per minute</strong></p>
-
-            <ul class="live-pro-benefits">
-                <li><span class="benefit-check">✓</span> Virtual audio cable support (in-browser audio)</li>
-                <li><span class="benefit-check">✓</span> Significantly increases transcription accuracy </li>
-                <li><span class="benefit-check">✓</span> Can handle complex topics</li>
-                <li><span class="benefit-check">✓</span> Powered by Google Gemini Live AI</li>
-            </ul>
-
-            <label class="hide-modal-checkbox">
-                <input type="checkbox" id="hide-live-pro-modal-checkbox">
-                <span>Don't show this again</span>
-            </label>
-
-            <div class="modal-actions">
-                <button class="btn-secondary" id="cancel-live-pro">Cancel</button>
-                <button class="btn-primary live-pro-activate" id="activate-live-pro">
-                    ⚡ Activate
-                </button>
-            </div>
-        </div>
-    </div>
 
     <!-- Streak Modal -->
     <div class="modal hidden" id="streak-modal">
