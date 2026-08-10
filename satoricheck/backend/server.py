@@ -257,7 +257,7 @@ scheduler.add_job(
 import os
 if os.environ.get('WERKZEUG_RUN_MAIN') != 'true' or not app.debug:
     scheduler.start()
-    logger.info("✓ Background scheduler started (cleanup every 60s)")
+    logger.info("✓ Background scheduler started (cleanup every 24h)")
 
 
 @app.route('/')

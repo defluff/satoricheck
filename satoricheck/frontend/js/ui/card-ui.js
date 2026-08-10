@@ -167,14 +167,14 @@ class CardUI {
                         return url.substring(0, 25) + '…';
                     }
                 };
-                sourcesDiv.innerHTML = `
+                sourcesDiv.innerHTML = DOMPurify.sanitize(`
                     <strong style="color: var(--color-text-secondary); font-size: 0.875rem;">Sources:</strong>
                     <ul class="sources-list">
                         ${validSources.map(url => `
                             <li><a href="${url}" target="_blank" rel="noopener noreferrer" title="${url}">${formatUrl(url)}</a></li>
                         `).join('')}
                     </ul>
-                `;
+                `);
                 detailsContainer.appendChild(sourcesDiv);
             }
         }

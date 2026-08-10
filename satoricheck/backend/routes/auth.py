@@ -154,7 +154,6 @@ def signup():
             raise APIError('Email and password are required')
         
         # Validate email format (robust)
-        import re
         if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
             raise APIError('Invalid email format')
         
