@@ -12,6 +12,24 @@ logger = logging.getLogger(__name__)
 # Token expiry (7 days)
 TOKEN_EXPIRY_DAYS = 7
 
+# Cookie settings
+JWT_COOKIE_NAME = 'authenix_token'
+JWT_COOKIE_SECURE = Config.ENV != 'development'  # True in production
+JWT_COOKIE_HTTPONLY = True
+JWT_COOKIE_SAMESITE = 'Lax'
+
+
+def set_jwt_cookie(response, token: str):
+    """Set the JWT authentication cookie with standard security settings on a Flask response."""
+    response.set_cookie(
+        JWT_COOKIE_NAME,
+        token,
+        httponly=JWT_COOKIE_HTTPONLY,
+        secure=JWT_COOKIE_SECURE,
+        samesite=JWT_COOKIE_SAMESITE,
+        max_age=TOKEN_EXPIRY_DAYS * 24 * 60 * 60,
+    )
+
 
 def create_token(user_id: int, email: str) -> str:
     """

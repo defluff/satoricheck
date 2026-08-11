@@ -91,15 +91,15 @@ class TestTokenRefresh:
         """A JWT with <1 day remaining should get a refreshed Set-Cookie."""
         from backend.jwt_utils import TOKEN_EXPIRY_DAYS
         from backend.config import Config
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, UTC
         import jwt as pyjwt
 
         # Craft a token that expires in 30 minutes (< 1 day threshold)
         payload = {
             'user_id': test_user.id,
             'email': test_user.email,
-            'iat': datetime.utcnow() - timedelta(days=TOKEN_EXPIRY_DAYS),
-            'exp': datetime.utcnow() + timedelta(minutes=30),
+            'iat': datetime.now(UTC) - timedelta(days=TOKEN_EXPIRY_DAYS),
+            'exp': datetime.now(UTC) + timedelta(minutes=30),
         }
         near_expiry_token = pyjwt.encode(payload, Config.SECRET_KEY, algorithm='HS256')
 

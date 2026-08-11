@@ -9,7 +9,7 @@ Covers:
 """
 import pytest
 from unittest.mock import patch, MagicMock
-from datetime import datetime
+from datetime import datetime, UTC
 
 
 # =============================================================================
@@ -53,7 +53,7 @@ class TestBatchCacheIDOR:
             sources=json.dumps(['https://example.com']),
             source_reliability='HIGH',
             source='factcheck',
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
         )
         db_session_fixture.add(fc)
         db_session_fixture.commit()
@@ -128,7 +128,7 @@ class TestBatchCacheIDOR:
             sources=json.dumps(['https://example.com']),
             source_reliability='HIGH',
             source='factcheck',
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
         )
         db_session_fixture.add(fc)
         db_session_fixture.commit()
@@ -267,7 +267,7 @@ class TestStandardCacheIDOR:
             sources=json.dumps(['https://example.com']),
             source_reliability='HIGH',
             source='factcheck',
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
         )
         db_session_fixture.add(fc)
         db_session_fixture.commit()

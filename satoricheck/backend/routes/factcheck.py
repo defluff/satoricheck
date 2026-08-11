@@ -434,19 +434,7 @@ def get_fact_check_history():
     
     return jsonify({
         'success': True,
-        'fact_checks': [
-            {
-                'id': fc.id,
-                'claim_text': fc.claim_text,
-                'verdict': fc.verdict,
-                'explanation': fc.explanation,
-                'fallacy': fc.fallacy,
-                'sources': json.loads(fc.sources) if fc.sources else [],
-                'tokens_used': fc.tokens_used,
-                'timestamp': fc.timestamp.isoformat()
-            }
-            for fc in fact_checks
-        ]
+        'fact_checks': [fc.to_dict() for fc in fact_checks]
     })
 
 

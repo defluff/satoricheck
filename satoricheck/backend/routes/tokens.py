@@ -130,14 +130,5 @@ def get_transaction_history():
     
     return jsonify({
         'success': True,
-        'transactions': [
-            {
-                'id': t.id,
-                'type': t.type,
-                'amount': t.amount,
-                'description': t.description,
-                'timestamp': t.timestamp.isoformat()
-            }
-            for t in transactions
-        ]
+        'transactions': [t.to_dict() for t in transactions]
     })

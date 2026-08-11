@@ -14,6 +14,7 @@ from sqlalchemy import text # For DB health check
 from backend.config import Config
 from backend.database import init_db, cleanup_db, db_session
 from backend.error_handlers import register_error_handlers
+from backend.jwt_utils import set_jwt_cookie
 
 # Import blueprints
 from backend.routes.auth import auth_bp
@@ -91,18 +92,7 @@ def set_security_headers(response):
     # Apply it to the response cookie so the client gets the extended expiry.
     refreshed_token = getattr(request, '_refresh_token', None)
     if refreshed_token:
-        from backend.routes.auth import (
-            JWT_COOKIE_HTTPONLY, JWT_COOKIE_NAME,
-            JWT_COOKIE_SAMESITE, JWT_COOKIE_SECURE,
-        )
-        response.set_cookie(
-            JWT_COOKIE_NAME,
-            refreshed_token,
-            httponly=JWT_COOKIE_HTTPONLY,
-            secure=JWT_COOKIE_SECURE,
-            samesite=JWT_COOKIE_SAMESITE,
-            max_age=7 * 24 * 60 * 60,  # 7 days
-        )
+        set_jwt_cookie(response, refreshed_token)
 
     # Prevent clickjacking
     response.headers['X-Frame-Options'] = 'DENY'

@@ -19,7 +19,10 @@ from backend.config import Config
 from backend.error_handlers import APIError
 from backend.services.streak import handle_login_streak
 from backend.extensions import oauth
-from backend.jwt_utils import create_token, verify_token, refresh_token_if_needed
+from backend.jwt_utils import (
+    create_token, verify_token, refresh_token_if_needed, set_jwt_cookie,
+    JWT_COOKIE_NAME, JWT_COOKIE_SECURE, JWT_COOKIE_HTTPONLY, JWT_COOKIE_SAMESITE
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +32,6 @@ def get_limiter():
     from backend.server import limiter
     return limiter
 
-# Cookie settings
-JWT_COOKIE_NAME = 'authenix_token'
-JWT_COOKIE_SECURE = Config.ENV != 'development'  # True in production
-JWT_COOKIE_HTTPONLY = True
-JWT_COOKIE_SAMESITE = 'Lax'
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
@@ -271,15 +269,7 @@ def login():
             }
         }))
         
-        # Set JWT cookie
-        response.set_cookie(
-            JWT_COOKIE_NAME,
-            jwt_token,
-            httponly=JWT_COOKIE_HTTPONLY,
-            secure=JWT_COOKIE_SECURE,
-            samesite=JWT_COOKIE_SAMESITE,
-            max_age=7 * 24 * 60 * 60  # 7 days
-        )
+        set_jwt_cookie(response, jwt_token)
         
         return response
         
@@ -497,14 +487,7 @@ def google_callback():
         else:
             redirect_url = '/?ext=1' if ext else '/'
         response = make_response(redirect(redirect_url))
-        response.set_cookie(
-            JWT_COOKIE_NAME,
-            jwt_token,
-            httponly=JWT_COOKIE_HTTPONLY,
-            secure=JWT_COOKIE_SECURE,
-            samesite=JWT_COOKIE_SAMESITE,
-            max_age=7 * 24 * 60 * 60  # 7 days
-        )
+        set_jwt_cookie(response, jwt_token)
         
         return response
         

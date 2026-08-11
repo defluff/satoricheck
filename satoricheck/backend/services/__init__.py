@@ -2,7 +2,6 @@ from typing import Optional
 from backend.services.gemini_service import GeminiService
 from backend.services.grok_service import GrokService
 from backend.services.pitchdeck_service import PitchdeckService
-
 import logging
 
 logger = logging.getLogger(__name__)
@@ -14,11 +13,7 @@ _pitchdeck_service: Optional[PitchdeckService] = None
 
 
 def init_services():
-    """
-    Initialize all external API service clients.
-    Though services now lazy-init, this can be called at startup 
-    to warm up connections and validate API keys.
-    """
+    """Initialize all external API service clients at startup."""
     get_gemini_service()
     get_grok_service()
     get_pitchdeck_service()

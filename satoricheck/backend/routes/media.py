@@ -9,17 +9,16 @@ import json
 import re
 import mimetypes
 from urllib.parse import urlparse
+import os
+from werkzeug.utils import secure_filename
+import tempfile
 
 from backend.database import db_session
-from backend.models import TokenBalance, MediaCheck
+from backend.models import MediaCheck, TokenBalance
 from backend.routes.auth import login_required
 from backend.error_handlers import APIError
 from backend.services import get_gemini_service
 from backend.config import Config
-
-import os
-from werkzeug.utils import secure_filename
-import tempfile
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +66,97 @@ def _detect_platform(hostname: str) -> str | None:
     return None
 
 
+def _analyze_media(
+    source: str,
+    input_type: str,
+    mime_type: str,
+    user,
+    display_name: str,
+) -> dict:
+    """Shared media analysis pipeline used by both URL and upload routes.
+
+    Handles: token reservation, cache flush, Gemini analysis, embedding,
+    DB persistence, and auto-refund on failure.
+    """
+    cost = getattr(Config, 'MEDIA_ANALYSIS_COST', 1)
+
+    token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
+    if not token_balance or token_balance.balance < cost:
+        raise APIError(f'Insufficient tokens. Media analysis costs {cost} CP.', status_code=403)
+
+    token_balance.balance -= cost
+    token_balance.last_updated = datetime.now(UTC)
+    db_session.commit()
+
+    logger.info(
+        f"Media analysis started for user {user.email}: "
+        f"{display_name} (Cost: {cost})"
+    )
+    start_time = time.time()
+
+    gemini_service = get_gemini_service()
+
+    try:
+        # Flush previous volatile cache
+        if user.current_media_cache:
+            gemini_service.delete_cache(user.current_media_cache)
+            user.current_media_cache = None
+            db_session.commit()
+
+        # Perform analysis
+        result = gemini_service.analyze_media_authenticity(
+            source, input_type=input_type, mime_type=mime_type
+        )
+
+        # Capture volatile cache if created
+        if result.get('cache_name'):
+            user.current_media_cache = result['cache_name']
+            db_session.commit()
+
+        # Get multimodal embedding (fingerprint)
+        embedding = gemini_service.get_media_embedding(
+            source, mime_type, input_type=input_type
+        )
+
+        processing_time = time.time() - start_time
+
+        # Persist to database
+        url_value = source if input_type == 'url' else f"upload://{display_name}"
+        media_check = MediaCheck(
+            user_id=user.id,
+            url=url_value,
+            mime_type=mime_type,
+            verdict=result.get('verdict'),
+            confidence=result.get('confidence'),
+            reasoning=result.get('explanation'),
+            criteria_json=json.dumps(result.get('criteria')),
+            embedding_json=json.dumps(embedding),
+            processing_time=processing_time,
+        )
+        db_session.add(media_check)
+        db_session.commit()
+
+        return {
+            'success': True,
+            'result': {
+                'verdict': result.get('verdict'),
+                'confidence': result.get('confidence'),
+                'explanation': result.get('explanation'),
+                'criteria': result.get('criteria'),
+                'processing_time': processing_time,
+            },
+            'new_balance': token_balance.balance,
+        }
+    except Exception:
+        try:
+            token_balance.balance += cost
+            db_session.commit()
+            logger.info(f"Refunded {cost} CP to user {user.email} due to analysis failure")
+        except Exception as refund_err:
+            logger.error(f"Failed to refund tokens: {refund_err}")
+        raise
+
+
 @media_bp.route('/analyze-url', methods=['POST'])
 @login_required
 def analyze_url() -> tuple:
@@ -78,7 +168,7 @@ def analyze_url() -> tuple:
         
         url = data['url'].strip()
         
-        # 1. Early Regex Validation
+        # Early regex validation
         if not URL_REGEX.match(url):
             raise APIError('Invalid URL format. Must start with http:// or https://', status_code=400)
             
@@ -125,95 +215,20 @@ def analyze_url() -> tuple:
                 'Supported formats: JPEG, PNG, WebP, MP4, MOV, WebM.',
                 status_code=400
             )
-        
-        user = request.current_user
-        
-        # 2. Token Balance Check
-        cost = getattr(Config, 'MEDIA_ANALYSIS_COST', 1)
-        token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
-        if not token_balance or token_balance.balance < cost:
-            raise APIError(f'Insufficient tokens. Media analysis costs {cost} CP.', status_code=403)
-        
-        gemini_service = get_gemini_service()
-        
-        # 3. Deduct Token
-        token_balance.balance -= cost
-        token_balance.last_updated = datetime.now(UTC)
-        db_session.commit() # Commit deduction before expensive call
-        
-        logger.info(f"Media analysis started for user {user.email}: {url[:100]} (Cost: {cost})")
-        
-        start_time = time.time()
-        
-        # 4. Flush Previous Cache (Volatile Caching)
-        if user.current_media_cache:
-            gemini_service.delete_cache(user.current_media_cache)
-            user.current_media_cache = None
-            db_session.commit()
 
-        try:
-            # 5. Perform Analysis
-            # This calls gemini_service which handles SSRF protection internally
-            result = gemini_service.analyze_media_authenticity(url, input_type='url', mime_type=mime_type)
-            
-            # Capture volatile cache if created
-            if result.get('cache_name'):
-                user.current_media_cache = result['cache_name']
-                db_session.commit()
-            
-            # 5. Get Multimodal Embedding (Fingerprint)
-            embedding = gemini_service.get_media_embedding(url, mime_type, input_type='url')
-            
-            processing_time = time.time() - start_time
-            
-            # 6. Persist to Database
-            media_check = MediaCheck(
-                user_id=user.id,
-                url=url,
-                mime_type=mime_type,
-                verdict=result.get('verdict'),
-                confidence=result.get('confidence'),
-                reasoning=result.get('explanation'), # Changed from reasoning to explanation
-                criteria_json=json.dumps(result.get('criteria')),
-                embedding_json=json.dumps(embedding),
-                processing_time=processing_time
-            )
-            db_session.add(media_check)
-            db_session.commit()
-            
-            return jsonify({
-                'success': True,
-                'result': {
-                    'verdict': result.get('verdict'),
-                    'confidence': result.get('confidence'),
-                    'explanation': result.get('explanation'), # Changed from reasoning to explanation
-                    'criteria': result.get('criteria'),
-                    'processing_time': processing_time
-                },
-                'new_balance': token_balance.balance
-            })
-
-        except Exception as e:
-            # 7. Refund Token on Failure
-            try:
-                token_balance.balance += cost
-                db_session.commit()
-                logger.info(f"Refunded {cost} tokens to user {user.email} due to analysis failure")
-            except Exception as refund_err:
-                logger.error(f"Failed to refund tokens: {refund_err}")
-                
-            if isinstance(e, ValueError):
-                raise APIError(str(e), status_code=400)
-            
-            logger.error(f"Media analysis failed: {e}", exc_info=True)
-            raise APIError('Analysis failed. Please ensure the URL is public and try again.', status_code=503)
+        return jsonify(
+            _analyze_media(url, 'url', mime_type, request.current_user, url[:100])
+        )
 
     except APIError:
         raise
+    except ValueError as e:
+        raise APIError(str(e), status_code=400)
     except Exception as e:
         db_session.rollback()
         logger.error(f"Media route error: {e}", exc_info=True)
-        raise APIError('Failed to process media request')
+        raise APIError('Analysis failed. Please ensure the URL is public and try again.', status_code=503)
+
 
 @media_bp.route('/analyze-upload', methods=['POST'])
 @login_required
@@ -232,94 +247,15 @@ def analyze_upload() -> tuple:
         if not mime_type or mime_type not in ALLOWED_MIME_TYPES:
             raise APIError(f'Unsupported media type: {mime_type}', status_code=400)
 
-        # 1. Token Balance Check
-        user = request.current_user
-        cost = getattr(Config, 'MEDIA_ANALYSIS_COST', 1)
-        token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
-        if not token_balance or token_balance.balance < cost:
-            raise APIError(f'Insufficient tokens. Media analysis costs {cost} CP.', status_code=403)
-        
-        # 2. Secure temporary storage
+        # Secure temporary storage
         filename = secure_filename(file.filename)
         fd, temp_path = tempfile.mkstemp(suffix=f"_{filename}")
         os.close(fd)
-        
         file.save(temp_path)
-        
-        # 3. Deduct Token
-        token_balance.balance -= cost
-        token_balance.last_updated = datetime.now(UTC)
-        db_session.commit() # Commit deduction before expensive call
-        
-        logger.info(f"Media upload analysis started for user {user.email}: {filename}")
-        start_time = time.time()
-        
-        try:
-            gemini_service = get_gemini_service()
-            
-            # 4. Flush Previous Cache (Volatile Caching)
-            if user.current_media_cache:
-                gemini_service.delete_cache(user.current_media_cache)
-                user.current_media_cache = None
-                db_session.commit()
 
-            # 5. Perform Analysis
-            result = gemini_service.analyze_media_authenticity(temp_path, input_type='file', mime_type=mime_type)
-            
-            # Capture volatile cache if created
-            if result.get('cache_name'):
-                user.current_media_cache = result['cache_name']
-                db_session.commit()
-
-            # 6. Get Multimodal Embedding (Fingerprint)
-            embedding = gemini_service.get_media_embedding(temp_path, mime_type, input_type='file')
-            
-            processing_time = time.time() - start_time
-            
-            # 7. Persist to Database
-            media_check = MediaCheck(
-                user_id=user.id,
-                url=f"upload://{filename}",
-                mime_type=mime_type,
-                verdict=result.get('verdict'),
-                confidence=result.get('confidence'),
-                reasoning=result.get('explanation'),
-                criteria_json=json.dumps(result.get('criteria')),
-                embedding_json=json.dumps(embedding),
-                processing_time=processing_time
-            )
-            db_session.add(media_check)
-            db_session.commit()
-            
-            return jsonify({
-                'success': True,
-                'result': {
-                    'verdict': result.get('verdict'),
-                    'confidence': result.get('confidence'),
-                    'explanation': result.get('explanation'),
-                    'criteria': result.get('criteria'),
-                    'processing_time': processing_time
-                },
-                'new_balance': token_balance.balance
-            })
-
-        except Exception as e:
-            # 7. Refund Token on Failure
-            try:
-                token_balance.balance += cost
-                db_session.commit()
-                logger.info(f"Refunded {cost} tokens to user {user.email} due to upload analysis failure")
-            except Exception as refund_err:
-                logger.error(f"Failed to refund tokens: {refund_err}")
-            
-            logger.error(f"Media upload analysis failed: {e}", exc_info=True)
-            raise APIError(f'Analysis failed: {str(e)}', status_code=500)
-
-        finally:
-            # 8. Local Cleanup
-            if temp_path and os.path.exists(temp_path):
-                os.remove(temp_path)
-                logger.info(f"Cleaned up temporary upload file: {temp_path}")
+        return jsonify(
+            _analyze_media(temp_path, 'file', mime_type, request.current_user, filename)
+        )
 
     except APIError:
         raise
@@ -327,3 +263,7 @@ def analyze_upload() -> tuple:
         db_session.rollback()
         logger.error(f"Media upload error: {e}", exc_info=True)
         raise APIError('Failed to process uploaded media')
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+            logger.debug(f"Cleaned up temporary upload file: {temp_path}")

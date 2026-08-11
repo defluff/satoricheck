@@ -2,9 +2,9 @@
 Database models for Authenix.
 """
 from datetime import datetime, UTC
+import json
 from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, Index
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, declarative_base
 
 Base = declarative_base()
 
@@ -99,6 +99,16 @@ class Transaction(Base):
     def __repr__(self):
         return f'<Transaction user_id={self.user_id} type={self.type} amount={self.amount}>'
 
+    def to_dict(self) -> dict:
+        """Serialize transaction to a JSON-friendly dict."""
+        return {
+            'id': self.id,
+            'type': self.type,
+            'amount': self.amount,
+            'description': self.description,
+            'timestamp': self.timestamp.isoformat() if self.timestamp else None,
+        }
+
 
 class FactCheck(Base):
     """Fact-check history."""
@@ -137,6 +147,22 @@ class FactCheck(Base):
     
     def __repr__(self):
         return f'<FactCheck id={self.id} verdict={self.verdict}>'
+
+    def to_dict(self) -> dict:
+        """Serialize fact-check to a JSON-friendly dict."""
+        return {
+            'id': self.id,
+            'claim_text': self.claim_text,
+            'verdict': self.verdict,
+            'explanation': self.explanation,
+            'fallacy': self.fallacy,
+            'sources': json.loads(self.sources) if self.sources else [],
+            'source_reliability': self.source_reliability,
+            'tokens_used': self.tokens_used,
+            'source': self.source,
+            'source_id': self.source_id,
+            'timestamp': self.timestamp.isoformat() if self.timestamp else None,
+        }
 
 
 
