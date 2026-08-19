@@ -89,7 +89,7 @@ async function ensureAuthentication() {
     }
 
     // Try auto-detecting existing web session from browser cookies (0 clicks)
-    if (authStatus) authStatus.textContent = 'Auto-detecting web session…';
+    if (authStatus) authStatus.textContent = 'Checking session…';
     const syncedUser = await syncWebAuthSession();
     if (syncedUser) {
         showAuthenticatedUI();
@@ -108,7 +108,7 @@ function showAuthenticatedUI() {
 function showDisconnectedUI() {
     mainSection.classList.add('hidden');
     authSection.classList.remove('hidden');
-    if (authStatus) authStatus.textContent = 'Sign in to access Authenix verification';
+    if (authStatus) authStatus.textContent = 'Sign in with Google to use Authenix';
 }
 
 // --- Load user info (balance & streak) ---
@@ -305,33 +305,43 @@ function updateCardWithResult(cardId, data) {
     let badgesHtml = '';
     let detailsHtml = '';
 
-    // 1. Claims Verdict Badge (for 'both' or 'claims' mode)
+    // 1. Claims Verdict Badge & Analysis Block (for 'both' or 'claims' mode)
     if (data.claims) {
         const verdict = data.claims.verdict || 'NOT_VERIFIED';
         badgesHtml += `<span class="sp-verdict ${verdict}">${verdict.replace(/_/g, ' ')}</span>`;
 
+        let claimSectionInner = '';
         if (data.claims.explanation) {
             const safeExp = typeof DOMPurify !== 'undefined'
                 ? DOMPurify.sanitize(data.claims.explanation)
                 : escapeHtml(data.claims.explanation);
-            detailsHtml += `<p class="sp-explanation">${safeExp}</p>`;
+            claimSectionInner += `<p class="sp-explanation">${safeExp}</p>`;
         }
 
         if (data.claims.fallacy) {
-            detailsHtml += `<span class="sp-fallacy">⚠️ ${escapeHtml(data.claims.fallacy)}</span>`;
+            claimSectionInner += `<span class="sp-fallacy">⚠️ ${escapeHtml(data.claims.fallacy)}</span>`;
         }
 
         if (data.claims.sources && Array.isArray(data.claims.sources) && data.claims.sources.length > 0) {
             const validSources = data.claims.sources.filter(u => sanitizeUrl(u));
             if (validSources.length > 0) {
-                detailsHtml += `<div class="sp-sources"><strong>Verified Sources:</strong>${validSources.map(u =>
+                claimSectionInner += `<div class="sp-sources"><strong>Verified Sources:</strong>${validSources.map(u =>
                     `<a href="${sanitizeUrl(u)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(u)}">🔗 ${formatUrl(u)}</a>`
                 ).join('')}</div>`;
             }
         }
+
+        detailsHtml += `
+            <div class="sp-section-block sp-claim-block">
+                <div class="sp-section-header">
+                    <span class="sp-section-title">🔍 Claim Check</span>
+                </div>
+                ${claimSectionInner}
+            </div>
+        `;
     }
 
-    // 2. AI Probability Pill & Forensics (for 'both' or 'ai' mode)
+    // 2. AI Probability Pill & Forensics Block (for 'both' or 'ai' mode)
     if (data.ai) {
         if (data.ai.skipped) {
             badgesHtml += `<span class="sp-ai-pill ai-short" title="${escapeHtml(data.ai.reason)}">🤖 Short (&lt;${MIN_AI_WORDS}w)</span>`;
@@ -348,18 +358,18 @@ function updateCardWithResult(cardId, data) {
             const humanIndicators = (data.ai.human_indicators || []).slice(0, 3);
 
             detailsHtml += `
-                <div class="sp-ai-forensics">
-                    <div class="sp-ai-forensics-header">
-                        <span class="sp-ai-forensics-title">🤖 AI Forensics (${prob}%)</span>
+                <div class="sp-section-block sp-ai-block">
+                    <div class="sp-section-header">
+                        <span class="sp-section-title">🤖 AI Forensics (${prob}%)</span>
                         <span class="sp-ai-confidence-tag">Confidence: ${conf}</span>
                     </div>
                     <div class="sp-ai-bar-track">
                         <div class="sp-ai-bar-fill ${pillClass}" style="width: ${prob}%"></div>
                     </div>
-                    ${data.ai.explanation ? `<p class="sp-explanation" style="font-size: 0.72rem; margin-top: 4px;">${escapeHtml(data.ai.explanation)}</p>` : ''}
+                    ${data.ai.explanation ? `<p class="sp-explanation" style="margin-top: 4px;">${escapeHtml(data.ai.explanation)}</p>` : ''}
                     <div class="sp-ai-indicators">
                         ${aiIndicators.map(ind => `<span class="sp-indicator-tag">Marker: ${escapeHtml(ind)}</span>`).join('')}
-                        ${humanIndicators.map(ind => `<span class="sp-indicator-tag" style="background: rgba(16, 185, 129, 0.15); color: #a7f3d0;">Human trait: ${escapeHtml(ind)}</span>`).join('')}
+                        ${humanIndicators.map(ind => `<span class="sp-indicator-tag sp-indicator-human">Human trait: ${escapeHtml(ind)}</span>`).join('')}
                     </div>
                 </div>
             `;
@@ -401,7 +411,7 @@ function setButtonLoading(btn, label) {
 }
 
 function resetButton(btn, label) {
-    btn.innerHTML = `<span class="btn-icon">⚡</span> <span class="btn-text">${label}</span>`;
+    btn.innerHTML = `<span class="btn-text">${label}</span>`;
     btn.disabled = inputText.value.trim().length === 0;
 }
 

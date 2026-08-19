@@ -10,7 +10,7 @@
     <!-- Header: Brand + Balance + Streak -->
     <header class="sp-header">
         <div class="sp-brand">
-            <span class="sp-logo-badge">⚡</span>
+            <img src="../assets/logo-authenix.png" alt="Authenix" class="sp-brand-logo" width="18" height="18">
             <span class="sp-title">Authenix</span>
             <span class="sp-live-dot" title="Live verification active"></span>
         </div>
@@ -23,7 +23,7 @@
     <!-- Disconnected Auth Prompt (Visible when not logged in) -->
     <section id="sp-auth-prompt" class="sp-auth-section hidden">
         <div class="sp-auth-card">
-            <div class="sp-auth-icon">🛡️</div>
+            <img src="../assets/logo-authenix.png" alt="Authenix" class="sp-auth-logo" width="40" height="40">
             <h3>Connect to Authenix</h3>
             <p>Verify claims and detect AI-generated text instantly across any webpage.</p>
             <button id="sp-google-login-btn" class="sp-btn-google">
@@ -44,13 +44,13 @@
         <!-- 3-Way Mode Segmented Control -->
         <nav class="sp-mode-selector" role="tablist" aria-label="Verification Mode">
             <button class="sp-mode-btn active" data-mode="both" role="tab" aria-selected="true" title="Verify factual claims and scan AI text probability simultaneously">
-                <span class="mode-icon">⚡</span> Both <span class="mode-badge">AI+Fact</span>
+                Both <span class="mode-badge">AI+Fact</span>
             </button>
             <button class="sp-mode-btn" data-mode="claims" role="tab" aria-selected="false" title="Fact-check factual claims only">
-                <span class="mode-icon">🔍</span> Claims
+                Claims
             </button>
             <button class="sp-mode-btn" data-mode="ai" role="tab" aria-selected="false" title="Forensic AI generation spotter">
-                <span class="mode-icon">🤖</span> AI Spotter
+                AI Spotter
             </button>
         </nav>
 
@@ -68,7 +68,6 @@
             <div class="sp-action-row">
                 <span class="sp-shortcut-hint">⌘ + Enter to check</span>
                 <button id="sp-verify-btn" class="sp-primary-btn" disabled>
-                    <span class="btn-icon">⚡</span>
                     <span class="btn-text">Verify</span>
                 </button>
             </div>
@@ -78,7 +77,7 @@
         <section id="sp-results" class="sp-results" aria-live="polite">
             <div class="sp-empty-state">
                 <div class="sp-empty-orb">
-                    <span class="sp-empty-icon">🛡️</span>
+                    <img src="../assets/logo-authenix.png" alt="Authenix" width="28" height="28" style="opacity: 0.8;">
                 </div>
                 <h4>Ready to Verify</h4>
                 <p>Highlight any claim on a web page & right-click <strong>"Verify with Authenix"</strong>, or paste text above.</p>

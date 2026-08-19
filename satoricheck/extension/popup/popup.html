@@ -10,8 +10,10 @@
     <!-- Disconnected State -->
     <div id="state-disconnected" class="popup-card">
         <div class="popup-header">
-            <span class="popup-brand-badge">⚡</span>
-            <h1>Authenix</h1>
+            <div class="popup-brand-group">
+                <img src="../assets/logo-authenix.png" alt="Authenix" class="popup-brand-logo" width="22" height="22">
+                <h1 class="popup-title">Authenix</h1>
+            </div>
         </div>
 
         <p class="popup-subtitle">Instant factual claim verification & forensic AI text scanner.</p>
@@ -27,24 +29,13 @@
         </button>
 
         <div id="auth-status" class="popup-status-msg"></div>
-
-        <!-- Optional Manual Token Accordion -->
-        <details class="popup-details">
-            <summary>Advanced: Connect with API token</summary>
-            <div class="token-input-group">
-                <input type="text" id="token-input" placeholder="Paste extension token" spellcheck="false" autocomplete="off" />
-                <button id="connect-btn" class="btn-secondary" disabled>Save</button>
-            </div>
-        </details>
-
-        <div id="connect-error" class="error-message hidden"></div>
     </div>
 
     <!-- Connected State -->
     <div id="state-connected" class="popup-card hidden">
         <div class="popup-header">
             <div class="popup-brand-group">
-                <span class="popup-brand-badge">⚡</span>
+                <img src="../assets/logo-authenix.png" alt="Authenix" class="popup-brand-logo" width="22" height="22">
                 <span class="popup-title">Authenix</span>
             </div>
             <button class="popup-badge popup-badge-buy" id="balance-badge" title="Click to recharge Check Points">— CP</button>
@@ -61,14 +52,14 @@
         <div class="mode-preference-box">
             <label for="popup-mode-select">Default Mode:</label>
             <select id="popup-mode-select" class="mode-select">
-                <option value="both">⚡ Both (Claims + AI)</option>
-                <option value="claims">🔍 Claims Only</option>
-                <option value="ai">🤖 AI Spotter Only</option>
+                <option value="both">Both (Claims + AI)</option>
+                <option value="claims">Claims Only</option>
+                <option value="ai">AI Spotter Only</option>
             </select>
         </div>
 
         <button id="open-sidepanel-btn" class="btn-primary btn-full">
-            Open Side Panel ⚡
+            Open Side Panel
         </button>
 
         <div class="popup-footer">

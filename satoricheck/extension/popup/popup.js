@@ -5,9 +5,7 @@
  */
 
 import {
-    saveToken,
     getToken,
-    saveUserEmail,
     clearAuth,
     getModePreference,
     saveModePreference
@@ -24,10 +22,6 @@ const stateDisconnected = document.getElementById('state-disconnected');
 const stateConnected = document.getElementById('state-connected');
 const googleLoginBtn = document.getElementById('google-login-btn');
 const authStatus = document.getElementById('auth-status');
-
-const tokenInput = document.getElementById('token-input');
-const connectBtn = document.getElementById('connect-btn');
-const connectError = document.getElementById('connect-error');
 
 const accountEmail = document.getElementById('account-email');
 const balanceBadge = document.getElementById('balance-badge');
@@ -48,7 +42,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // Auto-detect web session cookies
-    if (authStatus) authStatus.textContent = 'Auto-detecting web session…';
+    if (authStatus) authStatus.textContent = 'Checking session…';
     const user = await syncWebAuthSession();
     if (user) {
         await showConnectedState();
@@ -83,40 +77,6 @@ function setupEventListeners() {
                 </svg>
                 Sign in with Google
             `;
-        }
-    });
-
-    // Manual token input
-    tokenInput?.addEventListener('input', () => {
-        connectBtn.disabled = tokenInput.value.trim().length === 0;
-        connectError.classList.add('hidden');
-    });
-
-    connectBtn?.addEventListener('click', async () => {
-        const token = tokenInput.value.trim();
-        if (!token) return;
-
-        connectBtn.disabled = true;
-        connectBtn.innerHTML = '<span class="spinner"></span> Verifying…';
-        connectError.classList.add('hidden');
-
-        try {
-            await saveToken(token);
-            const response = await getCurrentUser();
-            if (response.success && response.user) {
-                await saveUserEmail(response.user.email);
-                await showConnectedState();
-            } else {
-                throw new Error('Invalid token');
-            }
-        } catch (error) {
-            await clearAuth();
-            connectError.textContent = error.status === 401
-                ? 'Invalid token. Please sign in via Google above.'
-                : `Error: ${error.message}`;
-            connectError.classList.remove('hidden');
-            connectBtn.disabled = false;
-            connectBtn.textContent = 'Save';
         }
     });
 
@@ -177,14 +137,7 @@ async function showConnectedState() {
 }
 
 function showDisconnectedState() {
-    if (tokenInput) tokenInput.value = '';
-    if (connectBtn) {
-        connectBtn.disabled = true;
-        connectBtn.textContent = 'Save';
-    }
-    if (connectError) connectError.classList.add('hidden');
     if (authStatus) authStatus.textContent = '';
-
     stateConnected.classList.add('hidden');
     stateDisconnected.classList.remove('hidden');
 }
