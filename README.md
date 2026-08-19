@@ -18,9 +18,9 @@ Fully vibecoded, AI-powered fact-checking app with live audio transcription, Met
 - Social Sharing — Generate shareable cards for verified claims for X & Linkedin (Privacy-first)
 - Streak System — Daily login rewards with CP bonuses
 - Token Billing — Stripe integration for Check Points (CP)
-- Google OAuth — One-click sign-in.
+- Google OAuth — One-click sign-in across Web App and Chrome Extension.
 - Account Deletion — GDPR-compliant data erasure with anti-abuse protection.
-- Browser Extension — Universal highlighting and fact-checking integration for Chrome via API tokens.
+- Chrome Extension (Manifest V3) — Persistent Side Panel with 1-click Google OAuth, modular verification (Fact Check + AI Forensics), right-click context menu, and direct CP top-ups.
 
 
 ## Quick Start
