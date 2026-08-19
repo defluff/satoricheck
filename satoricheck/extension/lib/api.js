@@ -1,39 +1,44 @@
 /**
  * API client for the Authenix extension.
  *
- * Reads the Bearer token from storage and attaches it to every
- * request. Configurable base URL to switch between 127.0.0.1
- * and production.
+ * Reads the Bearer token from encrypted storage or auto-syncs from
+ * active browser session cookies (Google OAuth).
  *
  * @module api
  */
 
-import { getToken } from './storage.js';
+import { getToken, saveToken, saveUserEmail, clearAuth } from './storage.js';
 import { fetchWithRetry } from './retry.js';
 
-const API_BASE = 'https://satoricheck-829698588154.europe-west6.run.app/api';
-// const API_BASE = 'https://authenix.ai/api';  // Future: use after domain mapping
-// const API_BASE = 'http://127.0.0.1:8000/api';
+/** Candidate backend origins (production, Cloud Run, local development). */
+export const CANDIDATE_ORIGINS = [
+    'https://satoricheck-829698588154.europe-west6.run.app',
+    'https://authenix.ai',
+    'http://127.0.0.1:8000',
+    'http://localhost:8000',
+];
+
+/** Active default API base. */
+export const API_BASE = 'https://satoricheck-829698588154.europe-west6.run.app/api';
 
 /** Default timeout per request attempt (ms). Used for fast endpoints (auth, balance). */
 const DEFAULT_TIMEOUT_MS = 20000;
-/** Extended timeout for AI analysis endpoints — covers Gemini Pro model cold-starts. */
+/** Extended timeout for AI analysis endpoints — covers model cold-starts. */
 const ANALYSIS_TIMEOUT_MS = 45000;
+
+/** Minimum word count required by the AI detection endpoint. */
+export const MIN_AI_WORDS = 20;
 
 /**
  * Make an authenticated API request with timeout + retry.
  *
- * Each attempt gets a fresh AbortController with DEFAULT_TIMEOUT_MS.
- * Transient server errors (500-504) are retried up to 2× with exponential
- * backoff. Rate-limit (429) and auth errors (401/403) surface immediately.
- *
  * @param {string} endpoint - Path relative to API_BASE (e.g. '/auth/me')
- * @param {RequestInit & { timeoutMs?: number }} [options={}] - Fetch options
+ * @param {RequestInit & { timeoutMs?: number, customToken?: string }} [options={}] - Fetch options
  * @returns {Promise<Object>} Parsed JSON response
  * @throws {Error} On network/auth/server/rate-limit errors
  */
 export async function request(endpoint, options = {}) {
-    const token = await getToken();
+    const token = options.customToken || (await getToken());
     if (!token) {
         throw new Error('Not authenticated — please connect your account.');
     }
@@ -50,7 +55,6 @@ export async function request(endpoint, options = {}) {
 
     const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
 
-    // Each retry creates a fresh AbortController so the timeout resets per attempt
     let response;
     try {
         response = await fetchWithRetry(() => {
@@ -79,7 +83,7 @@ export async function request(endpoint, options = {}) {
         throw error;
     }
 
-    // --- Auth and other errors: parse body safely (B5 — no crash on HTML) ---
+    // --- Auth and other errors: parse body safely ---
     if (!response.ok) {
         let message = `Request failed (${response.status})`;
         const contentType = response.headers.get('content-type') || '';
@@ -91,8 +95,8 @@ export async function request(endpoint, options = {}) {
         }
 
         if (response.status === 401) {
-            message = 'Session expired. Please reconnect your account.';
-        } else if (response.status === 403) {
+            message = 'Session expired. Please sign in again.';
+        } else if (response.status === 402 || response.status === 403) {
             message = 'Insufficient Check Points. Please top up.';
         }
 
@@ -104,14 +108,13 @@ export async function request(endpoint, options = {}) {
     return response.json();
 }
 
-// --- Convenience methods ---
-
 /**
  * Validate the stored token and get user info.
+ * @param {string} [customToken]
  * @returns {Promise<Object>} { success, user: { email, balance, streak } }
  */
-export async function getCurrentUser() {
-    return request('/auth/me');
+export async function getCurrentUser(customToken) {
+    return request('/auth/me', { customToken });
 }
 
 /**
@@ -123,12 +126,89 @@ export async function getBalance() {
 }
 
 /**
- * Submit a claim for fact-checking.
+ * Attempt to auto-sync authentication from browser session cookies (Google OAuth).
+ * Checks authenix_token cookie on candidate origins without user needing to copy an API key.
+ *
+ * @returns {Promise<Object|null>} User object if authenticated, or null
+ */
+export async function syncWebAuthSession() {
+    if (!chrome.cookies || !chrome.cookies.get) {
+        return null;
+    }
+
+    for (const origin of CANDIDATE_ORIGINS) {
+        try {
+            const cookie = await chrome.cookies.get({ url: origin, name: 'authenix_token' });
+            if (cookie && cookie.value) {
+                // Test token against /auth/me
+                const res = await getCurrentUser(cookie.value);
+                if (res?.success && res.user) {
+                    await saveToken(cookie.value);
+                    await saveUserEmail(res.user.email);
+                    return res.user;
+                }
+            }
+        } catch {
+            // Ignore origin error, check next candidate
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Open the Google OAuth login window in a tab, and auto-detect when login completes.
+ * @returns {Promise<void>}
+ */
+export async function initiateGoogleLogin() {
+    const authUrl = `${CANDIDATE_ORIGINS[0]}/api/auth/google?ext=1`;
+    const tab = await chrome.tabs.create({ url: authUrl });
+
+    // Poll briefly for the cookie to be set once the user finishes OAuth
+    return new Promise((resolve) => {
+        let attempts = 0;
+        const maxAttempts = 60; // 60 * 1500ms = 90s
+        const intervalId = setInterval(async () => {
+            attempts++;
+            const user = await syncWebAuthSession();
+            if (user) {
+                clearInterval(intervalId);
+                // Close the login tab if it's still open on the callback page
+                try {
+                    const tabInfo = await chrome.tabs.get(tab.id);
+                    if (tabInfo && tabInfo.url && tabInfo.url.includes('ext=1')) {
+                        await chrome.tabs.remove(tab.id);
+                    }
+                } catch { /* Tab may already be closed by user */ }
+                resolve(user);
+            } else if (attempts >= maxAttempts) {
+                clearInterval(intervalId);
+                resolve(null);
+            }
+        }, 1500);
+    });
+}
+
+/**
+ * Submit a claim for factual analysis.
  * @param {string} text - The claim text
  * @returns {Promise<Object>} Fact-check result
  */
 export async function analyzeText(text) {
     return request('/factcheck/analyze', {
+        method: 'POST',
+        body: JSON.stringify({ text }),
+        timeoutMs: ANALYSIS_TIMEOUT_MS,
+    });
+}
+
+/**
+ * Submit text for AI-generation detection.
+ * @param {string} text - Text to analyze (min 20 words)
+ * @returns {Promise<Object>} { ai_probability, confidence, ai_indicators, human_indicators, explanation }
+ */
+export async function analyzeAI(text) {
+    return request('/factcheck/analyze-ai', {
         method: 'POST',
         body: JSON.stringify({ text }),
         timeoutMs: ANALYSIS_TIMEOUT_MS,
@@ -149,22 +229,84 @@ export async function analyzeMediaUrl(url) {
 }
 
 /**
- * Submit text for AI-generation detection.
- * @param {string} text - Text to analyze (min 20 words)
- * @returns {Promise<Object>} { ai_probability, confidence, ai_indicators, human_indicators, explanation }
+ * Unified Modular Analyzer.
+ * Executes analysis according to mode:
+ *   - 'both': Runs Claims Verification & AI Text Scanner in parallel (Default)
+ *   - 'claims': Runs Claims Verification only
+ *   - 'ai': Runs AI Text Scanner only
+ *
+ * @param {string} text - Text content to verify
+ * @param {'both'|'claims'|'ai'} [mode='both'] - Verification mode
+ * @returns {Promise<Object>} Modular result payload
  */
-export async function analyzeAI(text) {
-    return request('/factcheck/analyze-ai', {
-        method: 'POST',
-        body: JSON.stringify({ text }),
-        timeoutMs: ANALYSIS_TIMEOUT_MS,
-    });
-}
+export async function analyzeModular(text, mode = 'both') {
+    const cleanText = (text || '').trim();
+    if (!cleanText) {
+        throw new Error('Please provide text to verify.');
+    }
 
+    const words = cleanText.split(/\s+/).filter(Boolean);
+    const wordCount = words.length;
+
+    if (mode === 'claims') {
+        const result = await analyzeText(cleanText);
+        return {
+            mode: 'claims',
+            text: cleanText,
+            wordCount,
+            claims: result.result || result,
+            new_balance: result.new_balance,
+        };
+    }
+
+    if (mode === 'ai') {
+        if (wordCount < MIN_AI_WORDS) {
+            throw new Error(`AI Spotter requires at least ${MIN_AI_WORDS} words (provided ${wordCount}).`);
+        }
+        const result = await analyzeAI(cleanText);
+        return {
+            mode: 'ai',
+            text: cleanText,
+            wordCount,
+            ai: result,
+            new_balance: result.new_balance,
+        };
+    }
+
+    // Default: 'both' mode (parallel execution with graceful AI fallback for short snippets)
+    const canRunAI = wordCount >= MIN_AI_WORDS;
+
+    const claimsPromise = analyzeText(cleanText);
+    const aiPromise = canRunAI
+        ? analyzeAI(cleanText)
+        : Promise.resolve({
+            skipped: true,
+            reason: `Snippet too short for forensic AI analysis (${wordCount}/${MIN_AI_WORDS} words).`,
+            ai_probability: null,
+            confidence: 'N/A',
+        });
+
+    const [claimsOutcome, aiOutcome] = await Promise.allSettled([claimsPromise, aiPromise]);
+
+    if (claimsOutcome.status === 'rejected') {
+        throw claimsOutcome.reason;
+    }
+
+    const claimData = claimsOutcome.value;
+    const aiData = aiOutcome.status === 'fulfilled' ? aiOutcome.value : null;
+
+    return {
+        mode: 'both',
+        text: cleanText,
+        wordCount,
+        claims: claimData.result || claimData,
+        ai: aiData,
+        new_balance: claimData.new_balance ?? (aiData?.new_balance),
+    };
+}
 
 /**
  * Create a Stripe checkout session for CP purchase.
- * Returns a URL to redirect the user to Stripe.
  * @param {string} [packageType='battery_medium'] - Package key from TOKEN_PACKAGES
  * @returns {Promise<Object>} { success, session_id, url }
  */

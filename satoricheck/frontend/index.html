@@ -640,37 +640,15 @@
 
 
             <div class="settings-section">
-                <h3>Extension Access</h3>
-                <p class="settings-help">Use this token to connect the Authenix browser extension to your account.</p>
-                <button class="btn-secondary" id="show-extension-token-btn">Show Extension Token</button>
+                <h3>Chrome Extension</h3>
+                <p class="settings-help">Verify claims and detect AI text anywhere on the web with our browser extension.</p>
+                <button class="btn-secondary" id="chrome-extension-btn">⚡ Chrome Extension</button>
             </div>
 
             <div class="settings-section">
                 <h3>Billing</h3>
                 <button class="btn-secondary" id="manage-billing-btn">Billing Account</button>
             </div>
-        </div>
-    </div>
-
-    <!-- Extension Token Modal -->
-    <div class="modal hidden" id="extension-token-modal">
-        <div class="modal-overlay"></div>
-        <div class="modal-content">
-            <button class="modal-close" id="close-extension-token-modal">×</button>
-            <h2>🔌 Extension Token</h2>
-            <p class="modal-subtitle">Paste this token in the Authenix browser extension to activate it.</p>
-
-            <div class="extension-token-display">
-                <input type="text" id="extension-token-value" class="extension-token-input" readonly
-                    value="Loading..." />
-                <button class="btn-primary btn-compact" id="copy-extension-token-btn" title="Copy to clipboard">
-                    📋 Copy
-                </button>
-            </div>
-
-            <p class="settings-help" style="margin-top: 12px;">You can find this token again in
-                <strong>Settings → Extension Access</strong>.
-            </p>
         </div>
     </div>
 

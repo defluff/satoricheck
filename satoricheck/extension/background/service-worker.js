@@ -1,31 +1,30 @@
 /**
- * Background service worker — extension entry point.
+ * Background service worker — Authenix extension entry point.
  *
  * Responsibilities:
- *   - Register context menu item ("Fact-check with Authenix")
- *   - Route context menu clicks to the side panel
+ *   - Register context menu item ("Verify with Authenix")
+ *   - Route context menu selections to the side panel
  *   - Handle messages from popup, side panel, and content script
  *   - Restrict storage access to trusted contexts
  */
 
 // --- Security: restrict storage to extension pages only ---
-// Content scripts cannot read the auth token.
 chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' })
     .catch(() => {
         // Fallback for older Chromium versions where this API may not exist
     });
 
-// --- Side panel config ---
+// --- Side panel behavior ---
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false })
     .catch(() => {
-        // Not critical — popup is the primary action
+        // Popup is the primary action icon click
     });
 
-// --- Context menu ---
+// --- Context menu registration ---
 chrome.runtime.onInstalled.addListener(() => {
     chrome.contextMenus.create({
         id: 'authenix-factcheck',
-        title: 'Fact-check with Authenix',
+        title: 'Verify with Authenix (Fact & AI)',
         contexts: ['selection'],
     });
 });
@@ -42,9 +41,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     try {
         await chrome.sidePanel.open({ tabId: tab.id });
 
-        // Fast path: if panel is already open its listener receives this
-        // directly. On success, clear the session store to avoid duplicate
-        // delivery via READY.
+        // Fast path: if panel is already open its listener receives this directly
         chrome.runtime.sendMessage({
             type: 'FACTCHECK_SELECTION',
             text: selectedText,
@@ -55,26 +52,22 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
         });
     } catch (error) {
         console.error('[Authenix] Failed to open side panel:', error);
-        pendingSelection = null;
     }
 });
 
 // --- Message handler ---
-const ALLOWED_TYPES = ['FACTCHECK_SELECTION', 'OPEN_SIDE_PANEL', 'SIDE_PANEL_READY'];
+const ALLOWED_TYPES = ['FACTCHECK_SELECTION', 'OPEN_SIDE_PANEL', 'SIDE_PANEL_READY', 'AUTH_UPDATED'];
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    // Only accept messages from our own extension
     if (sender.id !== chrome.runtime.id) return false;
     if (!message.type || !ALLOWED_TYPES.includes(message.type)) return false;
 
     if (message.type === 'SIDE_PANEL_READY') {
-        // Deliver any queued selection — read from session storage so it
-        // survives service worker termination between right-click and ready.
         chrome.storage.session.get('pendingSelection').then((stored) => {
             sendResponse({ text: stored.pendingSelection || null });
             chrome.storage.session.remove('pendingSelection');
         });
-        return true; // Required: keeps the message channel open for async sendResponse
+        return true;
     }
 
     if (message.type === 'OPEN_SIDE_PANEL') {
@@ -84,10 +77,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
         });
         sendResponse({ success: true });
+        return false;
     }
-
-    // FACTCHECK_SELECTION is forwarded to the side panel via the same
-    // runtime messaging channel — the side panel listens for it directly.
 
     return false;
 });

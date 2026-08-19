@@ -69,10 +69,19 @@ def login_required(f):
         auth_header = request.headers.get('Authorization')
         if auth_header and auth_header.startswith('Bearer '):
             token = auth_header.split(' ')[1]
-            user = db_session.query(User).filter_by(api_token=token).first()
-            if user:
-                request.current_user = user
-                return f(*args, **kwargs)
+            if token:
+                # Check 64-char API token first
+                user = db_session.query(User).filter_by(api_token=token).first()
+                if user:
+                    request.current_user = user
+                    return f(*args, **kwargs)
+                # Fallback to JWT payload verification
+                payload = verify_token(token)
+                if payload and 'user_id' in payload:
+                    user = db_session.query(User).filter_by(id=payload['user_id']).first()
+                    if user:
+                        request.current_user = user
+                        return f(*args, **kwargs)
         
         # 3. Fallback to Flask session (legacy)
         user_id = session.get('user_id')

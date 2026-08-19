@@ -1,93 +1,119 @@
 /**
- * Side panel script — multi-mode fact-check UI for the Authenix extension.
+ * Side panel controller — Modular Fact & AI Verification UI for Authenix.
  *
  * Modes:
- *   - factcheck: Standard fact-check (verdict cards)
- *   - ai: AI-generated text detection (probability bar)
- *   - media: Media URL authenticity analysis
- *   - history: Past fact-checks from the API
+ *   - 'both': Verifies factual claims + scans AI text likelihood simultaneously (Default)
+ *   - 'claims': Fact-checks factual claims only
+ *   - 'ai': Forensic AI Spotter only
+ *
+ * @module sidepanel
  */
 
-import { getToken } from '../lib/storage.js';
-import { getBalance, analyzeText, analyzeAI, analyzeMediaUrl, createCheckout } from '../lib/api.js';
+import { getToken, getModePreference, saveModePreference } from '../lib/storage.js';
+import {
+    getBalance,
+    syncWebAuthSession,
+    initiateGoogleLogin,
+    analyzeModular,
+    createCheckout,
+    MIN_AI_WORDS
+} from '../lib/api.js';
 
-// --- DOM refs ---
+// --- DOM Elements ---
 const balanceEl = document.getElementById('sp-balance');
 const streakEl = document.getElementById('sp-streak');
-const resultsContainer = document.getElementById('sp-results');
+const authSection = document.getElementById('sp-auth-prompt');
+const mainSection = document.getElementById('sp-main-content');
+const authStatus = document.getElementById('sp-auth-status');
+const googleLoginBtn = document.getElementById('sp-google-login-btn');
+const modeButtons = document.querySelectorAll('.sp-mode-btn');
+
+const inputText = document.getElementById('sp-input-text');
+const wordCountEl = document.getElementById('sp-word-count');
+const clearBtn = document.getElementById('sp-clear-btn');
+const verifyBtn = document.getElementById('sp-verify-btn');
+const resultsFeed = document.getElementById('sp-results');
 const lowBalanceBar = document.getElementById('sp-low-balance');
 const buyLink = document.getElementById('sp-buy-link');
 
-// Mode-specific inputs
-const claimInput = document.getElementById('sp-claim');
-const checkBtn = document.getElementById('sp-check-btn');
-const aiTextInput = document.getElementById('sp-ai-text');
-const aiBtn = document.getElementById('sp-ai-btn');
-const mediaUrlInput = document.getElementById('sp-media-url');
-const mediaBtn = document.getElementById('sp-media-btn');
-
+// --- State ---
 let cardCounter = 0;
 let currentBalance = null;
-let currentMode = 'factcheck';
+let currentMode = 'both';
 let isProcessing = false;
 
 const BALANCE_CACHE_KEY = 'authenix_balance_cache';
-const BALANCE_CACHE_TTL_MS = 60000; // 60 seconds
+const BALANCE_CACHE_TTL_MS = 60000;
 
-// --- Init ---
+// --- Initialization ---
 document.addEventListener('DOMContentLoaded', async () => {
-    const token = await getToken();
-    if (!token) {
-        // Hide inputs — they'd produce a confusing ERROR card without a valid token
-        document.querySelectorAll('.sp-input-section').forEach(el => el.classList.add('hidden'));
-        document.querySelector('.sp-tabs')?.classList.add('hidden');
+    currentMode = await getModePreference();
+    updateModeButtonsUI(currentMode);
+    setupEventListeners();
 
-        // Render an actionable CTA instead of a dead-end lock icon
-        resultsContainer.innerHTML = `
-            <div class="sp-empty-state">
-                <span class="sp-empty-icon">🔒</span>
-                <p>Connect your account to start fact-checking.</p>
-                <button id="sp-connect-cta" class="sp-check-btn sp-connect-cta-btn">
-                    Get your token →
-                </button>
-            </div>
-        `;
-        document.getElementById('sp-connect-cta')?.addEventListener('click', () => {
-            chrome.tabs.create({ url: 'https://satoricheck-829698588154.europe-west6.run.app?ext=1' });
-        });
+    const isAuthenticated = await ensureAuthentication();
+    if (!isAuthenticated) {
         return;
     }
 
     await loadUserInfo();
-    setupEventListeners();
 
-    // Handshake: tell the service worker we're ready and pick up
-    // any queued selection from a context-menu click that opened us.
+    // Handshake: pick up queued selection from right-click context menu
     chrome.runtime.sendMessage({ type: 'SIDE_PANEL_READY' }, (response) => {
         if (response?.text) {
-            switchMode('factcheck');
-            claimInput.value = response.text;
-            checkBtn.disabled = false;
-            handleFactCheck();
+            inputText.value = response.text;
+            updateInputState();
+            handleVerify();
         }
     });
 
-    // Fast path: receives FACTCHECK_SELECTION directly when panel is
-    // already open and the user right-clicks a new selection.
+    // Fast path: receives selection directly if side panel was already open
     chrome.runtime.onMessage.addListener((message) => {
         if (message.type === 'FACTCHECK_SELECTION' && message.text) {
-            switchMode('factcheck');
-            claimInput.value = message.text;
-            checkBtn.disabled = false;
-            handleFactCheck();
+            inputText.value = message.text;
+            updateInputState();
+            handleVerify();
         }
     });
 });
 
-// --- Load user info (with 60s cache to reduce API calls) ---
+/**
+ * Check authentication or auto-sync with active web session cookies.
+ * @returns {Promise<boolean>}
+ */
+async function ensureAuthentication() {
+    let token = await getToken();
+    if (token) {
+        showAuthenticatedUI();
+        return true;
+    }
+
+    // Try auto-detecting existing web session from browser cookies (0 clicks)
+    if (authStatus) authStatus.textContent = 'Auto-detecting web session…';
+    const syncedUser = await syncWebAuthSession();
+    if (syncedUser) {
+        showAuthenticatedUI();
+        return true;
+    }
+
+    showDisconnectedUI();
+    return false;
+}
+
+function showAuthenticatedUI() {
+    authSection.classList.add('hidden');
+    mainSection.classList.remove('hidden');
+}
+
+function showDisconnectedUI() {
+    mainSection.classList.add('hidden');
+    authSection.classList.remove('hidden');
+    if (authStatus) authStatus.textContent = 'Sign in to access Authenix verification';
+}
+
+// --- Load user info (balance & streak) ---
 async function loadUserInfo() {
     try {
-        // Skip API call if cache is fresh
         const cached = await chrome.storage.local.get(BALANCE_CACHE_KEY);
         const cache = cached[BALANCE_CACHE_KEY];
         if (cache && (Date.now() - cache.ts < BALANCE_CACHE_TTL_MS)) {
@@ -99,383 +125,327 @@ async function loadUserInfo() {
         const balance = response.balance ?? 0;
         const streak = response.streak?.current_streak ?? 0;
 
-        // Persist to cache
         await chrome.storage.local.set({
             [BALANCE_CACHE_KEY]: { balance, streak, ts: Date.now() },
         });
 
         applyBalanceUI(balance, streak);
     } catch (error) {
-        console.error('[Authenix] Failed to load user info:', error);
-        // Show a visible error state — "— CP" is indistinguishable from a zero balance
-        balanceEl.textContent = '⚠ CP';
-        balanceEl.title = 'Failed to load balance — click to retry';
+        console.error('[Authenix] Failed to load balance:', error);
+        balanceEl.textContent = '— CP';
     }
 }
 
-/** Apply balance and streak values to the header badges. */
 function applyBalanceUI(balance, streak) {
     currentBalance = balance;
     balanceEl.textContent = `${balance} CP`;
     streakEl.textContent = `🔥 ${streak}`;
     if (balance <= 0) {
         lowBalanceBar.classList.remove('hidden');
+    } else {
+        lowBalanceBar.classList.add('hidden');
     }
 }
 
-// --- Event listeners ---
+// --- Event Listeners Setup ---
 function setupEventListeners() {
-    // Mode tabs
-    document.querySelectorAll('.sp-tab').forEach(tab => {
-        tab.addEventListener('click', () => switchMode(tab.dataset.mode));
-    });
-
-    // Fact-check mode
-    claimInput.addEventListener('input', () => {
-        checkBtn.disabled = claimInput.value.trim().length === 0;
-    });
-    checkBtn.addEventListener('click', () => handleFactCheck());
-    claimInput.addEventListener('keydown', (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !checkBtn.disabled) {
-            handleFactCheck();
+    // 1-Click Google OAuth
+    googleLoginBtn?.addEventListener('click', async () => {
+        googleLoginBtn.disabled = true;
+        googleLoginBtn.innerHTML = '<span class="sp-spinner"></span> Connecting Google…';
+        try {
+            const user = await initiateGoogleLogin();
+            if (user) {
+                showAuthenticatedUI();
+                await loadUserInfo();
+            } else {
+                if (authStatus) authStatus.textContent = 'Sign in canceled or timed out. Please retry.';
+            }
+        } catch (err) {
+            if (authStatus) authStatus.textContent = `Sign in error: ${err.message}`;
+        } finally {
+            googleLoginBtn.disabled = false;
+            googleLoginBtn.innerHTML = `
+                <svg class="google-icon" viewBox="0 0 24 24" width="18" height="18">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                </svg>
+                Sign in with Google
+            `;
         }
     });
 
-    // AI detection mode
-    aiTextInput.addEventListener('input', () => {
-        aiBtn.disabled = aiTextInput.value.trim().length === 0;
+    // 3-Way Mode selector
+    modeButtons.forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            currentMode = btn.dataset.mode;
+            updateModeButtonsUI(currentMode);
+            await saveModePreference(currentMode);
+        });
     });
-    aiBtn.addEventListener('click', () => handleAIDetect());
-    aiTextInput.addEventListener('keydown', (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !aiBtn.disabled) {
-            handleAIDetect();
+
+    // Input handlers
+    inputText.addEventListener('input', () => updateInputState());
+    clearBtn.addEventListener('click', () => {
+        inputText.value = '';
+        updateInputState();
+        inputText.focus();
+    });
+
+    // Submit handler
+    verifyBtn.addEventListener('click', () => handleVerify());
+    inputText.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !verifyBtn.disabled) {
+            e.preventDefault();
+            handleVerify();
         }
     });
 
-    // Media mode
-    mediaUrlInput.addEventListener('input', () => {
-        mediaBtn.disabled = mediaUrlInput.value.trim().length === 0;
-    });
-    mediaBtn.addEventListener('click', () => handleMediaCheck());
-    mediaUrlInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !mediaBtn.disabled) {
-            handleMediaCheck();
-        }
-    });
-
-    // Buy link and CP badge both open Stripe checkout
-    buyLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        openCheckout();
-    });
-    balanceEl.addEventListener('click', () => openCheckout());
+    // Stripe checkout triggers
+    balanceEl.addEventListener('click', () => triggerCheckout());
+    buyLink.addEventListener('click', () => triggerCheckout());
 }
 
-// --- Mode switching ---
-function switchMode(mode) {
-    currentMode = mode;
-
-    // Update tabs
-    document.querySelectorAll('.sp-tab').forEach(tab => {
-        tab.classList.toggle('active', tab.dataset.mode === mode);
+function updateModeButtonsUI(activeMode) {
+    modeButtons.forEach((btn) => {
+        const isActive = btn.dataset.mode === activeMode;
+        btn.classList.toggle('active', isActive);
+        btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
     });
-
-    // Show/hide input sections
-    document.getElementById('input-factcheck').classList.toggle('hidden', mode !== 'factcheck');
-    document.getElementById('input-ai').classList.toggle('hidden', mode !== 'ai');
-    document.getElementById('input-media').classList.toggle('hidden', mode !== 'media');
 }
 
-// --- Fact-check handler ---
-async function handleFactCheck() {
+function updateInputState() {
+    const text = inputText.value.trim();
+    const words = text ? text.split(/\s+/).filter(Boolean).length : 0;
+
+    wordCountEl.textContent = `${words} word${words === 1 ? '' : 's'}`;
+    clearBtn.classList.toggle('hidden', text.length === 0);
+    verifyBtn.disabled = text.length === 0;
+}
+
+// --- Main Verification Flow ---
+async function handleVerify() {
     if (isProcessing) return;
-    const text = claimInput.value.trim();
+    const text = inputText.value.trim();
     if (!text) return;
 
     isProcessing = true;
     clearEmptyState();
-    const cardId = createPendingCard(text);
-    setButtonLoading(checkBtn, 'Checking…');
+    const cardId = createPendingCard(text, currentMode);
+    setButtonLoading(verifyBtn, 'Verifying…');
 
     let rateLimited = false;
     try {
-        const result = await analyzeText(text);
-        if (result.success !== false) {
-            updateFactCheckCard(cardId, result.result || result);
-            updateBalanceFromResponse(result);
-        } else {
-            updateCardError(cardId, result.error || 'Analysis failed');
+        const result = await analyzeModular(text, currentMode);
+        updateCardWithResult(cardId, result);
+
+        if (result.new_balance !== undefined) {
+            currentBalance = result.new_balance;
+            balanceEl.textContent = `${currentBalance} CP`;
+            chrome.storage.local.remove(BALANCE_CACHE_KEY);
         }
     } catch (error) {
         updateCardError(cardId, error.message);
         if (error.status === 429) {
             rateLimited = true;
-            showRateLimitCountdown(checkBtn, 'Check', error.retryAfterSec);
-        } else if (error.status === 403) {
-            openCheckout();
+            showRateLimitCountdown(verifyBtn, 'Verify', error.retryAfterSec);
+        } else if (error.status === 402 || error.status === 403) {
+            triggerCheckout();
         }
     } finally {
         isProcessing = false;
         if (!rateLimited) {
-            resetButton(checkBtn, 'Check', claimInput);
-            claimInput.value = '';
-            checkBtn.disabled = true;
+            resetButton(verifyBtn, 'Verify');
+            inputText.value = '';
+            updateInputState();
         }
     }
 }
 
-// --- AI detection handler ---
-async function handleAIDetect() {
-    if (isProcessing) return;
-    const text = aiTextInput.value.trim();
-    if (!text) return;
+// --- Card Rendering ---
 
-    isProcessing = true;
-    clearEmptyState();
-    const cardId = createPendingCard(text, 'ai');
-    setButtonLoading(aiBtn, 'Analyzing…');
-
-    let rateLimited = false;
-    try {
-        const result = await analyzeAI(text);
-        if (result.success !== false) {
-            updateAICard(cardId, result);
-            updateBalanceFromResponse(result);
-        } else {
-            updateCardError(cardId, result.error || 'Analysis failed');
-        }
-    } catch (error) {
-        updateCardError(cardId, error.message);
-        if (error.status === 429) {
-            rateLimited = true;
-            showRateLimitCountdown(aiBtn, 'Detect AI', error.retryAfterSec);
-        } else if (error.status === 403) {
-            openCheckout();
-        }
-    } finally {
-        isProcessing = false;
-        if (!rateLimited) {
-            resetButton(aiBtn, 'Detect AI', aiTextInput);
-            aiTextInput.value = '';
-            aiBtn.disabled = true;
-        }
-    }
-}
-
-// --- Media check handler ---
-async function handleMediaCheck() {
-    if (isProcessing) return;
-    const url = mediaUrlInput.value.trim();
-    if (!url) return;
-
-    isProcessing = true;
-    clearEmptyState();
-    const cardId = createPendingCard(url, 'media');
-    setButtonLoading(mediaBtn, 'Analyzing…');
-
-    let rateLimited = false;
-    try {
-        const result = await analyzeMediaUrl(url);
-        if (result.success !== false) {
-            updateFactCheckCard(cardId, result.result || result);
-            updateBalanceFromResponse(result);
-        } else {
-            updateCardError(cardId, result.error || 'Analysis failed');
-        }
-    } catch (error) {
-        updateCardError(cardId, error.message);
-        if (error.status === 429) {
-            rateLimited = true;
-            showRateLimitCountdown(mediaBtn, 'Analyze', error.retryAfterSec);
-        } else if (error.status === 403) {
-            openCheckout();
-        }
-    } finally {
-        isProcessing = false;
-        if (!rateLimited) {
-            resetButton(mediaBtn, 'Analyze', mediaUrlInput);
-            mediaUrlInput.value = '';
-            mediaBtn.disabled = true;
-        }
-    }
-}
-
-// --- Card creation ---
-
-/** Create a pending card. */
-function createPendingCard(text, type = 'fact') {
+/** Create a pending skeleton card */
+function createPendingCard(text, mode) {
     const id = `sp-card-${++cardCounter}`;
     const card = document.createElement('div');
-    card.className = `sp-card pending ${type === 'ai' ? 'ai-card' : ''}`;
+    card.className = 'sp-card pending';
     card.id = id;
 
-    const previewText = text.length > 120 ? text.substring(0, 120) + '…' : text;
+    const preview = text.length > 140 ? text.substring(0, 140) + '…' : text;
+    const modeBadgeLabel = mode === 'both' ? 'AI + Fact Check' : mode === 'claims' ? 'Fact Check' : 'AI Spotter';
 
     card.innerHTML = `
         <div class="sp-card-header">
-            <span class="sp-verdict PENDING">
-                <span class="sp-spinner"></span> ${type === 'ai' ? 'Analyzing…' : 'Checking…'}
-            </span>
-            <span class="sp-card-time">${new Date().toLocaleTimeString()}</span>
+            <div class="sp-badges-group">
+                <span class="sp-verdict PENDING">
+                    <span class="sp-spinner"></span> ${modeBadgeLabel}…
+                </span>
+            </div>
+            <span class="sp-card-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
         </div>
-        <p class="sp-claim-text">"${escapeHtml(previewText)}"</p>
+        <p class="sp-claim-text">"${escapeHtml(preview)}"</p>
         <div class="sp-card-details"></div>
     `;
 
-    resultsContainer.insertBefore(card, resultsContainer.firstChild);
+    resultsFeed.insertBefore(card, resultsFeed.firstChild);
     return id;
 }
 
-/** Update a card with fact-check result. */
-function updateFactCheckCard(cardId, result) {
+/** Update card with final modular verification results */
+function updateCardWithResult(cardId, data) {
     const card = document.getElementById(cardId);
     if (!card) return;
 
     card.classList.remove('pending');
+    const headerBadges = card.querySelector('.sp-badges-group');
+    const detailsContainer = card.querySelector('.sp-card-details');
 
-    const verdictBadge = card.querySelector('.sp-verdict');
-    const verdict = result.verdict || 'NOT_VERIFIED';
-    verdictBadge.className = `sp-verdict ${verdict}`;
-    verdictBadge.textContent = verdict.replace(/_/g, ' ');
+    let badgesHtml = '';
+    let detailsHtml = '';
 
-    if (verdict === 'NOT_A_CLAIM') {
-        card.style.cursor = 'default';
-        return;
-    }
+    // 1. Claims Verdict Badge (for 'both' or 'claims' mode)
+    if (data.claims) {
+        const verdict = data.claims.verdict || 'NOT_VERIFIED';
+        badgesHtml += `<span class="sp-verdict ${verdict}">${verdict.replace(/_/g, ' ')}</span>`;
 
-    const details = card.querySelector('.sp-card-details');
-    let html = '';
+        if (data.claims.explanation) {
+            const safeExp = typeof DOMPurify !== 'undefined'
+                ? DOMPurify.sanitize(data.claims.explanation)
+                : escapeHtml(data.claims.explanation);
+            detailsHtml += `<p class="sp-explanation">${safeExp}</p>`;
+        }
 
-    if (result.explanation) {
-        const safe = typeof DOMPurify !== 'undefined'
-            ? DOMPurify.sanitize(result.explanation) : escapeHtml(result.explanation);
-        html += `<p class="sp-explanation">${safe}</p>`;
-    }
-    if (result.fallacy) {
-        html += `<span class="sp-fallacy">⚠️ ${escapeHtml(result.fallacy)}</span>`;
-    }
-    if (result.sources?.length > 0) {
-        const valid = result.sources.filter(u => sanitizeUrl(u));
-        if (valid.length > 0) {
-            html += `<div class="sp-sources"><strong>Sources:</strong>${valid.map(u =>
-                `<a href="${sanitizeUrl(u)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(u)}">${formatUrl(u)}</a>`
-            ).join('')}</div>`;
+        if (data.claims.fallacy) {
+            detailsHtml += `<span class="sp-fallacy">⚠️ ${escapeHtml(data.claims.fallacy)}</span>`;
+        }
+
+        if (data.claims.sources && Array.isArray(data.claims.sources) && data.claims.sources.length > 0) {
+            const validSources = data.claims.sources.filter(u => sanitizeUrl(u));
+            if (validSources.length > 0) {
+                detailsHtml += `<div class="sp-sources"><strong>Verified Sources:</strong>${validSources.map(u =>
+                    `<a href="${sanitizeUrl(u)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(u)}">🔗 ${formatUrl(u)}</a>`
+                ).join('')}</div>`;
+            }
         }
     }
 
-    details.innerHTML = html;
+    // 2. AI Probability Pill & Forensics (for 'both' or 'ai' mode)
+    if (data.ai) {
+        if (data.ai.skipped) {
+            badgesHtml += `<span class="sp-ai-pill ai-short" title="${escapeHtml(data.ai.reason)}">🤖 Short (&lt;${MIN_AI_WORDS}w)</span>`;
+        } else {
+            const prob = data.ai.ai_probability ?? 50;
+            const conf = data.ai.confidence || 'MED';
+            const pillClass = prob >= 70 ? 'ai-high' : prob >= 40 ? 'ai-med' : 'ai-low';
+            const probLabel = prob >= 70 ? `${prob}% AI Likely` : prob <= 30 ? `${100 - prob}% Human` : `${prob}% AI Prob`;
+
+            badgesHtml += `<span class="sp-ai-pill ${pillClass}">🤖 ${probLabel}</span>`;
+
+            // Forensics breakdown box
+            const aiIndicators = (data.ai.ai_indicators || []).slice(0, 3);
+            const humanIndicators = (data.ai.human_indicators || []).slice(0, 3);
+
+            detailsHtml += `
+                <div class="sp-ai-forensics">
+                    <div class="sp-ai-forensics-header">
+                        <span class="sp-ai-forensics-title">🤖 AI Forensics (${prob}%)</span>
+                        <span class="sp-ai-confidence-tag">Confidence: ${conf}</span>
+                    </div>
+                    <div class="sp-ai-bar-track">
+                        <div class="sp-ai-bar-fill ${pillClass}" style="width: ${prob}%"></div>
+                    </div>
+                    ${data.ai.explanation ? `<p class="sp-explanation" style="font-size: 0.72rem; margin-top: 4px;">${escapeHtml(data.ai.explanation)}</p>` : ''}
+                    <div class="sp-ai-indicators">
+                        ${aiIndicators.map(ind => `<span class="sp-indicator-tag">Marker: ${escapeHtml(ind)}</span>`).join('')}
+                        ${humanIndicators.map(ind => `<span class="sp-indicator-tag" style="background: rgba(16, 185, 129, 0.15); color: #a7f3d0;">Human trait: ${escapeHtml(ind)}</span>`).join('')}
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    headerBadges.innerHTML = badgesHtml;
+    detailsContainer.innerHTML = detailsHtml;
+
+    // Card expand toggle
+    card.classList.add('expanded'); // Auto-expand upon arrival
     card.addEventListener('click', () => card.classList.toggle('expanded'));
 }
 
-/** Update a card with AI detection result. */
-function updateAICard(cardId, result) {
-    const card = document.getElementById(cardId);
-    if (!card) return;
-
-    card.classList.remove('pending');
-
-    const probability = result.ai_probability ?? 50;
-    const confidence = result.confidence || 'LOW';
-    const colorClass = probability >= 70 ? 'sp-ai-high' : probability >= 40 ? 'sp-ai-med' : 'sp-ai-low';
-
-    // Replace header
-    const header = card.querySelector('.sp-card-header');
-    header.innerHTML = `
-        <span class="sp-ai-header">🤖 AI Detection <span class="beta-tag">β</span></span>
-        <span class="sp-card-time">${new Date().toLocaleTimeString()}</span>
-    `;
-
-    // Build details
-    const details = card.querySelector('.sp-card-details');
-    const safe = typeof DOMPurify !== 'undefined'
-        ? DOMPurify.sanitize(result.explanation || '') : escapeHtml(result.explanation || '');
-
-    details.innerHTML = `
-        <div class="sp-ai-prob ${colorClass}">
-            <div class="sp-ai-prob-header">
-                <span class="sp-ai-prob-value">${probability}%</span>
-                <span class="sp-ai-prob-label">AI-Generated</span>
-                <span class="sp-ai-confidence">${confidence}</span>
-            </div>
-            <div class="sp-ai-bar">
-                <div class="sp-ai-fill" style="width: ${probability}%"></div>
-            </div>
-        </div>
-        <p class="sp-explanation">${safe}</p>
-        <em style="color: var(--color-text-muted); font-size: 0.7rem;">Beta feature — results are estimates only.</em>
-    `;
-
-    // Auto-expand AI cards
-    card.classList.add('expanded');
-    card.addEventListener('click', () => card.classList.toggle('expanded'));
-}
-
-/** Show an error on a card. */
+/** Show error state on card */
 function updateCardError(cardId, message) {
     const card = document.getElementById(cardId);
     if (!card) return;
 
     card.classList.remove('pending');
-    const verdictBadge = card.querySelector('.sp-verdict');
-    verdictBadge.className = 'sp-verdict FALSE';
-    verdictBadge.textContent = 'ERROR';
+    const headerBadges = card.querySelector('.sp-badges-group');
+    headerBadges.innerHTML = '<span class="sp-verdict FALSE">ERROR</span>';
 
-    card.querySelector('.sp-card-details').innerHTML =
-        `<p class="sp-explanation">${escapeHtml(message)}</p>`;
+    const details = card.querySelector('.sp-card-details');
+    details.innerHTML = `<p class="sp-explanation" style="color: var(--color-error);">${escapeHtml(message)}</p>`;
     card.classList.add('expanded');
 }
 
 // --- Helpers ---
 
 function clearEmptyState() {
-    const empty = resultsContainer.querySelector('.sp-empty-state');
+    const empty = resultsFeed.querySelector('.sp-empty-state');
     if (empty) empty.remove();
 }
 
 function setButtonLoading(btn, label) {
     btn.disabled = true;
-    btn.innerHTML = `<span class="sp-spinner"></span> ${label}`;
+    btn.innerHTML = `<span class="sp-spinner"></span> <span class="btn-text">${label}</span>`;
 }
 
-function resetButton(btn, label, input) {
-    btn.disabled = input ? input.value.trim().length === 0 : false;
-    btn.textContent = label;
+function resetButton(btn, label) {
+    btn.innerHTML = `<span class="btn-icon">⚡</span> <span class="btn-text">${label}</span>`;
+    btn.disabled = inputText.value.trim().length === 0;
 }
 
-function updateBalanceFromResponse(result) {
-    if (result.new_balance !== undefined) {
-        currentBalance = result.new_balance;
-        balanceEl.textContent = `${currentBalance} CP`;
-        if (currentBalance <= 0) lowBalanceBar.classList.remove('hidden');
-        // Invalidate cache so next loadUserInfo() fetches fresh data
-        chrome.storage.local.remove(BALANCE_CACHE_KEY);
+function showRateLimitCountdown(btn, defaultLabel, seconds = 60) {
+    let remaining = Math.min(seconds, 120);
+    btn.disabled = true;
+    const tick = () => {
+        if (remaining <= 0) {
+            resetButton(btn, defaultLabel);
+            return;
+        }
+        btn.innerHTML = `<span class="btn-text">Wait ${remaining}s</span>`;
+        remaining--;
+        setTimeout(tick, 1000);
+    };
+    tick();
+}
+
+async function triggerCheckout() {
+    try {
+        const result = await createCheckout();
+        if (result?.url) {
+            chrome.tabs.create({ url: result.url });
+        }
+    } catch {
+        chrome.tabs.create({ url: 'https://satoricheck-829698588154.europe-west6.run.app' });
     }
 }
 
 function formatUrl(url) {
     try {
         const parsed = new URL(url);
-        const domain = parsed.hostname.replace('www.', '');
-        const path = parsed.pathname.substring(0, 15);
-        return domain.substring(0, 25) + (path.length > 1 ? path + '…' : '');
+        return parsed.hostname.replace('www.', '');
     } catch {
-        return url.substring(0, 30) + '…';
+        return url.substring(0, 30);
     }
 }
 
 function escapeHtml(text) {
     const div = document.createElement('div');
-    div.textContent = text;
+    div.textContent = text || '';
     return div.innerHTML;
 }
 
-/**
- * Validate and sanitize a URL for safe use in href attributes.
- * Returns the properly-encoded href from the URL constructor,
- * or null if the URL is invalid or non-HTTP(S).
- * @param {*} url - Value to validate
- * @returns {string|null}
- */
 function sanitizeUrl(url) {
     if (!url || typeof url !== 'string') return null;
     try {
@@ -485,45 +455,4 @@ function sanitizeUrl(url) {
         }
     } catch { /* invalid URL */ }
     return null;
-}
-
-/**
- * Disable a button and show a countdown until the rate-limit window expires.
- * @param {HTMLButtonElement} btn - Button to disable
- * @param {string} defaultLabel - Label to restore after countdown
- * @param {number} [seconds=60] - Seconds to count down (capped at 120)
- */
-function showRateLimitCountdown(btn, defaultLabel, seconds = 60) {
-    let remaining = Math.min(seconds, 120);
-    btn.disabled = true;
-    const tick = () => {
-        if (remaining <= 0) {
-            btn.textContent = defaultLabel;
-            btn.disabled = false;
-            return;
-        }
-        btn.textContent = `Wait ${remaining}s`;
-        remaining--;
-        setTimeout(tick, 1000);
-    };
-    tick();
-}
-
-/**
- * Open Stripe checkout for the default CP package (battery_medium).
- * Calls the backend to create a session, then opens the Stripe URL
- * in a new browser tab. Shows the low-balance bar on failure.
- */
-async function openCheckout() {
-    try {
-        const result = await createCheckout();
-        if (result.url) {
-            chrome.tabs.create({ url: result.url });
-        }
-    } catch (error) {
-        // If checkout fails (e.g. Stripe not configured in TEST_MODE),
-        // fall back to opening the web app.
-        console.error('[Authenix] Checkout failed:', error.message);
-        chrome.tabs.create({ url: 'https://satoricheck-829698588154.europe-west6.run.app' });
-    }
 }

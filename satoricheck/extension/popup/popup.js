@@ -1,145 +1,189 @@
 /**
- * Popup script — handles token paste login and account display.
+ * Popup script — Quick launcher and Google OAuth controller for Authenix.
  *
- * Two states:
- *   1. Disconnected: shows token input + connect button
- *   2. Connected: shows email, balance, side panel launcher
+ * @module popup
  */
 
-import { saveToken, getToken, saveUserEmail, getUserEmail, clearAuth } from '../lib/storage.js';
-import { getCurrentUser, createCheckout } from '../lib/api.js';
+import {
+    saveToken,
+    getToken,
+    saveUserEmail,
+    clearAuth,
+    getModePreference,
+    saveModePreference
+} from '../lib/storage.js';
+import {
+    getCurrentUser,
+    syncWebAuthSession,
+    initiateGoogleLogin,
+    createCheckout
+} from '../lib/api.js';
 
-// --- DOM refs ---
+// --- DOM Elements ---
 const stateDisconnected = document.getElementById('state-disconnected');
 const stateConnected = document.getElementById('state-connected');
+const googleLoginBtn = document.getElementById('google-login-btn');
+const authStatus = document.getElementById('auth-status');
+
 const tokenInput = document.getElementById('token-input');
 const connectBtn = document.getElementById('connect-btn');
-const getTokenLink = document.getElementById('get-token-link');
 const connectError = document.getElementById('connect-error');
+
 const accountEmail = document.getElementById('account-email');
 const balanceBadge = document.getElementById('balance-badge');
+const streakBadge = document.getElementById('streak-badge');
+const modeSelect = document.getElementById('popup-mode-select');
 const openSidepanelBtn = document.getElementById('open-sidepanel-btn');
 const disconnectBtn = document.getElementById('disconnect-btn');
 
-// --- Init ---
+// --- Initialization ---
 document.addEventListener('DOMContentLoaded', async () => {
+    setupEventListeners();
+
+    // Check if already authenticated
     const token = await getToken();
     if (token) {
+        await showConnectedState();
+        return;
+    }
+
+    // Auto-detect web session cookies
+    if (authStatus) authStatus.textContent = 'Auto-detecting web session…';
+    const user = await syncWebAuthSession();
+    if (user) {
         await showConnectedState();
     } else {
         showDisconnectedState();
     }
 });
 
-// --- Event listeners ---
-
-// Enable connect button only when input has content
-tokenInput.addEventListener('input', () => {
-    connectBtn.disabled = tokenInput.value.trim().length === 0;
-    connectError.classList.add('hidden');
-});
-
-// Connect: validate token against the API
-connectBtn.addEventListener('click', async () => {
-    const token = tokenInput.value.trim();
-    if (!token) return;
-
-    connectBtn.disabled = true;
-    connectBtn.innerHTML = '<span class="spinner"></span> Verifying…';
-    connectError.classList.add('hidden');
-
-    try {
-        // Temporarily store token so api.js can use it
-        await saveToken(token);
-
-        // Validate by calling /auth/me
-        const response = await getCurrentUser();
-
-        if (response.success && response.user) {
-            await saveUserEmail(response.user.email);
-            await showConnectedState();
-        } else {
-            throw new Error('Invalid response from server');
+// --- Event Listeners ---
+function setupEventListeners() {
+    // 1-Click Google OAuth
+    googleLoginBtn?.addEventListener('click', async () => {
+        googleLoginBtn.disabled = true;
+        googleLoginBtn.innerHTML = '<span class="spinner"></span> Connecting Google…';
+        try {
+            const user = await initiateGoogleLogin();
+            if (user) {
+                await showConnectedState();
+            } else {
+                if (authStatus) authStatus.textContent = 'Sign-in canceled or timed out.';
+            }
+        } catch (err) {
+            if (authStatus) authStatus.textContent = `Sign-in error: ${err.message}`;
+        } finally {
+            googleLoginBtn.disabled = false;
+            googleLoginBtn.innerHTML = `
+                <svg class="google-icon" viewBox="0 0 24 24" width="18" height="18">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                </svg>
+                Sign in with Google
+            `;
         }
-    } catch (error) {
-        // Token is invalid — clear it
+    });
+
+    // Manual token input
+    tokenInput?.addEventListener('input', () => {
+        connectBtn.disabled = tokenInput.value.trim().length === 0;
+        connectError.classList.add('hidden');
+    });
+
+    connectBtn?.addEventListener('click', async () => {
+        const token = tokenInput.value.trim();
+        if (!token) return;
+
+        connectBtn.disabled = true;
+        connectBtn.innerHTML = '<span class="spinner"></span> Verifying…';
+        connectError.classList.add('hidden');
+
+        try {
+            await saveToken(token);
+            const response = await getCurrentUser();
+            if (response.success && response.user) {
+                await saveUserEmail(response.user.email);
+                await showConnectedState();
+            } else {
+                throw new Error('Invalid token');
+            }
+        } catch (error) {
+            await clearAuth();
+            connectError.textContent = error.status === 401
+                ? 'Invalid token. Please sign in via Google above.'
+                : `Error: ${error.message}`;
+            connectError.classList.remove('hidden');
+            connectBtn.disabled = false;
+            connectBtn.textContent = 'Save';
+        }
+    });
+
+    // Mode preference select
+    modeSelect?.addEventListener('change', async () => {
+        await saveModePreference(modeSelect.value);
+    });
+
+    // Open side panel
+    openSidepanelBtn?.addEventListener('click', async () => {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab) {
+            await chrome.sidePanel.open({ windowId: tab.windowId });
+        }
+        window.close();
+    });
+
+    // Sign out / Disconnect
+    disconnectBtn?.addEventListener('click', async (e) => {
+        e.preventDefault();
         await clearAuth();
+        showDisconnectedState();
+    });
 
-        connectError.textContent = error.status === 401
-            ? 'Invalid token. Please copy a fresh one from authenix.ai'
-            : `Connection failed: ${error.message}`;
-        connectError.classList.remove('hidden');
-
-        connectBtn.disabled = false;
-        connectBtn.textContent = 'Connect';
-    }
-});
-
-// Open the web app to get a token (Cloud Run URL — update if domain mapping is set up)
-getTokenLink.addEventListener('click', (e) => {
-    e.preventDefault();
-    chrome.tabs.create({ url: 'https://satoricheck-829698588154.europe-west6.run.app?ext=1' });
-});
-
-// Open side panel
-openSidepanelBtn.addEventListener('click', async () => {
-    // chrome.sidePanel.open requires a windowId
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab) {
-        await chrome.sidePanel.open({ windowId: tab.windowId });
-    }
-    window.close(); // Close popup after opening side panel
-});
-
-// Disconnect
-disconnectBtn.addEventListener('click', async (e) => {
-    e.preventDefault();
-    await clearAuth();
-    showDisconnectedState();
-});
-
-// CP badge click → open Stripe checkout
-balanceBadge.addEventListener('click', async () => {
-    try {
-        const result = await createCheckout();
-        if (result.url) {
-            chrome.tabs.create({ url: result.url });
+    // CP badge checkout
+    balanceBadge?.addEventListener('click', async () => {
+        try {
+            const result = await createCheckout();
+            if (result?.url) {
+                chrome.tabs.create({ url: result.url });
+            }
+        } catch {
+            chrome.tabs.create({ url: 'https://satoricheck-829698588154.europe-west6.run.app' });
         }
-    } catch {
-        chrome.tabs.create({ url: 'https://satoricheck-829698588154.europe-west6.run.app' });
-    }
-});
+    });
+}
 
-// --- State transitions ---
+// --- State Transitions ---
 
-/**
- * Fetch user info and switch to the connected state.
- */
 async function showConnectedState() {
     try {
         const response = await getCurrentUser();
         const user = response.user;
 
-        accountEmail.textContent = user.email;
-        balanceBadge.textContent = `${user.balance ?? '—'} CP`;
+        accountEmail.textContent = user.email || 'Connected';
+        balanceBadge.textContent = `${user.balance ?? 0} CP`;
+        streakBadge.textContent = `🔥 ${user.streak ?? 0}`;
+
+        const mode = await getModePreference();
+        if (modeSelect) modeSelect.value = mode;
 
         stateDisconnected.classList.add('hidden');
         stateConnected.classList.remove('hidden');
     } catch {
-        // Token expired or invalid — fall back to disconnected
         await clearAuth();
         showDisconnectedState();
     }
 }
 
-/**
- * Switch to the disconnected state.
- */
 function showDisconnectedState() {
-    tokenInput.value = '';
-    connectBtn.disabled = true;
-    connectBtn.textContent = 'Connect';
-    connectError.classList.add('hidden');
+    if (tokenInput) tokenInput.value = '';
+    if (connectBtn) {
+        connectBtn.disabled = true;
+        connectBtn.textContent = 'Save';
+    }
+    if (connectError) connectError.classList.add('hidden');
+    if (authStatus) authStatus.textContent = '';
 
     stateConnected.classList.add('hidden');
     stateDisconnected.classList.remove('hidden');
