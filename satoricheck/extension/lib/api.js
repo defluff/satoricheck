@@ -10,12 +10,10 @@
 import { getToken, saveToken, saveUserEmail, clearAuth } from './storage.js';
 import { fetchWithRetry } from './retry.js';
 
-/** Candidate backend origins (production, Cloud Run, local development). */
+/** Candidate backend origins (production, Cloud Run). */
 export const CANDIDATE_ORIGINS = [
     'https://satoricheck-829698588154.europe-west6.run.app',
     'https://authenix.ai',
-    'http://127.0.0.1:8000',
-    'http://localhost:8000',
 ];
 
 /** Active default API base. */

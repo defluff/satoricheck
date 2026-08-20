@@ -19,6 +19,7 @@ from backend.routes.auth import login_required
 from backend.error_handlers import APIError
 from backend.services import get_gemini_service
 from backend.config import Config
+from backend.extensions import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +160,7 @@ def _analyze_media(
 
 @media_bp.route('/analyze-url', methods=['POST'])
 @login_required
+@limiter.limit("10 per minute")
 def analyze_url() -> tuple:
     """Analyze a public media URL for authenticity."""
     try:
@@ -232,6 +234,7 @@ def analyze_url() -> tuple:
 
 @media_bp.route('/analyze-upload', methods=['POST'])
 @login_required
+@limiter.limit("10 per minute")
 def analyze_upload() -> tuple:
     """Analyze an uploaded media file for authenticity."""
     temp_path = None

@@ -31,6 +31,9 @@ def app():
     flask_app.config['TESTING'] = True
     flask_app.config['WTF_CSRF_ENABLED'] = False
     
+    from backend.extensions import limiter
+    limiter.reset()
+    
     # Create all tables fresh
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
@@ -38,6 +41,7 @@ def app():
     yield flask_app
     
     # Cleanup
+    limiter.reset()
     db_session.remove()
     Base.metadata.drop_all(bind=engine)
 

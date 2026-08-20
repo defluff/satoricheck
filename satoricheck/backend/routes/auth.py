@@ -18,7 +18,7 @@ from backend.models import User, TokenBalance, Streak, DeletedUser
 from backend.config import Config
 from backend.error_handlers import APIError
 from backend.services.streak import handle_login_streak
-from backend.extensions import oauth
+from backend.extensions import oauth, limiter
 from backend.jwt_utils import (
     create_token, verify_token, refresh_token_if_needed, set_jwt_cookie,
     JWT_COOKIE_NAME, JWT_COOKIE_SECURE, JWT_COOKIE_HTTPONLY, JWT_COOKIE_SAMESITE
@@ -145,6 +145,7 @@ def create_test_user():
 
 
 @auth_bp.route('/signup', methods=['POST'])
+@limiter.limit("5 per hour")
 def signup():
     """Register a new user."""
     # Rate limit: 5 signups per hour per IP (prevent bonus farming)
@@ -221,9 +222,10 @@ def signup():
 
 
 @auth_bp.route('/login', methods=['POST'])
+@limiter.limit("15 per minute")
 def login():
     """Log in a user."""
-    # Rate limit: 10 logins per minute per IP (prevent brute force)
+    # Rate limit: 15 logins per minute per IP (prevent brute force)
     try:
         data = request.get_json()
         

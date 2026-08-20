@@ -14,10 +14,14 @@ from backend.routes.auth import login_required
 from backend.error_handlers import APIError
 from backend.services import get_gemini_service
 from backend.config import Config
+from backend.extensions import limiter
 
 logger = logging.getLogger(__name__)
 
 factcheck_bp = Blueprint('factcheck', __name__, url_prefix='/api/factcheck')
+
+MAX_TEXT_LENGTH = 50000
+
 
 
 
@@ -25,6 +29,7 @@ factcheck_bp = Blueprint('factcheck', __name__, url_prefix='/api/factcheck')
 
 @factcheck_bp.route('/analyze', methods=['POST'])
 @login_required
+@limiter.limit("30 per minute")
 def analyze_claim():
     """Analyze text for factual claims."""
     try:
@@ -39,6 +44,8 @@ def analyze_claim():
             raise APIError('No text provided')
         
         text = text.strip()
+        if len(text) > MAX_TEXT_LENGTH:
+            raise APIError(f'Text exceeds maximum limit of {MAX_TEXT_LENGTH:,} characters.')
         user = request.current_user
         
         # Calculate word count
@@ -71,10 +78,11 @@ def analyze_claim():
         token_cost = (total_unbilled // Config.WORDS_PER_CP) * Config.TOKENS_PER_CP_UNIT
         remainder_words = total_unbilled % Config.WORDS_PER_CP
         
-        # Check balance (Checks FINAL calculated cost)
-        if token_balance.balance < token_cost:
+        # Check balance (Checks FINAL calculated cost and requires at least 1 CP to initiate check)
+        min_required = max(1, token_cost)
+        if token_balance.balance < min_required:
             raise APIError(
-                f'Insufficient tokens. Need {token_cost} CP, you have {token_balance.balance} CP',
+                f'Insufficient tokens. Need {min_required} CP, you have {token_balance.balance} CP',
                 status_code=403
             )
         
@@ -209,6 +217,7 @@ def create_context_cache():
 
 @factcheck_bp.route('/analyze-batch', methods=['POST'])
 @login_required
+@limiter.limit("10 per minute")
 def analyze_batch_claims():
     """Analyze multiple claims in a batch with caching."""
     start_time = time.time()
@@ -296,8 +305,9 @@ def analyze_batch_claims():
             # Batch analysis is now the standard path — no cost multiplier
             token_cost = max(1, token_cost) if token_cost > 0 else 0
             
-            if token_balance.balance < token_cost:
-                 raise APIError(f'Insufficient tokens. Need {token_cost} CP', status_code=403)
+            min_required = max(1, token_cost)
+            if token_balance.balance < min_required:
+                 raise APIError(f'Insufficient tokens. Need {min_required} CP, you have {token_balance.balance} CP', status_code=403)
                  
             # Deduct
             token_balance.balance -= token_cost
@@ -484,6 +494,7 @@ def identify_claims():
 
 @factcheck_bp.route('/analyze-ai', methods=['POST'])
 @login_required
+@limiter.limit("30 per minute")
 def analyze_ai():
     """Analyze text for AI-generation likelihood (like GPT Zero)."""
     start_time = time.time()
@@ -500,6 +511,8 @@ def analyze_ai():
             raise APIError('No text provided')
         
         text = text.strip()
+        if len(text) > MAX_TEXT_LENGTH:
+            raise APIError(f'Text exceeds maximum limit of {MAX_TEXT_LENGTH:,} characters.')
         user = request.current_user
         
         # Minimum text length check
@@ -520,9 +533,10 @@ def analyze_ai():
         token_cost = (total_unbilled // Config.WORDS_PER_CP) * Config.TOKENS_PER_CP_UNIT
         remainder_words = total_unbilled % Config.WORDS_PER_CP
         
-        # Check balance
-        if token_cost > 0 and token_balance.balance < token_cost:
-            raise APIError(f'Insufficient tokens. Need {token_cost} CP, have {token_balance.balance}', status_code=402)
+        # Check balance - require at least 1 CP to initiate AI detection
+        min_required = max(1, token_cost)
+        if token_balance.balance < min_required:
+            raise APIError(f'Insufficient tokens. Need {min_required} CP, have {token_balance.balance} CP', status_code=402)
         
         # Get Gemini service and analyze
         gemini_service = get_gemini_service()

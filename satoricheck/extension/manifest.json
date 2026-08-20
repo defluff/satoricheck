@@ -8,22 +8,17 @@
     "activeTab",
     "contextMenus",
     "cookies",
-    "identity",
     "sidePanel",
     "storage"
   ],
   "host_permissions": [
     "https://authenix.ai/*",
-    "https://satoricheck-829698588154.europe-west6.run.app/*",
-    "http://127.0.0.1:8000/*",
-    "http://localhost:8000/*"
+    "https://satoricheck-829698588154.europe-west6.run.app/*"
   ],
   "externally_connectable": {
     "matches": [
       "https://authenix.ai/*",
-      "https://satoricheck-829698588154.europe-west6.run.app/*",
-      "http://127.0.0.1:8000/*",
-      "http://localhost:8000/*"
+      "https://satoricheck-829698588154.europe-west6.run.app/*"
     ]
   },
   "action": {
@@ -42,13 +37,6 @@
     "service_worker": "background/service-worker.js",
     "type": "module"
   },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["content/content.js"],
-      "run_at": "document_idle"
-    }
-  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none';"
   },

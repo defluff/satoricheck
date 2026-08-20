@@ -68,6 +68,15 @@ def register_error_handlers(app):
             'error': 'Resource not found.'
         }), 404
     
+    @app.errorhandler(429)
+    def ratelimit_handler(error):
+        """Handle rate limit exceeded errors."""
+        logger.warning(f"Rate limit exceeded: {error}")
+        return jsonify({
+            'success': False,
+            'error': 'Too many requests. Please slow down and try again later.'
+        }), 429
+    
     @app.errorhandler(500)
     def internal_error(error):
         """Handle internal server errors."""

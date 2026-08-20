@@ -432,3 +432,56 @@ class TestTestModeProductionGuard:
                     # The validate() method should now catch this
                     with pytest.raises(ValueError, match='TEST_MODE'):
                         Config.validate()
+
+
+# =============================================================================
+# Fix 7: Zero-Balance Free Execution Prevention & Input Caps
+# =============================================================================
+
+class TestWalletDrainProtections:
+    """Ensure zero-balance accounts cannot trigger LLM calls for free."""
+
+    def test_zero_balance_cannot_execute_small_claim(self, auth_client, test_user, db_session_fixture):
+        """User with 0 CP must be blocked from running even <250 word snippets."""
+        from backend.models import TokenBalance
+
+        tb = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).first()
+        tb.balance = 0
+        tb.unbilled_words = 0
+        db_session_fixture.commit()
+
+        # Submit a small 10-word claim
+        resp = auth_client.post('/api/factcheck/analyze', json={
+            'text': 'The moon is made of green cheese and orbits earth.'
+        })
+
+        assert resp.status_code == 403
+        data = resp.get_json()
+        assert 'Insufficient tokens' in data.get('error', '')
+
+    def test_zero_balance_cannot_execute_ai_detection(self, auth_client, test_user, db_session_fixture):
+        """User with 0 CP must be blocked from running AI text detection."""
+        from backend.models import TokenBalance
+
+        tb = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).first()
+        tb.balance = 0
+        tb.unbilled_words = 0
+        db_session_fixture.commit()
+
+        resp = auth_client.post('/api/factcheck/analyze-ai', json={
+            'text': 'This is a comprehensive sample text containing plenty of authentic words to easily pass the minimum twenty word requirement for forensic detection analysis testing.'
+        })
+
+        assert resp.status_code == 402
+        data = resp.get_json()
+        assert 'Insufficient tokens' in data.get('error', '')
+
+    def test_oversized_payload_rejected(self, auth_client):
+        """Text payloads exceeding 50,000 characters must be rejected."""
+        huge_text = "a" * 50001
+        resp = auth_client.post('/api/factcheck/analyze', json={
+            'text': huge_text
+        })
+        assert resp.status_code == 400
+        assert 'exceeds maximum limit' in resp.get_json().get('error', '')
+
