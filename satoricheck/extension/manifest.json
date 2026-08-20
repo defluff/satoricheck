@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Authenix – Live Fact & AI Checker",
-  "description": "Verify factual claims and detect AI-generated text instantly. Select text, right-click, verify.",
+  "description": "Digital content authenticity and fact verification assistant. Verify factual claims, detect AI-generated text, and inspect sources.",
   "version": "0.2.0",
   "minimum_chrome_version": "114",
   "permissions": [
