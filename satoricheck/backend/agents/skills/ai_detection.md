@@ -66,13 +66,20 @@ Models drastically overuse specific words to simulate sophistication:
 
 ---
 
+## 8. Anti-Hallucination & Temporal Anchoring Rules (CRITICAL)
+*   **Temporal References & Dates**: Evaluate all calendar dates relative to `Today's Date` provided in the prompt context. Past dates (e.g., "June 2025" or past years relative to today's date) are standard historical/news facts. **NEVER flag valid past or present calendar dates as temporal logic errors or AI hallucinations.**
+*   **Journalistic Reporting Exemption**: Professional news articles (BBC, Reuters, AP, etc.) standardly feature inverted pyramid structures, attributed quotes, official stats, and balanced counter-arguments. **Do NOT misclassify standard human journalism as formulaic AI templates.**
+*   **Evidence Integrity**: Only output markers that are demonstrably present in the text. Never invent non-existent logical errors.
+
+---
+
 ## Decision Matrix & Confidence Scoring
 1.  **Analyze Statistical & Provenance Signals**: Look for statistical token biasing, perplexity uniformity, and burstiness cadence. Factor in whether the text has undergone translation or paraphrasing.
 2.  **Scan Surface & Syntactic Patterns**: Check for the Buzzword Blacklist, transition overloads, em-dash overuse, and symmetrical paragraphing.
-3.  **Check Factual Granularity**: Cross-reference citations and check for sensory/grounded human specifics.
+3.  **Check Factual Granularity & Temporal Consistency**: Cross-reference dates against Today's Date. Verify citations and sensory/grounded human specifics.
 4.  **Short Text Constraint**: If the input is under ~3 sentences, statistical and structural metrics lose reliability. Explicitly lower the "confidence" to "LOW" or "MEDIUM".
 5.  **Score**:
-    *   **0-30%**: Likely Human (flaws, personal voice, authentic variance, niche human context).
+    *   **0-30%**: Likely Human (flaws, personal voice, authentic variance, niche human context, journalistic news style).
     *   **31-69%**: Ambiguous (mixed signals, heavily edited AI, or professional human copy).
     *   **70-100%**: Highly Likely AI (uniform cadence, statistical token alignment, sterile structure, clinical tone).
 

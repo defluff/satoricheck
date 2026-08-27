@@ -35,20 +35,25 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     const selectedText = (info.selectionText || '').trim().slice(0, 10000);
     if (!selectedText) return;
 
-    // Persist for READY handshake — storage.session survives SW termination
-    await chrome.storage.session.set({ pendingSelection: selectedText });
+    const payload = { text: selectedText, timestamp: Date.now() };
+
+    // Persist for reactive storage listener & READY handshake
+    await chrome.storage.session.set({
+        pendingSelection: selectedText,
+        activeSelection: payload
+    });
 
     try {
         await chrome.sidePanel.open({ tabId: tab.id });
 
-        // Fast path: if panel is already open its listener receives this directly
+        // Fast path: broadcast message to open sidepanel views
         chrome.runtime.sendMessage({
             type: 'FACTCHECK_SELECTION',
             text: selectedText,
         }).then(() => {
             chrome.storage.session.remove('pendingSelection');
         }).catch(() => {
-            // Panel not ready yet — SIDE_PANEL_READY handshake will deliver
+            // Panel not ready yet — activeSelection storage listener or SIDE_PANEL_READY handshake will deliver
         });
     } catch (error) {
         console.error('[Authenix] Failed to open side panel:', error);

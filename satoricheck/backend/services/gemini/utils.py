@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+from datetime import datetime, UTC
 from google.genai import types
 from backend.services.gemini.client import GeminiServiceClient
 
@@ -280,9 +281,13 @@ Go through the text SENTENCE BY SENTENCE, keeping the context of the whole text.
         )
             
         config = types.GenerateContentConfig(system_instruction=system_instruction)
+        current_date_str = datetime.now(UTC).strftime('%B %d, %Y')
 
         prompt = f"""TASK:
 Analyze the text below and determine if it was written by an AI language model (like ChatGPT, Claude, Gemini) or by a human.
+
+CONTEXT:
+Today's Date: {current_date_str}
 
 TEXT TO ANALYZE:
 \"\"\"
@@ -291,8 +296,9 @@ TEXT TO ANALYZE:
 
 INSTRUCTIONS:
 1. Apply the Forensic Guidelines from the manual.
-2. Be decisive. Avoid middle-ground probabilities like 50% unless truly ambiguous.
-3. Identify specific markers (linguistic, structural, lexical) found in THIS text.
+2. IMPORTANT: Evaluate date references relative to Today's Date ({current_date_str}). References to past calendar years or months are standard facts, NOT temporal hallucinations.
+3. Be decisive. Avoid middle-ground probabilities like 50% unless truly ambiguous.
+4. Identify specific markers (linguistic, structural, lexical) found in THIS text.
 
 RESPOND WITH JSON ONLY:
 {{

@@ -440,21 +440,26 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 6px;
+    gap: 8px;
     margin-bottom: 8px;
 }
 
-.sp-badges-group {
+.sp-badges-left {
     display: flex;
     align-items: center;
     gap: 6px;
-    flex-wrap: wrap;
+}
+
+.sp-badges-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
 }
 
 .sp-card-time {
     font-size: 0.68rem;
     color: var(--text-muted);
-    margin-left: auto;
 }
 
 /* Verdict Badges */
@@ -510,11 +515,17 @@ body {
     transition: max-height 0.3s ease, margin-top 0.25s ease;
 }
 
+.sp-card.expanded {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
 .sp-card.expanded .sp-card-details {
     max-height: 900px;
     margin-top: 10px;
     padding-top: 10px;
-    border-top: 1px solid var(--border-subtle);
+    border-top: 1px solid #e2e8f0;
 }
 
 /* Section Blocks (Claim Check vs AI Forensics) */

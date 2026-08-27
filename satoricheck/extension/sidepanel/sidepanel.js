@@ -58,16 +58,33 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await loadUserInfo();
 
-    // Handshake: pick up queued selection from right-click context menu
-    chrome.runtime.sendMessage({ type: 'SIDE_PANEL_READY' }, (response) => {
-        if (response?.text) {
-            inputText.value = response.text;
+    // 1. Reactive storage listener for instant push when side panel is open
+    try {
+        chrome.storage.session.onChanged.addListener((changes) => {
+            if (changes.activeSelection?.newValue?.text) {
+                const text = changes.activeSelection.newValue.text;
+                if (text && text !== inputText.value) {
+                    inputText.value = text;
+                    updateInputState();
+                    handleVerify();
+                }
+            }
+        });
+
+        // 2. Check for recent active selection on open
+        const sessionData = await chrome.storage.session.get(['activeSelection', 'pendingSelection']);
+        const initialText = sessionData.activeSelection?.text || sessionData.pendingSelection;
+        if (initialText && (!sessionData.activeSelection?.timestamp || (Date.now() - sessionData.activeSelection.timestamp < 15000))) {
+            inputText.value = initialText;
             updateInputState();
             handleVerify();
+            chrome.storage.session.remove(['activeSelection', 'pendingSelection']);
         }
-    });
+    } catch (err) {
+        console.warn('[Authenix] Session storage access warning:', err);
+    }
 
-    // Fast path: receives selection directly if side panel was already open
+    // 3. Fallback Handshake message listener
     chrome.runtime.onMessage.addListener((message) => {
         if (message.type === 'FACTCHECK_SELECTION' && message.text) {
             inputText.value = message.text;
@@ -278,12 +295,14 @@ function createPendingCard(text, mode) {
 
     card.innerHTML = `
         <div class="sp-card-header">
-            <div class="sp-badges-group">
+            <div class="sp-badges-left">
                 <span class="sp-verdict PENDING">
                     <span class="sp-spinner"></span> ${modeBadgeLabel}…
                 </span>
             </div>
-            <span class="sp-card-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            <div class="sp-badges-right">
+                <span class="sp-card-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            </div>
         </div>
         <p class="sp-claim-text">"${escapeHtml(preview)}"</p>
         <div class="sp-card-details"></div>
@@ -299,16 +318,18 @@ function updateCardWithResult(cardId, data) {
     if (!card) return;
 
     card.classList.remove('pending');
-    const headerBadges = card.querySelector('.sp-badges-group');
+    const headerLeft = card.querySelector('.sp-badges-left');
+    const headerRight = card.querySelector('.sp-badges-right');
     const detailsContainer = card.querySelector('.sp-card-details');
 
-    let badgesHtml = '';
+    let leftBadgesHtml = '';
+    let rightBadgesHtml = '';
     let detailsHtml = '';
 
     // 1. Claims Verdict Badge & Analysis Block (for 'both' or 'claims' mode)
     if (data.claims) {
         const verdict = data.claims.verdict || 'NOT_VERIFIED';
-        badgesHtml += `<span class="sp-verdict ${verdict}">${verdict.replace(/_/g, ' ')}</span>`;
+        leftBadgesHtml += `<span class="sp-verdict ${verdict}">${verdict.replace(/_/g, ' ')}</span>`;
 
         let claimSectionInner = '';
         if (data.claims.explanation) {
@@ -335,6 +356,7 @@ function updateCardWithResult(cardId, data) {
             <div class="sp-section-block sp-claim-block">
                 <div class="sp-section-header">
                     <span class="sp-section-title">🔍 Claim Check</span>
+                    <span class="sp-verdict ${verdict}">${verdict.replace(/_/g, ' ')}</span>
                 </div>
                 ${claimSectionInner}
             </div>
@@ -344,14 +366,14 @@ function updateCardWithResult(cardId, data) {
     // 2. AI Probability Pill & Forensics Block (for 'both' or 'ai' mode)
     if (data.ai) {
         if (data.ai.skipped) {
-            badgesHtml += `<span class="sp-ai-pill ai-short" title="${escapeHtml(data.ai.reason)}">🤖 Short (&lt;${MIN_AI_WORDS}w)</span>`;
+            rightBadgesHtml += `<span class="sp-ai-pill ai-short" title="${escapeHtml(data.ai.reason)}">🤖 Short (&lt;${MIN_AI_WORDS}w)</span>`;
         } else {
             const prob = data.ai.ai_probability ?? 50;
             const conf = data.ai.confidence || 'MED';
             const pillClass = prob >= 70 ? 'ai-high' : prob >= 40 ? 'ai-med' : 'ai-low';
             const probLabel = prob >= 70 ? `${prob}% AI Likely` : prob <= 30 ? `${100 - prob}% Human` : `${prob}% AI Prob`;
 
-            badgesHtml += `<span class="sp-ai-pill ${pillClass}">🤖 ${probLabel}</span>`;
+            rightBadgesHtml += `<span class="sp-ai-pill ${pillClass}">🤖 ${probLabel}</span>`;
 
             // Forensics breakdown box
             const aiIndicators = (data.ai.ai_indicators || []).slice(0, 3);
@@ -376,7 +398,10 @@ function updateCardWithResult(cardId, data) {
         }
     }
 
-    headerBadges.innerHTML = badgesHtml;
+    rightBadgesHtml += `<span class="sp-card-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>`;
+
+    if (headerLeft) headerLeft.innerHTML = leftBadgesHtml;
+    if (headerRight) headerRight.innerHTML = rightBadgesHtml;
     detailsContainer.innerHTML = detailsHtml;
 
     // Card expand toggle
