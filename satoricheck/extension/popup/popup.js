@@ -101,13 +101,15 @@ function setupEventListeners() {
         showDisconnectedState();
     });
 
-    // CP badge checkout
+    // CP badge top-up trigger (opens Sidepanel top-up modal)
     balanceBadge?.addEventListener('click', async () => {
         try {
-            const result = await createCheckout();
-            if (result?.url) {
-                chrome.tabs.create({ url: result.url });
+            await chrome.storage.local.set({ authenix_open_topup: true });
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (tab) {
+                await chrome.sidePanel.open({ windowId: tab.windowId });
             }
+            window.close();
         } catch {
             chrome.tabs.create({ url: 'https://satoricheck-829698588154.europe-west6.run.app' });
         }

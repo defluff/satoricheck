@@ -35,6 +35,8 @@ const verifyBtn = document.getElementById('sp-verify-btn');
 const resultsFeed = document.getElementById('sp-results');
 const lowBalanceBar = document.getElementById('sp-low-balance');
 const buyLink = document.getElementById('sp-buy-link');
+const topupModalOverlay = document.getElementById('sp-topup-modal-overlay');
+const topupModalClose = document.getElementById('sp-modal-close');
 
 // --- State ---
 let cardCounter = 0;
@@ -57,6 +59,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     await loadUserInfo();
+
+    // Auto-open top-up modal if requested (e.g. from popup click)
+    try {
+        chrome.storage.local.get('authenix_open_topup', (res) => {
+            if (res?.authenix_open_topup) {
+                chrome.storage.local.remove('authenix_open_topup');
+                openTopupModal();
+            }
+        });
+    } catch {
+        // Ignore storage errors
+    }
 
     // 1. Reactive storage listener for instant push when side panel is open
     try {
@@ -220,9 +234,32 @@ function setupEventListeners() {
         }
     });
 
-    // Stripe checkout triggers
-    balanceEl.addEventListener('click', () => triggerCheckout());
-    buyLink.addEventListener('click', () => triggerCheckout());
+    // Stripe checkout triggers (opens modal)
+    balanceEl?.addEventListener('click', () => openTopupModal());
+    buyLink?.addEventListener('click', () => openTopupModal());
+
+    // Modal close & click outside handlers
+    topupModalClose?.addEventListener('click', () => closeTopupModal());
+    topupModalOverlay?.addEventListener('click', (e) => {
+        if (e.target === topupModalOverlay) closeTopupModal();
+    });
+
+    // Modal package card purchase handlers
+    topupModalOverlay?.querySelectorAll('.sp-pkg-btn').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const pkg = btn.dataset.package;
+            handlePackageCheckout(pkg, btn);
+        });
+    });
+
+    topupModalOverlay?.querySelectorAll('.sp-pkg-card').forEach((card) => {
+        card.addEventListener('click', (e) => {
+            const pkg = card.dataset.package;
+            const btn = card.querySelector('.sp-pkg-btn');
+            handlePackageCheckout(pkg, btn);
+        });
+    });
 }
 
 function updateModeButtonsUI(activeMode) {
@@ -455,14 +492,41 @@ function showRateLimitCountdown(btn, defaultLabel, seconds = 60) {
     tick();
 }
 
-async function triggerCheckout() {
+function openTopupModal() {
+    if (topupModalOverlay) {
+        topupModalOverlay.classList.remove('hidden');
+    }
+}
+
+function closeTopupModal() {
+    if (topupModalOverlay) {
+        topupModalOverlay.classList.add('hidden');
+    }
+}
+
+async function handlePackageCheckout(packageType = 'battery_medium', btnEl = null) {
+    const originalText = btnEl ? btnEl.textContent : '';
+    if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.textContent = '...';
+    }
+
     try {
-        const result = await createCheckout();
+        const result = await createCheckout(packageType);
         if (result?.url) {
             chrome.tabs.create({ url: result.url });
+            closeTopupModal();
+        } else {
+            chrome.tabs.create({ url: 'https://satoricheck-829698588154.europe-west6.run.app' });
         }
-    } catch {
+    } catch (err) {
+        console.error('Checkout failed:', err);
         chrome.tabs.create({ url: 'https://satoricheck-829698588154.europe-west6.run.app' });
+    } finally {
+        if (btnEl) {
+            btnEl.disabled = false;
+            btnEl.textContent = originalText;
+        }
     }
 }
 

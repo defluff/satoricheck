@@ -96,6 +96,68 @@
         <button id="sp-buy-link" class="sp-low-balance-btn">Top up CP →</button>
     </div>
 
+    <!-- Recharge / Top-Up CP Modal Overlay -->
+    <div id="sp-topup-modal-overlay" class="sp-modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="sp-modal-title">
+        <div class="sp-modal-container">
+            <div class="sp-modal-header">
+                <div>
+                    <h3 id="sp-modal-title">Recharge Check Points</h3>
+                    <p class="sp-modal-subtitle">1 CP = 1,250 words analyzed (~5–8 standard checks)</p>
+                </div>
+                <button id="sp-modal-close" class="sp-modal-close-btn" aria-label="Close modal">✕</button>
+            </div>
+
+            <div class="sp-package-grid">
+                <!-- Small Battery -->
+                <div class="sp-pkg-card" data-package="battery_small">
+                    <div class="sp-pkg-icon">🔋</div>
+                    <div class="sp-pkg-info">
+                        <h4 class="sp-pkg-title">Small Battery</h4>
+                        <div class="sp-pkg-capacity">86 CP</div>
+                        <div class="sp-pkg-subcaption">~500 checks (107k words)</div>
+                    </div>
+                    <div class="sp-pkg-action">
+                        <span class="sp-pkg-price">4.50 CHF</span>
+                        <button class="sp-pkg-btn" data-package="battery_small">Buy</button>
+                    </div>
+                </div>
+
+                <!-- Medium Battery (Featured) -->
+                <div class="sp-pkg-card sp-pkg-featured" data-package="battery_medium">
+                    <div class="sp-pkg-badge">Best Value</div>
+                    <div class="sp-pkg-icon">🔋🔋</div>
+                    <div class="sp-pkg-info">
+                        <h4 class="sp-pkg-title">Medium Battery</h4>
+                        <div class="sp-pkg-capacity">486 CP</div>
+                        <div class="sp-pkg-subcaption">~2,800 checks (607k words)</div>
+                    </div>
+                    <div class="sp-pkg-action">
+                        <span class="sp-pkg-price">24.00 CHF</span>
+                        <button class="sp-pkg-btn sp-pkg-btn-primary" data-package="battery_medium">Buy</button>
+                    </div>
+                </div>
+
+                <!-- Large Battery -->
+                <div class="sp-pkg-card" data-package="battery_large">
+                    <div class="sp-pkg-icon">⚡</div>
+                    <div class="sp-pkg-info">
+                        <h4 class="sp-pkg-title">Large Battery</h4>
+                        <div class="sp-pkg-capacity">2,222 CP</div>
+                        <div class="sp-pkg-subcaption">~13,000 checks (2.7M words)</div>
+                    </div>
+                    <div class="sp-pkg-action">
+                        <span class="sp-pkg-price">99.00 CHF</span>
+                        <button class="sp-pkg-btn" data-package="battery_large">Buy</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sp-modal-footer">
+                <span>🔒 Instant Delivery · Secured by Stripe</span>
+            </div>
+        </div>
+    </div>
+
     <!-- Vendor & Main Scripts -->
     <script src="../vendor/dompurify.min.js"></script>
     <script src="sidepanel.js" type="module"></script>
