@@ -425,124 +425,88 @@ RAW VISION OUTPUT (Full Text):
         
         # Use verifiable_claims if provided (new structured format)
         if verifiable_claims and isinstance(verifiable_claims, list):
-            logger.info(f"[Pitchdeck] Processing {len(verifiable_claims)} verifiable claims")
-            # Limit to 5 claims to avoid rate limits and long waits
-            for i, claim_obj in enumerate(verifiable_claims[:5]):
-                # logger.info(f"[Pitchdeck] Claim {i}: type={type(claim_obj)}, value={str(claim_obj)[:100]}")
-                if not isinstance(claim_obj, dict):
-                    logger.warning(f"[Pitchdeck] Skipping claim {i}: not a dict")
-                    continue
-                    
-                claim_text = claim_obj.get("claim", "")
-                category = claim_obj.get("category", "other")
-                source_cited = claim_obj.get("source_cited")
-                # NEW: Extract context to help the agent
-                claim_context = claim_obj.get("context", "")
-                
-                logger.info(f"[Pitchdeck] Claim {i}: text='{claim_text[:50]}...', context='{claim_context[:50]}...'")
-                
-                if not claim_text or len(claim_text) < 5:
-                    logger.warning(f"[Pitchdeck] Skipping claim {i}: too short")
-                    continue
-                
-                try:
-                    logger.info(f"[Pitchdeck] Verifying claim ({category}): {claim_text[:60]}...")
-                    
-                    # Construct rich input for the agent so it has full context
-                    # This solves the issue of "single claim lacking context"
-                    analysis_payload = f"""Claim: "{claim_text}"
-Context from Deck: {claim_context}
-Source Cited in Deck: {source_cited or 'None'}
-Industry: {industry_ctx}"""
-
-                    # ENABLE SMART AGENT OR CACHE
-                    # Unified call: always use analyze_claim with smart_agent=True
-                    # Pass cache_name if available - backend handles mixing Thinking + Cache
-                    result = gemini_svc.analyze_claim(
-                        analysis_payload, 
-                        smart_agent=True, 
-                        cache_name=cache_name
-                    )
-                    
-                    findings.append({
-                        "claim_type": category,
-                        "original_claim": claim_text,
-                        "source_cited": source_cited,
-                        "verdict": result.get("verdict", "UNVERIFIED"),
-                        "explanation": result.get("explanation", ""),
-                        "sources": result.get("sources", [])[:3]
-                    })
-                except Exception as e:
-                    logger.warning(f"[Pitchdeck] Failed to verify claim: {e}")
-                    findings.append({
-                        "claim_type": category,
-                        "original_claim": claim_text,
-                        "source_cited": source_cited,
-                        "verdict": "UNVERIFIED",
-                        "explanation": "Verification unavailable",
-                        "sources": []
-                    })
+            valid_claims = [
+                c for c in verifiable_claims[:5]
+                if isinstance(c, dict) and c.get("claim") and len(c.get("claim", "")) >= 5
+            ]
             
+            if not valid_claims:
+                logger.info("[Pitchdeck] No valid verifiable claims to process")
+                return []
+
+            logger.info(f"[Pitchdeck] Batch processing {len(valid_claims)} verifiable claims in single call")
+            
+            # Format payload for each claim with embedded context
+            batch_inputs = []
+            for c in valid_claims:
+                claim_text = c.get("claim", "")
+                cat = c.get("category", "other")
+                source_cited = c.get("source_cited") or "None"
+                claim_ctx = c.get("context", "")
+                batch_inputs.append(
+                    f'"{claim_text}" (Category: {cat}, Context: {claim_ctx}, Source cited: {source_cited})'
+                )
+
+            try:
+                batch_results = gemini_svc.analyze_claims_batch(
+                    batch_inputs,
+                    context=f"Startup Industry Vertical: {industry_ctx}",
+                    cache_name=cache_name
+                )
+            except Exception as e:
+                logger.warning(f"[Pitchdeck] Batch verification failed: {e}")
+                batch_results = []
+
+            for i, c in enumerate(valid_claims):
+                res = batch_results[i] if i < len(batch_results) and batch_results[i] else {}
+                findings.append({
+                    "claim_type": c.get("category", "other"),
+                    "original_claim": c.get("claim", ""),
+                    "source_cited": c.get("source_cited"),
+                    "slide_number": c.get("slide_number"),
+                    "verdict": res.get("verdict", "UNVERIFIED"),
+                    "explanation": res.get("explanation", "Verification unavailable"),
+                    "sources": res.get("sources", [])[:3]
+                })
+
             logger.info(f"[Pitchdeck] Verification complete: {len(findings)} findings")
             return findings
         
-        # Fallback: Use legacy market_size / competition format
-        if market_size and market_size.lower() not in ['null', 'not mentioned', 'n/a', '']:
-            try:
-                claim = f"The {industry_ctx} market size is {market_size}"
-                logger.info(f"[Pitchdeck] Verifying market size: {claim[:80]}...")
-                
-                if cache_name:
-                    prompt = f"Claim: {claim}\nContext: Validate this market size claim against the deck context."
-                    result = gemini_svc.analyze_claim(prompt, smart_agent=True, cache_name=cache_name)
-                else:
-                    result = gemini_svc.analyze_claim(claim, smart_agent=True)
-                
-                findings.append({
-                    "claim_type": "market_size",
-                    "original_claim": market_size,
-                    "verdict": result.get("verdict", "UNVERIFIED"),
-                    "explanation": result.get("explanation", ""),
-                    "sources": result.get("sources", [])[:3]
-                })
-            except Exception as e:
-                logger.warning(f"[Pitchdeck] Failed to verify market size: {e}")
-                findings.append({
-                    "claim_type": "market_size",
-                    "original_claim": market_size,
-                    "verdict": "UNVERIFIED",
-                    "explanation": "Verification unavailable",
-                    "sources": []
-                })
+        # Fallback: Use legacy market_size / competition format (batch together if both exist)
+        legacy_claims = []
+        legacy_meta = []
         
-        # Fallback: Verify competitors
+        if market_size and market_size.lower() not in ['null', 'not mentioned', 'n/a', '']:
+            legacy_claims.append(f"The {industry_ctx} market size is {market_size}")
+            legacy_meta.append({"claim_type": "market_size", "original_claim": market_size})
+            
         if competition and isinstance(competition, list):
             for competitor in competition[:3]:
-                if not competitor or not isinstance(competitor, str):
-                    continue
-                    
-                try:
-                    claim = f"{competitor} is a company operating in the {industry_ctx} industry"
-                    logger.info(f"[Pitchdeck] Verifying competitor: {competitor[:50]}...")
-                    
-                    result = gemini_svc.analyze_claim(claim)
-                    
-                    findings.append({
-                        "claim_type": "competitor",
-                        "original_claim": competitor,
-                        "verdict": result.get("verdict", "UNVERIFIED"),
-                        "explanation": result.get("explanation", ""),
-                        "sources": result.get("sources", [])[:2]
-                    })
-                except Exception as e:
-                    logger.warning(f"[Pitchdeck] Failed to verify competitor {competitor}: {e}")
-                    findings.append({
-                        "claim_type": "competitor",
-                        "original_claim": competitor,
-                        "verdict": "UNVERIFIED",
-                        "explanation": "Verification unavailable",
-                        "sources": []
-                    })
+                if competitor and isinstance(competitor, str):
+                    legacy_claims.append(f"{competitor} is a company operating in the {industry_ctx} industry")
+                    legacy_meta.append({"claim_type": "competitor", "original_claim": competitor})
+
+        if legacy_claims:
+            logger.info(f"[Pitchdeck] Batch verifying {len(legacy_claims)} legacy claims")
+            try:
+                batch_results = gemini_svc.analyze_claims_batch(
+                    legacy_claims,
+                    context=f"Startup Industry Vertical: {industry_ctx}",
+                    cache_name=cache_name
+                )
+            except Exception as e:
+                logger.warning(f"[Pitchdeck] Legacy batch verification failed: {e}")
+                batch_results = []
+
+            for i, meta in enumerate(legacy_meta):
+                res = batch_results[i] if i < len(batch_results) and batch_results[i] else {}
+                findings.append({
+                    "claim_type": meta["claim_type"],
+                    "original_claim": meta["original_claim"],
+                    "verdict": res.get("verdict", "UNVERIFIED"),
+                    "explanation": res.get("explanation", "Verification unavailable"),
+                    "sources": res.get("sources", [])[:3]
+                })
         
         logger.info(f"[Pitchdeck] Verification complete: {len(findings)} findings")
         return findings

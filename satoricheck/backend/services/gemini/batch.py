@@ -324,7 +324,13 @@ SOURCE DOCUMENT CONTEXT:
 ---
 """
         
-        return f"""CLAIMS TO ANALYZE:
+        from datetime import datetime, UTC
+        current_date_str = datetime.now(UTC).strftime('%B %d, %Y')
+        
+        return f"""CONTEXT:
+Today's Date: {current_date_str}
+
+CLAIMS TO ANALYZE:
 {claims_str}
 {context_block}
  

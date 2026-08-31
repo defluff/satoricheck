@@ -282,12 +282,15 @@ Go through the text SENTENCE BY SENTENCE, keeping the context of the whole text.
             
         config = types.GenerateContentConfig(system_instruction=system_instruction)
         current_date_str = datetime.now(UTC).strftime('%B %d, %Y')
+        word_count = len(text.split())
+        is_short_text_flag = word_count < 50
 
         prompt = f"""TASK:
 Analyze the text below and determine if it was written by an AI language model (like ChatGPT, Claude, Gemini) or by a human.
 
 CONTEXT:
 Today's Date: {current_date_str}
+Word Count: {word_count} ({'SHORT TEXT SAMPLE <50 words' if is_short_text_flag else 'Standard Length'})
 
 TEXT TO ANALYZE:
 \"\"\"
@@ -295,18 +298,20 @@ TEXT TO ANALYZE:
 \"\"\"
 
 INSTRUCTIONS:
-1. Apply the Forensic Guidelines from the manual.
+1. Apply the Domain & Register Calibration guidelines (Academic, Social, News, Literature, General).
 2. IMPORTANT: Evaluate date references relative to Today's Date ({current_date_str}). References to past calendar years or months are standard facts, NOT temporal hallucinations.
 3. Be decisive. Avoid middle-ground probabilities like 50% unless truly ambiguous.
-4. Identify specific markers (linguistic, structural, lexical) found in THIS text.
+4. Identify specific markers (linguistic, structural, lexical, register-specific) found in THIS text.
 
 RESPOND WITH JSON ONLY:
 {{
     "ai_probability": <0-100 integer>,
     "confidence": "HIGH" or "MEDIUM" or "LOW",
+    "detected_register": "academic" or "social" or "news" or "literature" or "general",
+    "is_short_text": {str(is_short_text_flag).lower()},
     "ai_indicators": ["specific markers found in the text"],
     "human_indicators": ["human traits found, if any"],
-    "explanation": "2 sentence verdict summarizing the findings"
+    "explanation": "2-3 sentence verdict summarizing findings and register calibration"
 }}"""
 
         try:
@@ -323,7 +328,10 @@ RESPOND WITH JSON ONLY:
                 if 'ai_probability' not in result:
                     result['ai_probability'] = 50
                 if 'confidence' not in result:
-                    result['confidence'] = 'LOW'
+                    result['confidence'] = 'LOW' if is_short_text_flag else 'MEDIUM'
+                if 'detected_register' not in result:
+                    result['detected_register'] = 'general'
+                result['is_short_text'] = bool(result.get('is_short_text', is_short_text_flag))
                 if 'ai_indicators' not in result:
                     result['ai_indicators'] = []
                 if 'human_indicators' not in result:
@@ -339,7 +347,7 @@ RESPOND WITH JSON ONLY:
                 result['ai_indicators'] = sanitize_indicators(result['ai_indicators'])
                 result['human_indicators'] = sanitize_indicators(result['human_indicators'])
                 
-                logger.info(f"AI Detection result: {result['ai_probability']}% AI probability")
+                logger.info(f"AI Detection result: {result['ai_probability']}% AI probability (Register: {result.get('detected_register')}, Short: {result['is_short_text']})")
                 return result
         except Exception as e:
             logger.error(f"AI detection failed: {e}", exc_info=True)
@@ -347,6 +355,8 @@ RESPOND WITH JSON ONLY:
         return {
             'ai_probability': 50,
             'confidence': 'LOW',
+            'detected_register': 'general',
+            'is_short_text': is_short_text_flag,
             'ai_indicators': [],
             'human_indicators': [],
             'explanation': 'Analysis failed.'

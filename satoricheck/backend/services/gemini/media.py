@@ -97,7 +97,15 @@ class GeminiServiceMedia(GeminiServiceClaims):
                 system_instruction=system_instruction
             )
             
-            prompt = "Conduct a rigorous multi-layered analysis of this media to determine its authenticity and respond with JSON matching the required schema."
+            is_video = 'video' in mime_type
+            is_audio = 'audio' in mime_type
+            media_context_hint = "video with audio track" if is_video else ("audio track" if is_audio else "static image")
+            
+            prompt = (
+                f"Conduct a rigorous multi-layered forensic analysis of this {media_context_hint} ({mime_type}). "
+                "Evaluate physical lighting/shadows, biometric features, video temporal continuity, audio/voice authenticity "
+                "(splicing, cloning, breath cadence), and compression markers. Respond with JSON matching the required schema."
+            )
 
             cache_name = self.create_cache(part)
             

@@ -106,6 +106,7 @@ Prioritise: market size, revenue, growth rates, ROI, customer metrics, cost savi
 **Rules**:
 - Maximum 10 claims. Prioritise the highest-stakes, most investor-critical ones.
 - Only include claims explicitly stated in the deck.
+- `slide_number`: The 1-based page/slide number where this claim is visually presented (or `null` if unknown).
 - `is_quantitative`: `true` if the claim contains a number, percentage, or growth rate.
 - `category` must be exactly one of:
   `market_size | revenue | growth_rate | roi | customer_count | cost_savings | competitor | technology | other`
@@ -118,7 +119,7 @@ Prioritise: market size, revenue, growth rates, ROI, customer metrics, cost savi
 3. Did I apply the Derived Metrics Rule where component inputs are both stated?
 4. Are all currency values verbatim from the deck (no conversion)?
 5. Are all `assessment` values from the permitted enum?
-6. Are `verifiable_claims` limited to what the deck actually states?
+6. Are `verifiable_claims` limited to what the deck actually states, with `slide_number` annotated?
 7. Are `red_flags` only based on absent or contradictory signals in the deck?
 8. Did I interpret charts, graphs, and tables — not just text?
 
@@ -144,6 +145,7 @@ Respond ONLY with valid JSON. No preamble, no trailing text, no markdown code fe
             "category": "market_size | revenue | growth_rate | roi | customer_count | cost_savings | competitor | technology | other",
             "source_cited": "Source mentioned in deck if any (e.g. 'Statista', 'Company data'). Null if none.",
             "is_quantitative": true,
+            "slide_number": 3,
             "context": "Brief context about where this claim appears (e.g. 'Market slide', 'Financial projections')"
         }
     ],

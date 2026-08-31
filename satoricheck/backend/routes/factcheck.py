@@ -559,6 +559,8 @@ def analyze_ai():
             'success': True,
             'ai_probability': result['ai_probability'],
             'confidence': result['confidence'],
+            'detected_register': result.get('detected_register', 'general'),
+            'is_short_text': result.get('is_short_text', False),
             'ai_indicators': result['ai_indicators'],
             'human_indicators': result['human_indicators'],
             'explanation': result['explanation'],

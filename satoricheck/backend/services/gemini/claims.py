@@ -59,7 +59,13 @@ before rendering your verdict."""
 
             system_instruction_full = f"{system_instruction}\n\n{tool_block}"
             
-            prompt = f"""CLAIM TO ANALYZE:
+            from datetime import datetime, UTC
+            current_date_str = datetime.now(UTC).strftime('%B %d, %Y')
+            
+            prompt = f"""CONTEXT:
+Today's Date: {current_date_str}
+
+CLAIM TO ANALYZE:
 "{text}"
 
 Verify the claim and respond with JSON matching the required schema."""
@@ -220,7 +226,13 @@ Verify the claim and respond with JSON matching the required schema."""
                     tools=[types.Tool(google_search=types.GoogleSearch())]
                 )
                 
-                prompt = f"""CLAIM TO ANALYZE:
+                from datetime import datetime, UTC
+                current_date_str = datetime.now(UTC).strftime('%B %d, %Y')
+                
+                prompt = f"""CONTEXT:
+Today's Date: {current_date_str}
+
+CLAIM TO ANALYZE:
 "{text}"
 
 Verify the claim and respond with JSON matching the required schema."""
