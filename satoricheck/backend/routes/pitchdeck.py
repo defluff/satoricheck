@@ -67,11 +67,15 @@ def analyze_pitch_deck():
             logger.warning(f"[Pitchdeck] Page count regex failed: {e}. Defaulting to 1 page.")
             page_count = 1
             
-        # 2. Calculate Cost (1 CP per 10 slides, Min 1)
+        if page_count > 100:
+            raise APIError('Pitch deck exceeds maximum allowed size (100 slides). Please upload core deck.', status_code=400)
+
+        # 2. Calculate Cost (1 CP per 10 slides, Min 1, Max 6 CP for up to 60 standard slides)
         # Examples: 8 slides -> 1 CP. 12 slides -> 2 CP. 55 slides -> 6 CP.
-        cost = max(1, math.ceil(page_count / 10))
+        effective_pages = min(page_count, 60)
+        cost = max(1, math.ceil(effective_pages / 10))
         
-        logger.info(f"[Pitchdeck] Pricing: {page_count} pages -> {cost} CP")
+        logger.info(f"[Pitchdeck] Pricing: {page_count} pages (effective {effective_pages}) -> {cost} CP")
 
         # 3. Check Balance
         if not user.token_balance:
@@ -171,13 +175,15 @@ def verify_market_claims():
         competition = data.get('competition', [])
         industry = data.get('industry')
         cache_name = data.get('cache_name')
+        company = data.get('company') or data.get('company_name')
+        summary = data.get('summary')
         
         # Validate at least one claim to verify
         if not verifiable_claims and not market_size and not competition:
             raise APIError('No claims to verify', status_code=400)
         
         user = request.current_user
-        logger.info(f"[Pitchdeck] Verify request - claims: {len(verifiable_claims)}, cache: {bool(cache_name)}")
+        logger.info(f"[Pitchdeck] Verify request - claims: {len(verifiable_claims)}, company: {company}, cache: {bool(cache_name)}")
         
         # --- PRICING: 1 CP flat per market verification ---
         from backend.database import db_session
@@ -202,7 +208,9 @@ def verify_market_claims():
                 market_size=market_size,
                 competition=competition,
                 industry=industry,
-                cache_name=cache_name
+                cache_name=cache_name,
+                company=company,
+                summary=summary
             )
         except Exception as e:
             # Refund on service failure

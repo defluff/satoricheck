@@ -64,6 +64,10 @@
     --bg-error-subtle: rgba(239, 68, 68, 0.08);
     --bg-warning-subtle: rgba(245, 158, 11, 0.1);
     --bg-warning-hover: rgba(245, 158, 11, 0.03);
+    --bg-purple-subtle: rgba(139, 92, 246, 0.12);
+    --color-purple: #7c3aed;
+    --bg-neutral-subtle: rgba(107, 114, 128, 0.1);
+    --color-neutral: #4b5563;
 
     /* Glows and Shadows (Navy Blue theme) */
     --glow-primary: rgba(0, 0, 128, 0.2);
@@ -127,6 +131,10 @@
     --bg-error-subtle: rgba(239, 68, 68, 0.1);
     --bg-warning-subtle: rgba(245, 158, 11, 0.15);
     --bg-warning-hover: rgba(245, 158, 11, 0.05);
+    --bg-purple-subtle: rgba(139, 92, 246, 0.2);
+    --color-purple: #a78bfa;
+    --bg-neutral-subtle: rgba(156, 163, 175, 0.15);
+    --color-neutral: #9ca3af;
 
     /* Glows and Shadows */
     --glow-primary: rgba(59, 130, 246, 0.4);

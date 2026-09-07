@@ -85,3 +85,28 @@
 .btn-link:hover {
     text-decoration: underline;
 }
+
+/* Tab button for segment switchers (reused across pitchdeck, media, etc.) */
+.btn-tab {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--color-text-secondary);
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+}
+
+.btn-tab:hover:not(.active) {
+    color: var(--color-text);
+    background: var(--color-surface-elevated);
+}
+
+.btn-tab.active {
+    background: var(--color-primary);
+    color: var(--color-primary-text, white);
+    box-shadow: var(--shadow-sm);
+}

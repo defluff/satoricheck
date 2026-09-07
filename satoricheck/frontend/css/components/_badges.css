@@ -118,3 +118,155 @@
     background: rgba(148, 163, 184, 0.15);
     color: #94a3b8;
 }
+
+/* ==========================================================================
+   Shared Utility Badges & Callouts (Reused across entire platform)
+   ========================================================================== */
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+    line-height: 1.3;
+}
+
+.badge-pill {
+    border-radius: 9999px;
+}
+
+.badge-count {
+    background: var(--color-primary);
+    color: var(--color-primary-text, white);
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 9999px;
+}
+
+/* Metric / Status Badge Variants */
+.badge-good,
+.badge-success {
+    background: var(--bg-success-subtle);
+    color: var(--color-success);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.badge-caution,
+.badge-warning {
+    background: var(--bg-warning-subtle);
+    color: var(--color-warning);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.badge-critical,
+.badge-error {
+    background: var(--bg-error-subtle);
+    color: var(--color-error);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.badge-info,
+.badge-primary {
+    background: var(--bg-primary-subtle);
+    color: var(--color-primary);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.badge-neutral {
+    background: var(--bg-neutral-subtle);
+    color: var(--color-neutral);
+    border: 1px solid rgba(107, 114, 128, 0.2);
+}
+
+.badge-purple {
+    background: var(--bg-purple-subtle);
+    color: var(--color-purple);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+}
+
+/* Slide / Context Tag */
+.badge-tag {
+    background: var(--color-surface-elevated);
+    color: var(--color-text-secondary);
+    border: 1px solid var(--color-border);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.badge-tag:hover {
+    color: var(--color-primary);
+    border-color: var(--color-primary);
+}
+
+/* Reusable Callouts (Red Flags, Security & Diligence Risks, Notices) */
+.callout-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.callout-item {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--bg-error-subtle);
+    border: 1px solid rgba(239, 68, 68, 0.18);
+    border-left: 3px solid rgba(239, 68, 68, 0.5);
+    border-radius: var(--radius-sm);
+    font-size: 0.82rem;
+    color: var(--color-text-secondary);
+    line-height: 1.45;
+}
+
+.callout-item::before {
+    content: '!';
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    min-width: 16px;
+    border-radius: 50%;
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: var(--color-error);
+    font-size: 0.65rem;
+    font-weight: 800;
+    margin-top: 1px;
+}
+
+.callout-item--critical {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.4);
+    border-left: 3px solid var(--color-error);
+    color: var(--color-text);
+    font-weight: 500;
+}
+
+.callout-item--critical::before {
+    background: var(--color-error);
+    border-color: var(--color-error);
+    color: white;
+}
+
+/* Privacy & Ephemeral Disclaimers */
+.callout-privacy {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-md);
+    color: var(--color-text-muted);
+    font-size: 0.75rem;
+    border-top: 1px solid var(--color-border);
+}

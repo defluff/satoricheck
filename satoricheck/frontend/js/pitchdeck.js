@@ -1,9 +1,12 @@
 /**
- * Pitch Deck Module
- * Handles view switching, PDF upload, and UI state for the Pitch Deck Analyst Workspace.
+ * Pitch Deck Module — Investor Workstation
  * 
- * Privacy-first approach: Files are read client-side using FileReader API.
- * Data stays in browser memory and is never uploaded to the server for storage.
+ * Interactive due-diligence workstation for early-stage investors:
+ * - Instant client-side PDF rendering (PDF.js) with 0ms visual delay.
+ * - Top Executive Dashboard: Company Summary, VC Lens Scorecard, and Red Flags.
+ * - Side-by-side Workstation: Crisp slide viewer canvas on the left, slide-mapped
+ *   claims with on-demand verification on the right.
+ * - Privacy-first: File remains in browser memory; never stored on disk.
  */
 
 import ui from './ui.js';
@@ -14,58 +17,101 @@ class PitchdeckModule {
         this.isActive = false;
         this.elements = {};
 
-        // Uploaded file state (client-side only, ephemeral)
+        // Ephemeral uploaded file state
         this.uploadedFile = null;
         this.uploadedFileData = null;
+
+        // PDF.js rendering state
+        this.pdfDoc = null;
+        this.currentSlide = 1;
+        this.totalSlides = 1;
+        this.zoomLevel = 1.0;
+        this.renderTask = null;
+
+        // Claims state
+        this.activeFilter = 'slide'; // 'slide' | 'all' | 'financials'
+        this.claimsBySlideMap = new Map();
+        this.extractedClaims = [];
+        this.globalDeckContext = null;
     }
 
     /**
-     * Initialize the module - wire up event listeners
+     * Initialize the module and cache DOM elements
      */
     init() {
-        // Cache DOM elements
         this.elements = {
+            // Views & Navigation
             navBtnFactcheck: document.getElementById('nav-factcheck-btn'),
             navBtnPitchdeck: document.getElementById('nav-pitchdeck-btn'),
             factcheckView: document.getElementById('factcheck-view'),
             pitchdeckView: document.getElementById('pitchdeck-view'),
+
+            // Upload Zone
             uploadZone: document.getElementById('pd-upload-zone'),
             fileInput: document.getElementById('pd-file-input'),
             uploadTitle: document.querySelector('.pd-upload-title'),
             uploadSubtitle: document.querySelector('.pd-upload-subtitle'),
             uploadedInfo: document.querySelector('.pd-uploaded-info'),
             uploadedFilename: document.querySelector('.pd-uploaded-filename'),
-            generateBtn: document.getElementById('pd-generate-btn')
+            uploadedPagesBadge: document.getElementById('pd-uploaded-pages-badge'),
+            generateBtn: document.getElementById('pd-generate-btn'),
+
+            // Slide Viewer Controls
+            prevSlideBtn: document.getElementById('pd-prev-slide-btn'),
+            nextSlideBtn: document.getElementById('pd-next-slide-btn'),
+            canvasPrevBtn: document.getElementById('pd-canvas-prev-btn'),
+            canvasNextBtn: document.getElementById('pd-canvas-next-btn'),
+            currentSlideNum: document.getElementById('pd-current-slide-num'),
+            totalSlidesNum: document.getElementById('pd-total-slides-num'),
+            zoomInBtn: document.getElementById('pd-zoom-in'),
+            zoomOutBtn: document.getElementById('pd-zoom-out'),
+            zoomFitBtn: document.getElementById('pd-zoom-fit'),
+            zoomVal: document.getElementById('pd-zoom-val'),
+            slideCanvas: document.getElementById('pd-slide-canvas'),
+            canvasWrapper: document.getElementById('pd-canvas-wrapper'),
+            canvasPlaceholder: document.getElementById('pd-canvas-placeholder'),
+
+            // Claims Desk Controls
+            activeSlideBadge: document.getElementById('pd-active-slide-badge'),
+            slideClaimsCount: document.getElementById('pd-slide-claims-count'),
+            checkSlideBtn: document.getElementById('pd-check-slide-btn'),
+            checkAllBtn: document.getElementById('pd-check-all-btn'),
+            filterTabs: document.getElementById('pd-claims-filter-tabs'),
+            claimsCard: document.getElementById('pd-claims-card'),
+            claimsHeaderTitle: document.getElementById('pd-claims-header-title'),
+            claimsList: document.getElementById('pd-claims-list'),
+            claimsPlaceholder: document.getElementById('pd-claims-placeholder')
         };
 
-        // Check if pitchdeck elements exist
         if (!this.elements.pitchdeckView) {
-            console.warn('[Pitchdeck] Module elements not found in DOM');
+            console.warn('[Pitchdeck] Pitchdeck view not found in DOM');
             return;
+        }
+
+        // Configure PDF.js worker if available
+        if (window.pdfjsLib) {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
         }
 
         this.setupEventListeners();
     }
 
     /**
-     * Set up event listeners for navigation and upload interactions
+     * Attach event listeners
      */
     setupEventListeners() {
-        // Upload zone - click to trigger file picker
+        // Upload zone click & file select
         if (this.elements.uploadZone && this.elements.fileInput) {
             this.elements.uploadZone.addEventListener('click', () => {
                 this.elements.fileInput.click();
             });
 
-            // File input change handler
             this.elements.fileInput.addEventListener('change', (e) => {
                 const file = e.target.files?.[0];
-                if (file) {
-                    this.handleFileUpload(file);
-                }
+                if (file) this.handleFileUpload(file);
             });
 
-            // Drag and drop handlers
+            // Drag and drop
             this.elements.uploadZone.addEventListener('dragover', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -82,57 +128,367 @@ class PitchdeckModule {
                 e.preventDefault();
                 e.stopPropagation();
                 this.elements.uploadZone.classList.remove('dragover');
-
                 const file = e.dataTransfer?.files?.[0];
-                if (file) {
-                    this.handleFileUpload(file);
-                }
+                if (file) this.handleFileUpload(file);
             });
         }
 
-        // Generate Overview button - triggers analysis
+        // Generate Overview button
         this.elements.generateBtn?.addEventListener('click', () => {
             this.startAnalysis();
         });
 
-        // Claims list event delegation
-        const claimsList = document.getElementById('pd-claims-list');
-        if (claimsList) {
-            console.log('[Pitchdeck] Added event listener to claims list');
-            claimsList.addEventListener('click', (e) => {
-                console.log('[Pitchdeck] Click on claims list:', e.target);
-                const btn = e.target.closest('.pd-claim-check-btn');
-                if (btn) {
-                    console.log('[Pitchdeck] Check button clicked:', btn);
-                    if (!btn.disabled) {
-                        const index = parseInt(btn.dataset.claimIndex, 10);
-                        console.log('[Pitchdeck] Claim index:', index);
-                        if (!isNaN(index)) {
-                            this.verifySingleClaim(index);
-                        } else {
-                            console.error('[Pitchdeck] Invalid claim index');
-                        }
-                    } else {
-                        console.log('[Pitchdeck] Button disabled');
+        // Slide navigation buttons (Toolbar & On-Canvas)
+        this.elements.prevSlideBtn?.addEventListener('click', () => {
+            this.goToSlide(this.currentSlide - 1);
+        });
+
+        this.elements.nextSlideBtn?.addEventListener('click', () => {
+            this.goToSlide(this.currentSlide + 1);
+        });
+
+        this.elements.canvasPrevBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.goToSlide(this.currentSlide - 1);
+        });
+
+        this.elements.canvasNextBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.goToSlide(this.currentSlide + 1);
+        });
+
+        // Zoom controls
+        this.elements.zoomInBtn?.addEventListener('click', () => {
+            this.setZoom(this.zoomLevel + 0.2);
+        });
+
+        this.elements.zoomOutBtn?.addEventListener('click', () => {
+            this.setZoom(this.zoomLevel - 0.2);
+        });
+
+        this.elements.zoomFitBtn?.addEventListener('click', () => {
+            this.setZoom(1.0);
+        });
+
+        // Keyboard arrow navigation
+        window.addEventListener('keydown', (e) => {
+            if (!this.isActive || !this.pdfDoc) return;
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            if (e.key === 'ArrowLeft') {
+                this.goToSlide(this.currentSlide - 1);
+            } else if (e.key === 'ArrowRight') {
+                this.goToSlide(this.currentSlide + 1);
+            }
+        });
+
+        // Claims filter tabs
+        this.elements.filterTabs?.addEventListener('click', (e) => {
+            const btn = e.target.closest('.pd-tab-btn');
+            if (btn && btn.dataset.filter) {
+                this.elements.filterTabs.querySelectorAll('.pd-tab-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.activeFilter = btn.dataset.filter;
+                this.renderFilteredClaims();
+            }
+        });
+
+        // Verify Slide claims button
+        this.elements.checkSlideBtn?.addEventListener('click', () => {
+            this.verifyCurrentSlideClaims();
+        });
+
+        // Check all claims button
+        this.elements.checkAllBtn?.addEventListener('click', () => {
+            this.checkAllClaims();
+        });
+
+        // Claims list event delegation (Check claim button OR jump to slide)
+        if (this.elements.claimsList) {
+            this.elements.claimsList.addEventListener('click', async (e) => {
+                const checkBtn = e.target.closest('.pd-claim-check-btn');
+                if (checkBtn && !checkBtn.disabled) {
+                    const index = parseInt(checkBtn.dataset.claimIndex, 10);
+                    if (!isNaN(index)) {
+                        this.verifySingleClaim(index);
+                    }
+                    return;
+                }
+
+                // If user clicks anywhere on a claim card or slide tag
+                const card = e.target.closest('.pd-claim-card');
+                if (card && card.dataset.slide) {
+                    const slideNum = parseInt(card.dataset.slide, 10);
+                    if (!isNaN(slideNum)) {
+                        this.elements.claimsList.querySelectorAll('.pd-claim-card').forEach(c => c.classList.remove('selected-claim'));
+                        card.classList.add('selected-claim');
+                        await this.goToSlide(slideNum);
                     }
                 }
-            });
-        } else {
-            console.error('[Pitchdeck] Claims list container not found during init');
-        }
-
-        // Check All Button
-        const checkAllBtn = document.getElementById('pd-check-all-btn');
-        if (checkAllBtn) {
-            checkAllBtn.addEventListener('click', () => {
-                this.checkAllClaims();
             });
         }
     }
 
     /**
-     * Start the PDF analysis by calling the backend API.
-     * Shows loading state and displays results when complete.
+     * Ensure the PDF.js library script is loaded in window and worker configured
+     */
+    async ensurePdfJsLibLoaded() {
+        if (window.pdfjsLib) {
+            if (!window.pdfjsLib.GlobalWorkerOptions?.workerSrc) {
+                window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+            }
+            return true;
+        }
+
+        return new Promise((resolve) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+            script.onload = () => {
+                if (window.pdfjsLib) {
+                    window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+                    resolve(true);
+                } else {
+                    resolve(false);
+                }
+            };
+            script.onerror = () => {
+                const fallbackScript = document.createElement('script');
+                fallbackScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+                fallbackScript.onload = () => {
+                    if (window.pdfjsLib) {
+                        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                        resolve(true);
+                    } else {
+                        resolve(false);
+                    }
+                };
+                fallbackScript.onerror = () => resolve(false);
+                document.head.appendChild(fallbackScript);
+            };
+            document.head.appendChild(script);
+        });
+    }
+
+    /**
+     * Ensure PDF.js is ready and the uploaded PDF is parsed into this.pdfDoc
+     */
+    async ensurePdfLoaded() {
+        if (this.pdfDoc) return true;
+
+        const libReady = await this.ensurePdfJsLibLoaded();
+        if (!libReady || !window.pdfjsLib) {
+            console.error('[Pitchdeck] PDF.js library could not be loaded');
+            return false;
+        }
+
+        try {
+            let dataBuffer = null;
+            if (this.uploadedFile) {
+                dataBuffer = await this.uploadedFile.arrayBuffer();
+            } else if (this.uploadedFileData) {
+                const binaryStr = atob(this.uploadedFileData);
+                const bytes = new Uint8Array(binaryStr.length);
+                for (let i = 0; i < binaryStr.length; i++) {
+                    bytes[i] = binaryStr.charCodeAt(i);
+                }
+                dataBuffer = bytes;
+            }
+
+            if (!dataBuffer) return false;
+
+            const loadingTask = window.pdfjsLib.getDocument({
+                data: dataBuffer,
+                isEvalSupported: false,
+                enableScripting: false
+            });
+
+            this.pdfDoc = await loadingTask.promise;
+            this.totalSlides = this.pdfDoc.numPages;
+
+            if (this.elements.totalSlidesNum) {
+                this.elements.totalSlidesNum.textContent = this.totalSlides;
+            }
+            if (this.elements.uploadedPagesBadge) {
+                this.elements.uploadedPagesBadge.textContent = `${this.totalSlides} slides`;
+                this.elements.uploadedPagesBadge.classList.remove('hidden');
+            }
+            return true;
+        } catch (err) {
+            console.error('[Pitchdeck] Failed to initialize PDF document:', err);
+            return false;
+        }
+    }
+
+    /**
+     * File upload handler — loads PDF into local PDF.js and reads base64 for backend.
+     * @param {File} file
+     */
+    async handleFileUpload(file) {
+        if (!this.isValidPdf(file)) {
+            ui.showToast('Please upload a PDF file', 'error');
+            this.resetUpload();
+            return;
+        }
+
+        if (file.size === 0) {
+            ui.showToast('File is empty', 'error');
+            this.resetUpload();
+            return;
+        }
+
+        const MAX_FILE_SIZE = 25 * 1024 * 1024;
+        if (file.size > MAX_FILE_SIZE) {
+            ui.showToast('File too large. Maximum size is 25MB.', 'error');
+            this.resetUpload();
+            return;
+        }
+
+        this.uploadedFile = file;
+
+        // 1. Read Base64 for backend in background
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            this.uploadedFileData = e.target.result.split(',')[1];
+            this.showUploadSuccess(file.name);
+        };
+        reader.onerror = () => {
+            ui.showToast('Failed to read file', 'error');
+            this.resetUpload();
+        };
+        reader.readAsDataURL(file);
+
+        // 2. Load PDF into client-side PDF.js for instant slide viewing
+        try {
+            const loaded = await this.ensurePdfLoaded();
+            if (loaded && this.pdfDoc) {
+                this.currentSlide = 1;
+                this.zoomLevel = 1.0;
+                await this.renderSlide(1);
+                ui.showToast(`Loaded ${this.totalSlides} slides. Click "Analyze Deck with AI" to extract intelligence.`, 'info');
+            } else {
+                ui.showToast('Could not preview PDF locally, but AI analysis is still available.', 'warning');
+            }
+        } catch (err) {
+            console.error('[Pitchdeck] Local PDF preview error:', err);
+            ui.showToast('Could not preview PDF locally, but AI analysis is still available.', 'warning');
+        }
+    }
+
+    /**
+     * Navigate to specific slide number
+     * @param {number} pageNumber
+     */
+    async goToSlide(pageNumber) {
+        await this.ensurePdfLoaded();
+        if (!this.pdfDoc || pageNumber < 1 || pageNumber > this.totalSlides) return;
+        await this.renderSlide(pageNumber);
+    }
+
+    /**
+     * Set zoom level
+     * @param {number} level
+     */
+    setZoom(level) {
+        this.zoomLevel = Math.max(0.5, Math.min(2.5, Math.round(level * 10) / 10));
+        if (this.elements.zoomVal) {
+            this.elements.zoomVal.textContent = `${Math.round(this.zoomLevel * 100)}%`;
+        }
+        if (this.pdfDoc) {
+            this.renderSlide(this.currentSlide);
+        }
+    }
+
+    /**
+     * Render a slide canvas with Retina / HiDPI crispness
+     * @param {number} pageNumber
+     */
+    async renderSlide(pageNumber) {
+        await this.ensurePdfLoaded();
+        if (!this.pdfDoc) return;
+        this.currentSlide = Math.max(1, Math.min(this.totalSlides, pageNumber));
+
+        // Update toolbar and canvas indicators
+        if (this.elements.currentSlideNum) this.elements.currentSlideNum.textContent = this.currentSlide;
+        if (this.elements.activeSlideBadge) this.elements.activeSlideBadge.textContent = this.currentSlide;
+        if (this.elements.prevSlideBtn) this.elements.prevSlideBtn.disabled = (this.currentSlide <= 1);
+        if (this.elements.nextSlideBtn) this.elements.nextSlideBtn.disabled = (this.currentSlide >= this.totalSlides);
+        if (this.elements.canvasPrevBtn) {
+            this.elements.canvasPrevBtn.disabled = (this.currentSlide <= 1);
+            this.elements.canvasPrevBtn.classList.remove('hidden');
+        }
+        if (this.elements.canvasNextBtn) {
+            this.elements.canvasNextBtn.disabled = (this.currentSlide >= this.totalSlides);
+            this.elements.canvasNextBtn.classList.remove('hidden');
+        }
+
+        try {
+            const page = await this.pdfDoc.getPage(this.currentSlide);
+            const canvas = this.elements.slideCanvas;
+            if (!canvas) return;
+
+            const ctx = canvas.getContext('2d');
+            const wrapper = this.elements.canvasWrapper;
+            const containerWidth = (wrapper?.clientWidth || 700) - 32;
+
+            const baseViewport = page.getViewport({ scale: 1.0 });
+            const fitScale = (containerWidth / baseViewport.width) * this.zoomLevel;
+            const viewport = page.getViewport({ scale: Math.max(0.4, fitScale) });
+
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = Math.floor(viewport.width * dpr);
+            canvas.height = Math.floor(viewport.height * dpr);
+            canvas.style.width = `${Math.floor(viewport.width)}px`;
+            canvas.style.height = `${Math.floor(viewport.height)}px`;
+
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+            if (this.renderTask) {
+                this.renderTask.cancel();
+            }
+
+            this.renderTask = page.render({
+                canvasContext: ctx,
+                viewport: viewport
+            });
+
+            await this.renderTask.promise;
+
+            // Reveal canvas, hide placeholder
+            this.elements.canvasPlaceholder?.classList.add('hidden');
+            canvas.classList.remove('hidden');
+
+            // Refresh claims panel if in slide-specific mode, else highlight active slide cards
+            if (this.activeFilter === 'slide') {
+                this.renderFilteredClaims();
+            } else {
+                this.highlightClaimsForSlide(this.currentSlide);
+            }
+
+        } catch (err) {
+            if (err.name !== 'RenderingCancelledException') {
+                console.error('[Pitchdeck] Slide rendering failed:', err);
+            }
+        }
+    }
+
+    /**
+     * Highlight claims matching the current slide in multi-claim views
+     * @param {number} slideNum
+     */
+    highlightClaimsForSlide(slideNum) {
+        if (!this.elements.claimsList) return;
+        const cards = this.elements.claimsList.querySelectorAll('.pd-claim-card');
+        cards.forEach(card => {
+            const cardSlide = parseInt(card.dataset.slide, 10);
+            if (cardSlide === slideNum) {
+                card.classList.add('slide-active');
+            } else {
+                card.classList.remove('slide-active');
+            }
+        });
+    }
+
+    /**
+     * Start backend pitch deck analysis
      */
     async startAnalysis() {
         if (!this.uploadedFileData) {
@@ -140,8 +496,6 @@ class PitchdeckModule {
             return;
         }
 
-        // Get result container elements
-        const summaryCard = document.getElementById('pd-summary-card');
         const summarySkeleton = document.getElementById('pd-summary-skeleton');
         const summaryLoading = document.getElementById('pd-summary-loading');
         const summaryResults = document.getElementById('pd-summary-results');
@@ -149,19 +503,15 @@ class PitchdeckModule {
         const marketLoading = document.getElementById('pd-market-loading');
         const marketResults = document.getElementById('pd-market-results');
 
-        // Declared outside try so the finally block can clear it
         let timeoutId;
 
         try {
-            // === SHOW LOADING STATE ===
             this.elements.generateBtn.disabled = true;
-            this.elements.generateBtn.textContent = 'Analyzing...';
+            this.elements.generateBtn.textContent = 'Analyzing Deck...';
             this.elements.generateBtn.classList.add('analyzing');
 
-            // Show toast — Pro + thinking mode on a PDF can take 60-120s on larger decks
-            ui.showToast('🔍 Generating overview... Large decks may take up to 2 minutes.', 'info');
+            ui.showToast('Analyzing file... (~5-8s)', 'info');
 
-            // Hide skeletons, show loading spinners
             summarySkeleton?.classList.add('hidden');
             summaryLoading?.classList.remove('hidden');
             summaryResults?.classList.add('hidden');
@@ -170,97 +520,83 @@ class PitchdeckModule {
             marketLoading?.classList.remove('hidden');
             marketResults?.classList.add('hidden');
 
-            // === PDF DATA (already Base64 encoded natively) ===
-            const base64Data = this.uploadedFileData;
-
-            // === CALL API ===
-            // Use AbortController for a 2-minute client-side timeout.
-            // The backend itself allows up to 180s per attempt — without this the
-            // browser can drop the connection before the server finishes.
             const controller = new AbortController();
-            timeoutId = setTimeout(() => controller.abort(), 120_000); // 2 min (90s backend + margin)
+            timeoutId = setTimeout(() => controller.abort(), 120_000);
 
-                const result = await api.analyzePitchDeck(base64Data, controller.signal);
+            const result = await api.analyzePitchDeck(this.uploadedFileData, controller.signal);
 
-                // === DISPLAY RESULTS ===
-                this.displayResults(result);
+            await this.displayResults(result);
 
-                // Show cost toast if available
-                if (result.success && result.cost_incurred) {
-                    ui.showToast(`Analysis complete`, 'success');
-                    // Refresh balance
-                    if (result.new_balance !== undefined) {
-                        ui.updateBalance(result.new_balance);
-                    } else {
-                        // Fallback: Fetch balance if not provided in response
-                        try {
-                            const balanceResponse = await api.getBalance();
-                            if (balanceResponse && balanceResponse.balance !== undefined) {
-                                ui.updateBalance(balanceResponse.balance);
-                            }
-                        } catch (e) {
-                            console.warn('[Pitchdeck] Failed to refresh balance:', e);
+            if (result.success && result.cost_incurred) {
+                ui.showToast(`Analysis complete (${result.cost_incurred} CP)`, 'success');
+                if (result.new_balance !== undefined) {
+                    ui.updateBalance(result.new_balance);
+                } else {
+                    try {
+                        const balanceResponse = await api.getBalance();
+                        if (balanceResponse && balanceResponse.balance !== undefined) {
+                            ui.updateBalance(balanceResponse.balance);
                         }
+                    } catch (e) {
+                        console.warn('[Pitchdeck] Failed to refresh balance:', e);
                     }
                 }
-
-                // Update button state
-                this.elements.generateBtn.textContent = 'Overview Generated ✓';
-                this.elements.generateBtn.classList.remove('analyzing');
-
-            } catch (error) {
-                if (error.name === 'AbortError') {
-                    ui.showToast('Analysis timed out. Your deck may be too large — try a smaller PDF.', 'error');
-                } else {
-                    console.error('[Pitchdeck] Analysis failed:', error);
-                    ui.showToast(error.message || 'Analysis failed. Please try again.', 'error');
-                }
-
-                // Reset to skeleton state
-                summarySkeleton?.classList.remove('hidden');
-                summaryLoading?.classList.add('hidden');
-                marketSkeleton?.classList.remove('hidden');
-                marketLoading?.classList.add('hidden');
-
-                // Reset button
-                this.elements.generateBtn.disabled = false;
-                this.elements.generateBtn.textContent = 'Generate Overview';
-                this.elements.generateBtn.classList.remove('analyzing');
-            } finally {
-                clearTimeout(timeoutId);
             }
+
+            this.elements.generateBtn.textContent = 'Analysis Complete ✓';
+            this.elements.generateBtn.classList.remove('analyzing');
+
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                ui.showToast('Analysis timed out. Try a smaller deck.', 'error');
+            } else {
+                console.error('[Pitchdeck] Analysis failed:', error);
+                ui.showToast(error.message || 'Analysis failed. Please try again.', 'error');
+            }
+
+            summarySkeleton?.classList.remove('hidden');
+            summaryLoading?.classList.add('hidden');
+            marketSkeleton?.classList.remove('hidden');
+            marketLoading?.classList.add('hidden');
+
+            this.elements.generateBtn.disabled = false;
+            this.elements.generateBtn.textContent = '⚡ Analyze Deck with AI';
+            this.elements.generateBtn.classList.remove('analyzing');
+        } finally {
+            clearTimeout(timeoutId);
+        }
     }
 
     /**
-     * Display analysis results in the UI
-     * @param {Object} result - Analysis result from API
+     * Display analysis results in top dashboard and populate claims map
+     * @param {Object} result
      */
-    displayResults(result) {
+    async displayResults(result) {
         const summaryLoading = document.getElementById('pd-summary-loading');
         const summaryResults = document.getElementById('pd-summary-results');
         const marketLoading = document.getElementById('pd-market-loading');
         const marketResults = document.getElementById('pd-market-results');
 
-        // Hide loading, show results
         summaryLoading?.classList.add('hidden');
         summaryResults?.classList.remove('hidden');
         marketLoading?.classList.add('hidden');
         marketResults?.classList.remove('hidden');
 
-        // Populate Summary & USP
-        // AI-generated content — always sanitize before injecting into the DOM;
-        // Gemini output is never inherently XSS-safe.
+        // Ensure PDF is loaded and active slide is rendered
+        await this.ensurePdfLoaded();
+        if (this.pdfDoc) {
+            await this.renderSlide(this.currentSlide || 1);
+        }
+
+        // Company & Summary
         document.getElementById('pd-company-name').innerHTML = DOMPurify.sanitize(result.company_name || '—');
         document.getElementById('pd-summary-text').innerHTML = DOMPurify.sanitize(result.summary || '—');
         document.getElementById('pd-usp-text').innerHTML = DOMPurify.sanitize(result.usp || '—');
 
-        // Populate Market & Competition
+        // Market & Industry
         document.getElementById('pd-industry').innerHTML = DOMPurify.sanitize(result.industry || '—');
-
-        // Only render sector + separator when a meaningful sector value exists.
-        // Gemini sometimes returns '.' or null when sector is implicit — suppress those.
         const sectorEl = document.getElementById('pd-sector');
-        const separatorEl = sectorEl?.previousElementSibling; // .pd-separator span
+        const separatorEl = sectorEl?.previousElementSibling;
         const sectorValue = (result.sector || '').trim();
         const hasSector = sectorValue && sectorValue !== '.' && sectorValue !== '—';
         if (sectorEl) sectorEl.innerHTML = hasSector ? DOMPurify.sanitize(sectorValue) : '';
@@ -269,24 +605,25 @@ class PitchdeckModule {
         }
         document.getElementById('pd-market-size').innerHTML = DOMPurify.sanitize(result.market_size || 'Not specified');
 
+        // Competition
         const competitionList = document.getElementById('pd-competition-list');
-        competitionList.innerHTML = '';
-
-        const competitors = result.competition || [];
-        if (competitors.length > 0) {
-            competitors.forEach(competitor => {
+        if (competitionList) {
+            competitionList.innerHTML = '';
+            const competitors = result.competition || [];
+            if (competitors.length > 0) {
+                competitors.forEach(comp => {
+                    const li = document.createElement('li');
+                    li.textContent = comp;
+                    competitionList.appendChild(li);
+                });
+            } else {
                 const li = document.createElement('li');
-                // textContent is safer than innerHTML here — competitor names are plain text
-                li.textContent = competitor;
+                li.textContent = 'Not specified';
                 competitionList.appendChild(li);
-            });
-        } else {
-            const li = document.createElement('li');
-            li.textContent = 'Not specified';
-            competitionList.appendChild(li);
+            }
         }
 
-        // Populate VC Metrics
+        // VC Metrics Lens
         const vcMetrics = result.vc_metrics || {};
         this._renderMetricsContainer('pd-metrics-summary', [
             { key: 'monthly_revenue_arr', label: 'Revenue / ARR', data: vcMetrics.monthly_revenue_arr },
@@ -299,358 +636,333 @@ class PitchdeckModule {
             { key: 'runway_months', label: 'Runway', data: vcMetrics.runway_months },
         ]);
 
-        // Store global context for claim verification
+        // Red Flags
+        this._displayRedFlags(result);
+
+        // Global Context for Claim Verification
         this.globalDeckContext = {
             company: result.company_name || 'Unknown Company',
             industry: result.industry || 'Unknown Industry',
             sector: result.sector || 'Unknown Sector',
             summary: result.summary || 'No summary available.',
-            cache_name: result.cache_name || null // Store Cache ID
+            cache_name: result.cache_name || null
         };
 
-        // Display extracted claims (no auto-verification)
-        this.displayClaims(result);
+        // Index claims by slide_number
+        this.claimsBySlideMap = new Map();
+        const rawClaims = result.verifiable_claims || [];
+        this.extractedClaims = rawClaims.map((claim, index) => ({
+            ...claim,
+            originalIndex: index,
+            slide_number: typeof claim.slide_number === 'number' ? claim.slide_number : 1
+        }));
 
-        // Display red flags below exec summary
-        this._displayRedFlags(result);
+        this.extractedClaims.forEach(claim => {
+            const slide = claim.slide_number;
+            if (!this.claimsBySlideMap.has(slide)) {
+                this.claimsBySlideMap.set(slide, []);
+            }
+            this.claimsBySlideMap.get(slide).push(claim);
+        });
+
+        // Show workstation buttons
+        this.elements.checkSlideBtn?.classList.remove('hidden');
+        this.elements.checkAllBtn?.classList.remove('hidden');
+
+        // Render claims for current slide
+        this.renderFilteredClaims();
     }
 
     /**
-     * Render a list of metric items into a container element.
-     * @param {string} containerId - DOM id of the metrics container
-     * @param {Array<{key: string, label: string, data: Object|null}>} metrics
+     * Render filtered claims into the right panel
+     */
+    renderFilteredClaims() {
+        const list = this.elements.claimsList;
+        const placeholder = this.elements.claimsPlaceholder;
+        const countBadge = this.elements.slideClaimsCount;
+        if (!list) return;
+
+        // Update dynamic claims desk title
+        const titleEl = this.elements.claimsHeaderTitle || document.getElementById('pd-claims-header-title');
+        if (titleEl) {
+            if (this.activeFilter === 'slide') {
+                titleEl.innerHTML = `Claims for Slide <span id="pd-active-slide-badge">${this.currentSlide}</span>`;
+            } else if (this.activeFilter === 'financials') {
+                titleEl.innerHTML = `Financials & Traction`;
+            } else {
+                titleEl.innerHTML = `All Deck Claims`;
+            }
+        }
+
+        if (this.extractedClaims.length === 0) {
+            placeholder?.classList.remove('hidden');
+            list?.classList.add('hidden');
+            if (countBadge) countBadge.textContent = '0';
+            return;
+        }
+
+        placeholder?.classList.add('hidden');
+        list?.classList.remove('hidden');
+
+        // Determine active subset
+        let claims = [];
+        if (this.activeFilter === 'slide') {
+            claims = this.claimsBySlideMap.get(this.currentSlide) || [];
+        } else if (this.activeFilter === 'financials') {
+            const financialCats = new Set(['revenue', 'growth_rate', 'roi', 'cost_savings', 'customer_count']);
+            claims = this.extractedClaims.filter(c => financialCats.has(c.category) || c.is_quantitative);
+        } else {
+            claims = this.extractedClaims;
+        }
+
+        if (countBadge) {
+            countBadge.textContent = String(claims.length);
+        }
+
+        list.innerHTML = '';
+
+        if (claims.length === 0) {
+            list.innerHTML = `
+                <div class="pd-claims-empty-state" style="text-align: center; padding: 2rem 1rem; color: var(--color-text-muted);">
+                    <div style="font-size: 1.2rem; margin-bottom: 0.5rem; opacity: 0.5;">—</div>
+                    <p style="margin: 0; font-size: 0.9rem;">No specific claims extracted for Slide ${this.currentSlide}.</p>
+                    <p style="margin: 0.25rem 0 0; font-size: 0.8rem; opacity: 0.8;">Navigate slides or switch tab to "All Deck Claims".</p>
+                </div>
+            `;
+            return;
+        }
+
+        claims.forEach(claim => {
+            const card = document.createElement('div');
+            card.className = 'pd-claim-card';
+            card.id = `pd-claim-${claim.originalIndex}`;
+            card.dataset.slide = claim.slide_number || 1;
+            card.dataset.claimIndex = claim.originalIndex;
+            card.title = `Click to jump to Slide ${claim.slide_number || 1}`;
+
+            if (claim.slide_number === this.currentSlide) {
+                card.classList.add('slide-active');
+            }
+
+            const catLabel = (claim.category || 'other').replace('_', ' ').toUpperCase();
+            const isVerified = Boolean(claim.verificationResult);
+
+            card.innerHTML = DOMPurify.sanitize(`
+                <div class="pd-claim-meta">
+                    <div class="pd-claim-badge-group">
+                        <span class="badge badge-caution">${catLabel}</span>
+                        ${claim.slide_number ? `<span class="badge badge-tag pd-slide-tag" data-slide="${claim.slide_number}" title="Jump to Slide ${claim.slide_number}">Slide ${claim.slide_number}</span>` : ''}
+                    </div>
+                    <button class="btn-primary btn-sm pd-claim-check-btn ${isVerified ? 'verified' : ''}" data-claim-index="${claim.originalIndex}">
+                        ${isVerified ? 'Verified ✓' : 'Verify Claim'}
+                    </button>
+                </div>
+                <div class="pd-claim-text">
+                    ${claim.claim}
+                </div>
+                ${claim.source_cited ? `<div class="pd-claim-source">Source cited: <em>${claim.source_cited}</em></div>` : ''}
+                <div class="pd-claim-result ${isVerified ? '' : 'hidden'}" id="pd-claim-result-${claim.originalIndex}"></div>
+            `);
+
+            list.appendChild(card);
+
+            if (isVerified) {
+                this.displayClaimResult(claim.originalIndex, claim.verificationResult);
+            }
+        });
+    }
+
+    /**
+     * Render metrics into a container
      */
     _renderMetricsContainer(containerId, metrics) {
         const container = document.getElementById(containerId);
         if (!container) return;
 
-        // Keep the header, clear dynamically added items
         const header = container.querySelector('.pd-metrics-header');
         container.innerHTML = '';
         if (header) container.appendChild(header);
 
         metrics.forEach(({ label, data }) => {
-            container.appendChild(this._renderMetricItem(label, data));
+            const el = document.createElement('div');
+            el.className = 'pd-metric-item';
+
+            if (!data) {
+                el.innerHTML = `
+                    <span class="pd-metric-label">${label}</span>
+                    <span class="pd-metric-value pd-metric-value--muted">—</span>
+                    <span class="badge badge-neutral">Not Disclosed</span>
+                `;
+            } else {
+                const badgeClass = this._getMetricBadgeClass(data.assessment);
+                el.innerHTML = DOMPurify.sanitize(`
+                    <span class="pd-metric-label">${label}</span>
+                    <span class="pd-metric-value">${data.value || '—'}</span>
+                    <span class="badge ${badgeClass}">${data.assessment || 'Not Disclosed'}</span>
+                    ${data.detail ? `<span class="pd-metric-detail">${data.detail}</span>` : ''}
+                `);
+            }
+            container.appendChild(el);
         });
     }
 
-    /**
-     * Create a single metric item DOM element.
-     * @param {string} label - Human-readable metric name
-     * @param {Object|null} data - { value, assessment, detail } or null
-     * @returns {HTMLElement}
-     */
-    _renderMetricItem(label, data) {
-        const el = document.createElement('div');
-        el.className = 'pd-metric-item';
-
-        if (!data) {
-            // label is a static constant defined in displayResults — safe without sanitize
-            el.innerHTML = `
-                <span class="pd-metric-label">${label}</span>
-                <span class="pd-metric-value pd-metric-value--muted">—</span>
-                <span class="pd-metric-badge pd-metric-badge--not-disclosed">Not Disclosed</span>
-            `;
-            return el;
-        }
-
-        const badgeClass = this._getMetricBadgeClass(data.assessment);
-
-        // data.value, data.assessment, data.detail are AI-generated — sanitize before injecting
-        el.innerHTML = DOMPurify.sanitize(`
-            <span class="pd-metric-label">${label}</span>
-            <span class="pd-metric-value">${data.value || '—'}</span>
-            <span class="pd-metric-badge ${badgeClass}">${data.assessment || 'Not Disclosed'}</span>
-            ${data.detail ? `<span class="pd-metric-detail">${data.detail}</span>` : ''}
-        `);
-        return el;
-    }
-
-    /**
-     * Map assessment string to a CSS modifier class.
-     * @param {string} assessment
-     * @returns {string}
-     */
     _getMetricBadgeClass(assessment) {
         const map = {
-            'Elite': 'pd-metric-badge--elite',
-            'Good': 'pd-metric-badge--good',
-            'Caution': 'pd-metric-badge--caution',
-            'Red Flag': 'pd-metric-badge--red-flag',
-            'Not Disclosed': 'pd-metric-badge--not-disclosed',
-            'Pre-Revenue': 'pd-metric-badge--pre-revenue',
+            'Elite': 'badge-good',
+            'Good': 'badge-good',
+            'Caution': 'badge-caution',
+            'Red Flag': 'badge-critical',
+            'Not Disclosed': 'badge-neutral',
+            'Pre-Revenue': 'badge-purple',
         };
-        return map[assessment] || 'pd-metric-badge--not-disclosed';
+        return map[assessment] || 'badge-neutral';
     }
 
-    /**
-     * Display extracted claims grouped by category with Check buttons
-     * @param {Object} analysisResult - The analysis result containing claims
-     */
-    displayClaims(analysisResult) {
-        const claimsPlaceholder = document.getElementById('pd-claims-placeholder');
-        const claimsList = document.getElementById('pd-claims-list');
-        const checkAllBtn = document.getElementById('pd-check-all-btn');
-
-        // Get verifiable claims from result
-        const claims = analysisResult.verifiable_claims || [];
-
-        if (claims.length === 0) {
-            claimsPlaceholder.innerHTML = '<p class="pd-placeholder-text">No verifiable claims found in deck</p>';
-            checkAllBtn?.classList.add('hidden');
-            return;
-        }
-
-        // Show claims list
-        claimsPlaceholder?.classList.add('hidden');
-        claimsList?.classList.remove('hidden');
-        // checkAllBtn?.classList.remove('hidden'); 
-
-        /**
-         * NOTE: CHECK ALL DISABLED TEMPORARILY
-         * Reason: The current client-side concurrency (Check All) triggers backend rate limits (Gemini API) 
-         * and 503 errors because it spawns too many parallel "Smart Agent" requests.
-         * 
-         * Resolution Dependency: Requires implementation of a dedicated /api/factcheck/batch-analyze endpoint
-         * to handle bulk claims in a single request.
-         * 
-         * See: PITCHDECK_IMPLEMENTATION_PLAN.md (Batch API section)
-         */
-        if (checkAllBtn) checkAllBtn.classList.add('hidden');
-
-        claimsList.innerHTML = '';
-
-        // Group claims by category
-        const groupedClaims = {};
-        claims.forEach((claim, index) => {
-            const category = claim.category || 'other';
-            if (!groupedClaims[category]) {
-                groupedClaims[category] = [];
-            }
-            groupedClaims[category].push({ ...claim, originalIndex: index });
-        });
-
-        // Category display config
-        const categoryConfig = {
-            'market_size': { icon: '📊', label: 'Market Size' },
-            'revenue': { icon: '💰', label: 'Revenue' },
-            'growth_rate': { icon: '📈', label: 'Growth Rate' },
-            'roi': { icon: '🎯', label: 'ROI' },
-            'customer_count': { icon: '👥', label: 'Customers' },
-            'cost_savings': { icon: '💡', label: 'Cost Savings' },
-            'competitor': { icon: '🏢', label: 'Competition' },
-            'technology': { icon: '⚡', label: 'Technology' },
-            'other': { icon: '📌', label: 'Other' }
-        };
-
-        // Render grouped claims
-        Object.entries(groupedClaims).forEach(([category, catClaims]) => {
-            const config = categoryConfig[category] || categoryConfig['other'];
-
-            const groupEl = document.createElement('div');
-            groupEl.className = 'pd-claim-category-group';
-
-            // Category header
-            const headerEl = document.createElement('div');
-            headerEl.className = 'pd-claim-category-header';
-            headerEl.innerHTML = `${config.icon} ${config.label}`;
-            groupEl.appendChild(headerEl);
-
-            // Claims in this category
-            const itemsEl = document.createElement('div');
-            itemsEl.className = 'pd-claim-category-items';
-
-            catClaims.forEach(claim => {
-                const claimEl = document.createElement('div');
-                claimEl.className = 'pd-claim-item';
-                claimEl.id = `pd-claim-${claim.originalIndex}`;
-
-                // claim.claim and claim.source_cited come from AI/PDF extraction — sanitize.
-                // data-claim-index and the result div id use only the integer originalIndex — safe.
-                claimEl.innerHTML = DOMPurify.sanitize(`
-                    <div class="pd-claim-header">
-                        <div class="pd-claim-text">${claim.claim}</div>
-                        <button class="pd-claim-check-btn" data-claim-index="${claim.originalIndex}" title="Fact-check this claim">
-                            Check
-                        </button>
-                    </div>
-                    ${claim.source_cited ? `<div class="pd-claim-source">Source: ${claim.source_cited}</div>` : ''}
-                    <div class="pd-claim-result hidden" id="pd-claim-result-${claim.originalIndex}">
-                        <!-- Verification result will be inserted here -->
-                    </div>
-                `);
-
-                itemsEl.appendChild(claimEl);
-            });
-
-            groupEl.appendChild(itemsEl);
-            claimsList.appendChild(groupEl);
-        });
-
-        // Store claims with originalIndex for verification
-        this.extractedClaims = claims.map((claim, index) => ({
-            ...claim,
-            originalIndex: index
-        }));
-
-        console.log('[Pitchdeck] Displayed', claims.length, 'claims in', Object.keys(groupedClaims).length, 'categories');
-    }
-
-    /**
-     * Render the red flags section in the exec summary card.
-     * Hides the section entirely when the model returns no flags.
-     * @param {Object} analysisResult - The full analysis result
-     */
     _displayRedFlags(analysisResult) {
         const container = document.getElementById('pd-red-flags');
         const list = document.getElementById('pd-red-flags-list');
         if (!container || !list) return;
 
         const flags = analysisResult.red_flags;
-
-        // Hide section when no red flags extracted or field absent
         if (!Array.isArray(flags) || flags.length === 0) {
             container.classList.add('hidden');
             return;
         }
 
         list.innerHTML = '';
-
         flags.forEach(flagText => {
             if (typeof flagText !== 'string' || !flagText.trim()) return;
             const li = document.createElement('li');
-            li.className = 'pd-red-flag-item';
-            // Use textContent — flag strings are plain text from the AI, no markup needed.
-            // This also avoids any XSS risk without needing DOMPurify here.
-            li.textContent = flagText.trim();
+            const trimmed = flagText.trim();
+            const isCritical = trimmed.toUpperCase().startsWith('CRITICAL');
+            li.className = isCritical ? 'callout-item callout-item--critical' : 'callout-item';
+            li.textContent = trimmed;
             list.appendChild(li);
         });
-
         container.classList.remove('hidden');
     }
 
     /**
-     * Verify all unverified claims with concurrency limit
-     */
-    async checkAllClaims() {
-        const checkAllBtn = document.getElementById('pd-check-all-btn');
-        if (checkAllBtn) {
-            checkAllBtn.disabled = true;
-            checkAllBtn.innerHTML = '<span class="pd-spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:8px;"></span> Verifying...';
-        }
-
-        const unverifiedClaims = this.extractedClaims.filter(c => !c.verificationResult);
-        if (unverifiedClaims.length === 0) {
-            if (checkAllBtn) {
-                checkAllBtn.disabled = false;
-                checkAllBtn.textContent = 'Check All';
-            }
-            return;
-        }
-
-        const CONCURRENCY = 1; // Sequential execution to prevent 503 errors
-        const queue = [...unverifiedClaims];
-        const workers = [];
-
-        const worker = async () => {
-            while (queue.length > 0) {
-                const claim = queue.shift();
-                await this.verifySingleClaim(claim.originalIndex);
-                // 1.5s delay to be gentle on the backend/API
-                await new Promise(r => setTimeout(r, 1500));
-            }
-        };
-
-        // Start workers
-        for (let i = 0; i < Math.min(CONCURRENCY, unverifiedClaims.length); i++) {
-            workers.push(worker());
-        }
-
-        await Promise.all(workers);
-
-        if (checkAllBtn) {
-            checkAllBtn.disabled = false;
-            checkAllBtn.textContent = 'Check All Complete';
-            // Reset after 3 seconds
-            setTimeout(() => {
-                if (checkAllBtn) checkAllBtn.textContent = 'Check All';
-            }, 3000);
-        }
-        ui.showToast('Batch verification complete', 'success');
-    }
-
-    /**
-     * Verify a single claim using the backend API
-     * @param {number} claimIndex - Index of claim to verify
+     * Verify a single claim using cached deck context
      */
     async verifySingleClaim(claimIndex) {
         const claim = this.extractedClaims.find(c => c.originalIndex === claimIndex);
         if (!claim) return;
 
-        // UI Loading state
         const checkBtn = document.querySelector(`.pd-claim-check-btn[data-claim-index="${claimIndex}"]`);
         if (checkBtn) {
             checkBtn.disabled = true;
-            checkBtn.innerHTML = '<span class="pd-spinner" style="width:14px;height:14px;border-width:2px;"></span> Checking...';
+            checkBtn.innerHTML = '<span class="spinner" style="width:12px;height:12px;margin-right:6px;"></span> Checking...';
             checkBtn.classList.add('loading');
         }
 
         try {
-            // New: Usage of Context Caching via specific endpoint
-            // We use the batch endpoint '/verify-market' effectively as a single-claim verifier here
-            // to leverage the backend caching logic we just added.
-
             const payload = {
+                company: this.globalDeckContext?.company,
+                summary: this.globalDeckContext?.summary,
+                industry: this.globalDeckContext?.industry,
+                cache_name: this.globalDeckContext?.cache_name,
                 verifiable_claims: [{
                     claim: claim.claim,
                     category: claim.category,
                     source_cited: claim.source_cited,
                     context: claim.context
-                }],
-                industry: this.globalDeckContext?.industry,
-                cache_name: this.globalDeckContext?.cache_name
+                }]
             };
 
             const data = await api.verifyMarketClaims(payload);
 
             if (data.success && data.findings && data.findings.length > 0) {
-                // Store result
                 const finding = data.findings[0];
                 claim.verificationResult = finding;
                 this.displayClaimResult(claimIndex, finding);
             } else {
-                throw new Error('Invalid API response');
+                throw new Error('Verification returned no findings');
             }
 
-            // Update button to verified state
             if (checkBtn) {
                 checkBtn.disabled = false;
-                checkBtn.innerHTML = 'Reprocess';
+                checkBtn.innerHTML = 'Verified ✓';
                 checkBtn.classList.remove('loading');
                 checkBtn.classList.add('verified');
             }
 
+            if (data.new_balance !== undefined) {
+                ui.updateBalance(data.new_balance);
+            }
+
         } catch (error) {
-            console.error('Claim verification failed:', error);
+            console.error('[Pitchdeck] Claim verification error:', error);
             if (checkBtn) {
                 checkBtn.disabled = false;
                 checkBtn.textContent = 'Retry';
                 checkBtn.classList.remove('loading');
             }
-
-            // Handle Server Busy / Rate Limit specifically
-            if (error.status === 503 || error.status === 429 || (error.message && error.message.includes('temporarily unavailable'))) {
-                ui.showToast('Server is busy. Please try again in a moment.', 'warning');
-            } else {
-                ui.showToast('Verification failed. Please try again.', 'error');
-            }
+            ui.showToast(error.message || 'Verification failed. Please try again.', 'error');
         }
     }
 
     /**
-     * Display verification result for a single claim
-     * @param {number} claimIndex - Index of the claim
-     * @param {Object} result - Verification result
+     * Verify all unverified claims on the current slide in batch
+     */
+    async verifyCurrentSlideClaims() {
+        const slideClaims = (this.claimsBySlideMap.get(this.currentSlide) || []).filter(c => !c.verificationResult);
+        if (slideClaims.length === 0) {
+            ui.showToast('All claims on this slide are already verified.', 'info');
+            return;
+        }
+
+        const btn = this.elements.checkSlideBtn;
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = `Verifying ${slideClaims.length} Claims...`;
+        }
+
+        for (const claim of slideClaims) {
+            await this.verifySingleClaim(claim.originalIndex);
+            await new Promise(r => setTimeout(r, 600));
+        }
+
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Verify Slide';
+        }
+        ui.showToast(`Slide ${this.currentSlide} claims verification complete!`, 'success');
+    }
+
+    /**
+     * Verify all claims in the deck sequentially
+     */
+    async checkAllClaims() {
+        const unverified = this.extractedClaims.filter(c => !c.verificationResult);
+        if (unverified.length === 0) {
+            ui.showToast('All deck claims are verified.', 'info');
+            return;
+        }
+
+        const btn = this.elements.checkAllBtn;
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Verifying Deck...';
+        }
+
+        for (const claim of unverified) {
+            await this.verifySingleClaim(claim.originalIndex);
+            await new Promise(r => setTimeout(r, 1000));
+        }
+
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Check All Complete';
+            setTimeout(() => {
+                if (btn) btn.textContent = 'Check All';
+            }, 3000);
+        }
+        ui.showToast('Full deck verification complete!', 'success');
+    }
+
+    /**
+     * Display single claim verification finding
      */
     displayClaimResult(claimIndex, result) {
         const resultEl = document.getElementById(`pd-claim-result-${claimIndex}`);
@@ -669,11 +981,11 @@ class PitchdeckModule {
             sourcesHtml = `<div class="pd-claim-sources">Sources: ${sourceLinks}</div>`;
         }
 
-        // result.verdict, result.explanation, and source data all come from the Gemini API — sanitize.
-        // KEEP_CONTENT: false is the DOMPurify default, so scripts/event-handlers are stripped.
         resultEl.innerHTML = DOMPurify.sanitize(`
             <div class="pd-claim-verdict">
-                <span class="pd-verdict-badge ${verdictClass}">${verdictIcon} ${result.verdict}</span>
+                <span class="badge pd-verdict-badge ${verdictClass}">
+                    ${verdictIcon} ${result.verdict}
+                </span>
             </div>
             ${result.explanation ? `<div class="pd-claim-explanation">${result.explanation}</div>` : ''}
             ${sourcesHtml}
@@ -681,11 +993,6 @@ class PitchdeckModule {
         resultEl.classList.remove('hidden');
     }
 
-    /**
-     * Get CSS class for verdict styling
-     * @param {string} verdict
-     * @returns {string}
-     */
     getVerdictClass(verdict) {
         if (!verdict) return 'verdict-unverified';
         const v = String(verdict).toUpperCase();
@@ -695,11 +1002,6 @@ class PitchdeckModule {
         return 'verdict-unverified';
     }
 
-    /**
-     * Get icon for verdict
-     * @param {string} verdict
-     * @returns {string}
-     */
     getVerdictIcon(verdict) {
         if (!verdict) return '❓';
         const v = String(verdict).toUpperCase();
@@ -709,162 +1011,61 @@ class PitchdeckModule {
         return '❓';
     }
 
-    /**
-     * Handle file upload - validates and reads the file into memory.
-     * Privacy-first: Data stays in browser memory, never uploaded to server for storage.
-     * @param {File} file - The uploaded file
-     */
-    handleFileUpload(file) {
-        // Validate file type
-        if (!this.isValidPdf(file)) {
-            ui.showToast('Please upload a PDF file', 'error');
-            this.resetUpload();
-            return;
-        }
-
-        // Validate file is not empty
-        if (file.size === 0) {
-            ui.showToast('File is empty', 'error');
-            this.resetUpload();
-            return;
-        }
-
-        // Validate file size (max 25MB as per spec)
-        const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
-        if (file.size > MAX_FILE_SIZE) {
-            ui.showToast('File too large. Maximum size is 25MB.', 'error');
-            this.resetUpload();
-            return;
-        }
-
-        // Read file into memory natively directly into base64 to prevent UI thread lockups
-        const reader = new FileReader();
-
-        reader.onload = (e) => {
-            // Extract pure base64 string (remove data URL prefix)
-            const base64String = e.target.result.split(',')[1];
-            
-            // Store file data in memory (ephemeral - discarded on session end)
-            this.uploadedFile = file;
-            this.uploadedFileData = base64String;
-
-            // Update UI to show success state
-            this.showUploadSuccess(file.name);
-        };
-
-        reader.onerror = () => {
-            ui.showToast('Failed to read file', 'error');
-            this.resetUpload();
-        };
-
-        // Read natively as Base64 Data URL (insanely fast compared to JS array buffers)
-        reader.readAsDataURL(file);
-    }
-
-    /**
-     * Validate that the file is a PDF
-     * @param {File} file - The file to validate
-     * @returns {boolean} True if valid PDF
-     */
     isValidPdf(file) {
-        // Check MIME type
-        if (file.type === 'application/pdf') {
-            return true;
-        }
-
-        // Fallback: Check file extension
+        if (file.type === 'application/pdf') return true;
         const name = file.name.toLowerCase();
-        if (name.endsWith('.pdf')) {
-            return true;
-        }
-
-        return false;
+        return name.endsWith('.pdf');
     }
 
-    /**
-     * Update UI to show upload success state
-     * @param {string} filename - Name of the uploaded file
-     */
     showUploadSuccess(filename) {
         const { uploadZone, uploadTitle, uploadSubtitle, uploadedInfo, uploadedFilename, generateBtn } = this.elements;
-
-        // Add success class to upload zone
         uploadZone?.classList.add('uploaded');
-
-        // Hide default text, show uploaded info
         uploadTitle?.classList.add('hidden');
         uploadSubtitle?.classList.add('hidden');
         uploadedInfo?.classList.remove('hidden');
-
-        // Set filename
-        if (uploadedFilename) {
-            uploadedFilename.textContent = filename;
-        }
-
-        // Enable Generate Overview button
-        if (generateBtn) {
-            generateBtn.disabled = false;
-        }
+        if (uploadedFilename) uploadedFilename.textContent = filename;
+        if (generateBtn) generateBtn.disabled = false;
     }
 
-    /**
-     * Reset upload state (for error recovery or new upload)
-     */
     resetUpload() {
-        const { uploadZone, uploadTitle, uploadSubtitle, uploadedInfo, uploadedFilename, generateBtn, fileInput } = this.elements;
-
-        // Clear state
+        const { uploadZone, uploadTitle, uploadSubtitle, uploadedInfo, uploadedFilename, generateBtn, fileInput, uploadedPagesBadge, slideCanvas, canvasPlaceholder } = this.elements;
         this.uploadedFile = null;
         this.uploadedFileData = null;
+        if (this.renderTask) {
+            this.renderTask.cancel();
+            this.renderTask = null;
+        }
+        this.pdfDoc = null;
+        this.currentSlide = 1;
+        this.totalSlides = 1;
+        this.extractedClaims = [];
+        this.claimsBySlideMap.clear();
 
-        // Reset UI
         uploadZone?.classList.remove('uploaded');
         uploadTitle?.classList.remove('hidden');
         uploadSubtitle?.classList.remove('hidden');
         uploadedInfo?.classList.add('hidden');
 
-        if (uploadedFilename) {
-            uploadedFilename.textContent = '';
-        }
+        slideCanvas?.classList.add('hidden');
+        canvasPlaceholder?.classList.remove('hidden');
 
-        if (generateBtn) {
-            generateBtn.disabled = true;
+        if (uploadedFilename) uploadedFilename.textContent = '';
+        if (uploadedPagesBadge) {
+            uploadedPagesBadge.textContent = '';
+            uploadedPagesBadge.classList.add('hidden');
         }
-
-        // Clear file input (allows re-uploading same file)
-        if (fileInput) {
-            fileInput.value = '';
-        }
+        if (generateBtn) generateBtn.disabled = true;
+        if (fileInput) fileInput.value = '';
     }
 
-    /**
-     * Get the currently uploaded file data
-     * @returns {{file: File, data: ArrayBuffer} | null}
-     */
-    getUploadedFile() {
-        if (this.uploadedFile && this.uploadedFileData) {
-            return {
-                file: this.uploadedFile,
-                data: this.uploadedFileData
-            };
-        }
-        return null;
-    }
-
-    /**
-     * Show the Pitchdeck workspace
-     */
     show() {
         this.isActive = true;
-        console.log('[Pitchdeck] Module activated');
+        console.log('[Pitchdeck] Workstation activated');
     }
 
-    /**
-     * Hide the Pitchdeck workspace
-     */
     hide() {
         this.isActive = false;
-        console.log('[Pitchdeck] Module deactivated');
+        console.log('[Pitchdeck] Workstation deactivated');
     }
 }
 

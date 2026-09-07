@@ -13,6 +13,61 @@
     font-size: 0.75rem;
 }
 
+.btn-sm {
+    padding: 4px 10px;
+    font-size: 0.8rem;
+}
+
+/* Skeletons */
+.skeleton-line {
+    height: 14px;
+    background: linear-gradient(90deg,
+            var(--color-surface-elevated) 25%,
+            rgba(255, 255, 255, 0.1) 50%,
+            var(--color-surface-elevated) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: var(--radius-sm);
+}
+
+.skeleton-line--long {
+    width: 100%;
+}
+
+.skeleton-line--medium {
+    width: 75%;
+}
+
+.skeleton-line--short {
+    width: 50%;
+}
+
+.skeleton-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--spacing-md);
+}
+
+.skeleton-box {
+    height: 80px;
+    background: linear-gradient(90deg,
+            var(--color-surface-elevated) 25%,
+            rgba(255, 255, 255, 0.1) 50%,
+            var(--color-surface-elevated) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: var(--radius-md);
+}
+
+@keyframes shimmer {
+    0% {
+        background-position: -200% 0;
+    }
+    100% {
+        background-position: 200% 0;
+    }
+}
+
 /* Test Mode Banner */
 .test-mode-banner {
     background: var(--gradient-error);
