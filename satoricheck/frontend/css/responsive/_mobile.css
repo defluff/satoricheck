@@ -120,6 +120,10 @@
         font-size: 1.25rem;
     }
 
+    .logo-img {
+        height: 52px;
+    }
+
     .logo-icon {
         font-size: 1.4rem;
     }

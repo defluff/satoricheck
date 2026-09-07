@@ -13,7 +13,9 @@
     /* Accent Colors */
     --color-primary: #ADD8E6; /* Light Blue Accent */
     --color-primary-hover: #87CEEB;
+    --color-primary-strong: #000080; /* Navy Blue for high contrast */
     --color-primary-text: #111827; /* Dark text for contrast */
+    --color-accent-text: #000080; /* High contrast text for accents/tokens (7:1+) */
     --color-secondary: #6D8196; /* Slate Accent */
     --color-success: #10B981;
     --color-error: #EF4444;
@@ -102,7 +104,9 @@
     /* Accent Colors */
     --color-primary: #3b82f6;
     --color-primary-hover: #2563eb;
+    --color-primary-strong: #60a5fa;
     --color-primary-text: #ffffff;
+    --color-accent-text: #60a5fa; /* High contrast bright blue for dark mode (5.5:1+) */
     --color-secondary: #8b5cf6;
     --color-success: #10b981;
     --color-error: #ef4444;

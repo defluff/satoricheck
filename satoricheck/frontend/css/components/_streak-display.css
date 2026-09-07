@@ -145,12 +145,12 @@
     top: -8px;
     right: -8px;
     font-size: 1.5rem;
-    background: var(--color-surface);
-    border-radius: 50%;
-    padding: 2px;
-    margin-top: 2px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-    filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.2));
+    background: transparent;
+    border-radius: 0;
+    padding: 0;
+    margin-top: 0;
+    box-shadow: none;
+    filter: none;
     transition: transform var(--transition-base);
 }
 
@@ -191,11 +191,13 @@
 
 .streak-reward-icon.large {
     font-size: 1.8rem;
-    color: #fff;
-    text-shadow: 0 0 10px rgba(245, 158, 11, 0.6);
+    color: inherit;
+    text-shadow: none;
     top: -10px;
     right: -10px;
-    padding: 3px;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
     z-index: 5;
 }
 

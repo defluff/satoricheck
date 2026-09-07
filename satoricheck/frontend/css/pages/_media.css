@@ -82,13 +82,13 @@
 
 .ma-drop-zone:hover {
     border-color: var(--color-primary);
-    background: rgba(59, 130, 246, 0.08);
+    background: var(--bg-primary-subtle);
     box-shadow: 0 0 20px var(--glow-primary-light);
 }
 
 .ma-drop-zone.drag-over {
     border-color: var(--color-primary);
-    background: rgba(59, 130, 246, 0.15);
+    background: var(--bg-primary-hover);
     box-shadow: 0 0 30px var(--glow-primary);
     transform: scale(1.01);
 }
