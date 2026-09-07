@@ -246,7 +246,7 @@ class App {
         const chromeExtBtn = document.getElementById('chrome-extension-btn');
         if (chromeExtBtn) {
             chromeExtBtn.addEventListener('click', () => {
-                ui.showToast('Authenix Chrome Extension is coming very soon to the Chrome Web Store!', 'info');
+                window.open('https://chromewebstore.google.com/detail/authenix-%E2%80%93-live-fact-ai-c/egamiabbbonhkjlhjbniocfpihpdcehl?authuser=0&hl=en-GB', '_blank', 'noopener,noreferrer');
             });
         }
 

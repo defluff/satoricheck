@@ -44,6 +44,28 @@
     margin: 0;
 }
 
+.intro-feature-body {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-md);
+    width: 100%;
+    flex-wrap: wrap;
+}
+
+.intro-feature-body > div {
+    flex: 1 1 240px;
+}
+
+.intro-ext-btn {
+    white-space: nowrap;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+}
+
 .intro-pricing {
     background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
     border: 1px solid var(--color-primary);
