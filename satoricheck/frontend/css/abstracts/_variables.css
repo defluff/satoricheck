@@ -1,12 +1,12 @@
 /* _variables.css - Design tokens: colors, spacing, shadows, transitions */
 
 :root {
-    /* Colors - Premium Light Theme */
-    --color-bg: #FFFAFA; /* Snow White */
+    /* Colors - Clean Neutral Blue-Grey Light Theme (matches Extension Sidepanel) */
+    --color-bg: #f8fafc; /* Neutral Slate Blue-Grey (matches extension sidepanel) */
     --color-surface: #FFFFFF; /* Pure White */
-    --color-surface-elevated: #F0F4F8; /* Very light slate */
-    --color-border: #D1D5DB; /* Defined borders */
-    --color-text: #111827; /* High contrast black */
+    --color-surface-elevated: #f1f5f9; /* Slate 100 */
+    --color-border: #e2e8f0; /* Crisp slate border */
+    --color-text: #0f172a; /* Slate 900 - High contrast text */
     --color-text-secondary: #4B5563; /* Slate gray */
     --color-text-muted: #6B7280; /* Muted gray */
 
@@ -36,7 +36,7 @@
     --gradient-primary: linear-gradient(135deg, #000080 0%, #ADD8E6 100%);
     --gradient-success: linear-gradient(135deg, #10B981 0%, #059669 100%);
     --gradient-error: linear-gradient(135deg, #EF4444 0%, #DC2626 100%);
-    --gradient-surface: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(255, 250, 250, 0.8) 100%);
+    --gradient-surface: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(248, 250, 252, 0.8) 100%);
 
     /* Spacing */
     --spacing-xs: 0.25rem;
