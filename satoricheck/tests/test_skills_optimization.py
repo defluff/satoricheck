@@ -105,3 +105,13 @@ class TestSkillOptimizations:
             assert findings[1]["slide_number"] == 5
             # Crucial: analyze_claims_batch was called ONCE, not twice sequentially
             mock_gemini.analyze_claims_batch.assert_called_once()
+
+    def test_claim_extraction_skill_stream_calibration(self, app):
+        """Verify claim_extraction.md skill contains falsifiability standard and stream filters."""
+        utils = GeminiServiceUtils()
+        skill_text = utils._load_skill("claim_extraction")
+        
+        assert "Falsifiability Standard" in skill_text
+        assert "Rhetorical Hyperbole" in skill_text
+        assert "Conversational Filler & Disfluencies" in skill_text
+

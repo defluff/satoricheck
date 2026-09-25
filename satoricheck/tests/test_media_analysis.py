@@ -198,3 +198,135 @@ class TestMediaAnalysisAPI:
         
         assert response.status_code == 403
         assert "Insufficient tokens" in response.get_json()['error']
+
+    def test_analyze_upload_audio_with_claims(self, auth_client, test_user, db_session_fixture, mocker):
+        """Audio file upload should be accepted and return extracted spoken claims."""
+        from backend.models import MediaCheck
+        import io
+        
+        mock_claims = [
+            {"timestamp": "00:15", "timestamp_seconds": 15, "claim": "Inflation dropped to 3.2% in 2024"},
+            {"timestamp": "01:05", "timestamp_seconds": 65, "claim": "The legislation was passed unanimously"}
+        ]
+        mock_service = MagicMock()
+        mock_service.analyze_media_authenticity.return_value = {
+            'verdict': 'Appears Authentic',
+            'confidence': 94,
+            'explanation': 'Natural vocal resonance.',
+            'criteria': {
+                'audio': {'tag': 'Clean', 'score': 5, 'detail': 'Natural speech rhythm.'},
+                'temporal': {'tag': 'Clean', 'score': 0, 'detail': 'Clean.'}
+            },
+            'claims': mock_claims
+        }
+        mock_service.get_media_embedding.return_value = [0.1]*768
+        mocker.patch('backend.routes.media.get_gemini_service', return_value=mock_service)
+        
+        data = {
+            'file': (io.BytesIO(b"fake audio mp3 bytes"), 'podcast_episode.mp3', 'audio/mpeg'),
+        }
+        
+        response = auth_client.post('/api/media/analyze-upload', data=data, content_type='multipart/form-data')
+        
+        assert response.status_code == 200
+        res_json = response.get_json()
+        assert res_json['success'] is True
+        assert len(res_json['result']['claims']) == 2
+        assert res_json['result']['claims'][0]['timestamp'] == "00:15"
+        
+        # Verify persistence in DB
+        check = db_session_fixture.query(MediaCheck).filter_by(user_id=test_user.id).order_by(MediaCheck.id.desc()).first()
+        assert check is not None
+        assert "Inflation dropped" in check.claims_json
+
+    def test_analyze_youtube_url_success(self, auth_client, test_user, db_session_fixture, mocker):
+        """Valid YouTube watch URL should be routed as video/mp4 without needing file download."""
+        from backend.models import MediaCheck
+        
+        mock_claims = [
+            {"timestamp": "00:30", "timestamp_seconds": 30, "claim": "Quantum computers broke RSA 2048 yesterday"}
+        ]
+        mock_service = MagicMock()
+        mock_service.analyze_media_authenticity.return_value = {
+            'verdict': 'Suspicious / AI-Generated',
+            'confidence': 88,
+            'explanation': 'Synthetic voice cloning detected.',
+            'criteria': {
+                'audio': {'tag': 'Altered', 'score': 85, 'detail': 'Voice cloning artifacts.'},
+                'temporal': {'tag': 'Clean', 'score': 10, 'detail': 'Consistent frames.'}
+            },
+            'claims': mock_claims
+        }
+        mock_service.get_media_embedding.return_value = []
+        mocker.patch('backend.routes.media.get_gemini_service', return_value=mock_service)
+        
+        response = auth_client.post('/api/media/analyze-url', json={
+            'url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+        })
+        
+        assert response.status_code == 200
+        res = response.get_json()
+        assert res['success'] is True
+        assert res['result']['verdict'] == 'Suspicious / AI-Generated'
+        assert len(res['result']['claims']) == 1
+        assert res['result']['claims'][0]['claim'] == "Quantum computers broke RSA 2048 yesterday"
+        
+        # Verify call arguments
+        mock_service.analyze_media_authenticity.assert_called_once_with(
+            'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+            input_type='url',
+            mime_type='video/mp4'
+        )
+
+    def test_analyze_youtube_shortlink_success(self, auth_client, test_user, db_session_fixture, mocker):
+        """Shortened youtu.be URL should be canonicalized and accepted."""
+        mock_service = MagicMock()
+        mock_service.analyze_media_authenticity.return_value = {
+            'verdict': 'Appears Authentic',
+            'confidence': 92,
+            'explanation': 'Authentic video stream.',
+            'criteria': {},
+            'claims': []
+        }
+        mock_service.get_media_embedding.return_value = []
+        mocker.patch('backend.routes.media.get_gemini_service', return_value=mock_service)
+        
+        response = auth_client.post('/api/media/analyze-url', json={
+            'url': 'https://youtu.be/dQw4w9WgXcQ?t=45'
+        })
+        
+        assert response.status_code == 200
+        mock_service.analyze_media_authenticity.assert_called_once_with(
+            'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+            input_type='url',
+            mime_type='video/mp4'
+        )
+
+    def test_analyze_youtube_invalid_url_rejected(self, auth_client, test_user):
+        """Channel or non-video YouTube link should return a 400 error."""
+        response = auth_client.post('/api/media/analyze-url', json={
+            'url': 'https://www.youtube.com/channel/UC1234567890'
+        })
+        assert response.status_code == 400
+        assert 'Invalid YouTube URL' in response.get_json()['error']
+
+    def test_gemini_service_prepares_youtube_part_from_uri(self, app):
+        """GeminiServiceMedia should construct Part.from_uri for YouTube and never call requests.get."""
+        from backend.services.gemini_service import GeminiService
+        
+        service = GeminiService()
+        youtube_url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+        
+        with patch.object(service, '_validate_url', return_value=True), \
+             patch('requests.get') as mock_requests_get:
+            part = service._prepare_media_part(youtube_url, 'video/mp4', input_type='url')
+            
+            # Must NOT call requests.get to download YouTube videos
+            mock_requests_get.assert_not_called()
+            
+            # Must return Part with file_data pointing to YouTube URI
+            assert hasattr(part, 'file_data')
+            assert part.file_data.file_uri == youtube_url
+            assert part.file_data.mime_type == 'video/mp4'
+
+

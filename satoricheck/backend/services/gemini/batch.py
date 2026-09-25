@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 class GeminiServiceBatch(GeminiServiceUtils):
     """Batch claim verification and triage methods for GeminiService."""
 
-    def create_cache(self, content: str | dict | list, ttl_minutes: int = 15) -> str:
+    def create_cache(self, content: str | dict | list, system_instruction: str | None = None, ttl_minutes: int = 15) -> str:
         """Create a Context Cache for Gemini."""
         if not self.client:
             return None
@@ -19,6 +19,8 @@ class GeminiServiceBatch(GeminiServiceUtils):
         contents = []
         if hasattr(content, 'uri') and hasattr(content, 'mime_type'):
             contents = [types.Part.from_uri(file_uri=content.uri, mime_type=content.mime_type)]
+        elif isinstance(content, types.Part):
+            contents = [content]
         elif isinstance(content, str):
             contents = [content]
         elif isinstance(content, list):
@@ -28,12 +30,16 @@ class GeminiServiceBatch(GeminiServiceUtils):
             
         try:
             ttl_str = f"{ttl_minutes * 60}s"
+            cache_config = types.CreateCachedContentConfig(
+                contents=contents,
+                ttl=ttl_str
+            )
+            if system_instruction:
+                cache_config.system_instruction = system_instruction
+
             cache = self.client.caches.create(
                 model=self.MODEL_PRO,
-                config=types.CreateCachedContentConfig(
-                    contents=contents,
-                    ttl=ttl_str
-                )
+                config=cache_config
             )
             logger.info(f"Created Gemini Context Cache: {cache.name} at {datetime.now(UTC)} (TTL: {ttl_minutes}m)")
             return cache.name
@@ -61,6 +67,10 @@ class GeminiServiceBatch(GeminiServiceUtils):
             if not config:
                 config = types.GenerateContentConfig()
             config.cached_content = cache_name
+            # In Gemini API, CachedContent cannot be combined with system_instruction, tools, or tool_config on GenerateContent
+            config.system_instruction = None
+            config.tools = None
+            config.tool_config = None
             response = self.client.models.generate_content(
                 model=self.MODEL_PRO,
                 contents=prompt,
@@ -429,20 +439,22 @@ For each claim, select the appropriate strategy from your guidelines, verify it,
         
         config = types.GenerateContentConfig(
             system_instruction=system_instruction,
-            temperature=1.0,
+            temperature=0.2,
         )
-        
         prompt = f"""CLAIMS TO CATEGORIZE:
 {claims_str}
 {context_hint}
 
 For each claim, classify:
-- priority: SKIP (opinion/trivial), IMMEDIATE (breaking/viral), NORMAL (standard), DEFERRED (low-priority)
+- priority: SKIP (opinion/trivial/hyperbole lacking empirical basis), IMMEDIATE (breaking/viral), NORMAL (standard), DEFERRED (low-priority)
 - strategy: KNOWLEDGE_CHECK (well-known fact), SEARCH_VERIFY (needs sources), SOCIAL_VERIFY (viral/social)
+- is_hyperbole: boolean (true if statement is rhetorical exaggeration, subjective superlative, or conversational fluff lacking concrete metrics/dates/sources)
+
+CRITICAL RULE: If a claim is rhetorical hyperbole (is_hyperbole=true) and lacks empirical data (no dates, specific numbers, laws, or attributable quotes), priority MUST be SKIP.
 
 Return ONLY a JSON array matching:
-[{{"index": 1, "priority": "NORMAL", "strategy": "SEARCH_VERIFY"}}, ...]"""
- 
+[{{"index": 1, "priority": "NORMAL", "strategy": "SEARCH_VERIFY", "is_hyperbole": false}}, ...]"""
+
         try:
             if self.client:
                 response = self.client.models.generate_content(
@@ -467,19 +479,26 @@ Return ONLY a JSON array matching:
                     triage = next((t for t in triage_results if t.get('index') == i + 1), None)
                     
                     if triage:
+                        is_hyperbole = bool(triage.get('is_hyperbole', False))
                         priority_str = triage.get('priority', 'normal').lower()
+                        priority = priority_map.get(priority_str, ClaimPriority.NORMAL)
+                        # Auto-assign SKIP if hyperbole was flagged
+                        if is_hyperbole and priority != ClaimPriority.SKIP:
+                            priority = ClaimPriority.SKIP
                         results.append({
                             "claim": claim,
                             "index": i,
-                            "priority": priority_map.get(priority_str, ClaimPriority.NORMAL),
-                            "strategy": triage.get('strategy', 'SEARCH_VERIFY')
+                            "priority": priority,
+                            "strategy": triage.get('strategy', 'SEARCH_VERIFY'),
+                            "is_hyperbole": is_hyperbole
                         })
                     else:
                         results.append({
                             "claim": claim,
                             "index": i,
                             "priority": ClaimPriority.NORMAL,
-                            "strategy": "SEARCH_VERIFY"
+                            "strategy": "SEARCH_VERIFY",
+                            "is_hyperbole": False
                         })
                 
                 skip_count = sum(1 for r in results if r["priority"] == ClaimPriority.SKIP)
@@ -495,7 +514,8 @@ Return ONLY a JSON array matching:
                 "claim": c,
                 "index": i,
                 "priority": ClaimPriority.NORMAL,
-                "strategy": "SEARCH_VERIFY"
+                "strategy": "SEARCH_VERIFY",
+                "is_hyperbole": False
             }
             for i, c in enumerate(claims)
         ]

@@ -41,6 +41,9 @@ class APIClient {
 
             return data;
         } catch (error) {
+            // User-initiated abort: propagate without logging or retrying
+            if (error.name === 'AbortError') throw error;
+
             console.error(`API Error (${endpoint}):`, error);
 
             // Retry on 503 (Service Unavailable) or 429 (Rate Limit)
@@ -207,20 +210,28 @@ class APIClient {
 
     // --- MEDIA AUTHENTICITY ENDPOINTS ---
 
-    async analyzeMedia(file) {
-        const formData = new FormData();
-        formData.append('file', file);
+    async analyzeMedia(fileOrFormData, signal) {
+        let body;
+        if (fileOrFormData instanceof FormData) {
+            body = fileOrFormData;
+        } else {
+            const formData = new FormData();
+            formData.append('file', fileOrFormData);
+            body = formData;
+        }
 
         return this.request('/media/analyze-upload', {
             method: 'POST',
-            body: formData
+            body: body,
+            signal
         });
     }
 
-    async analyzeMediaUrl(url) {
+    async analyzeMediaUrl(url, signal) {
         return this.request('/media/analyze-url', {
             method: 'POST',
-            body: JSON.stringify({ url })
+            body: JSON.stringify({ url }),
+            signal
         });
     }
 

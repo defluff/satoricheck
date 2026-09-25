@@ -17,6 +17,7 @@ Reason step-by-step through the following forensic layers before determining a v
    * **Generative Music/Harmonics:** Inspect background music for repetitive algorithmic loops, stem bleed, or synthetic compression artifacts.
 6. **Lip-Sync & Multi-modal Synchronization:** Verify precise alignment between visible phoneme shapes (mouth/jaw/tongue movements) and spoken audio phonemes.
 7. **Media Heuristics & Platform Evidence:** Look for watermark remnants (e.g., SynthID, C2PA), compression inconsistencies, and duration patterns.
+8. **Spoken Claim Extraction (for Video/Audio Tracks):** If the media contains spoken dialogue or voiceover, extract distinct verifiable factual claims that satisfy the **Falsifiability Standard** (statistics, enacted laws, dates, historical claims, specific quotes) with their relative timestamp in the media. Exclude opinions, conversational filler, and rhetorical hyperbole lacking empirical anchors.
 
 ## Required Output JSON Format
 Respond ONLY with a JSON object. Do not include markdown code fences or explanatory text.
@@ -61,7 +62,15 @@ Respond ONLY with a JSON object. Do not include markdown code fences or explanat
       "score": 0,
       "detail": "No metadata anomalies found."
     }
-  }
+  },
+  "claims": [
+    {
+      "timestamp": "00:14",
+      "timestamp_seconds": 14,
+      "claim": "Extracted verifiable factual claim"
+    }
+  ]
 }
 ```
+*Note: 'claims' should be an empty list [] for static images or if no verifiable factual statements are spoken.*
 *Note: 'High Signal' indicates a clear anomaly/synthetic artifact; 'Med Signal' indicates suspicious or uncertain elements; 'Clean' indicates authentic characteristics.*

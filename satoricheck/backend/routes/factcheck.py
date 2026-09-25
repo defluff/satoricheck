@@ -3,10 +3,12 @@ Fact-checking routes.
 Handles text analysis and fact verification using Gemini API.
 """
 from flask import Blueprint, request, jsonify
-import logging
-import time
-from datetime import datetime, UTC
+import hashlib
 import json
+import logging
+import re
+import time
+from datetime import datetime, UTC, timedelta
 
 from backend.database import db_session
 from backend.models import FactCheck, TokenBalance
@@ -573,4 +575,278 @@ def analyze_ai():
     except Exception as e:
         logger.error(f"AI Detection error: {e}", exc_info=True)
         raise APIError('AI detection service unavailable')
+
+
+# In-memory session dedup cache. Works for single-worker deployments.
+# TODO: Migrate to Redis or DB-backed cache for multi-instance Cloud Run scaling.
+#       Duplicates across workers are non-critical (wasted compute, not incorrect behavior).
+_STREAM_DEDUPE_CACHE = {}  # session_key -> list of (normalized_hash, timestamp)
+
+def _is_claim_duplicate_in_session(session_key: str, claim_text: str, window_seconds: int = 180) -> bool:
+    """Check if normalized claim was already seen in this session's recent window."""
+    now = time.time()
+    clean = re.sub(r'[^\w\s]', '', claim_text.lower()).strip()
+    norm_key = ' '.join(clean.split())
+    if not norm_key:
+        return True
+    norm_hash = hashlib.sha256(norm_key.encode('utf-8')).hexdigest()
+
+    # Evict expired session keys if dictionary grows large
+    if len(_STREAM_DEDUPE_CACHE) > 500:
+        stale_keys = [k for k, v in _STREAM_DEDUPE_CACHE.items() if not v or (now - v[-1][1] > window_seconds)]
+        for k in stale_keys:
+            _STREAM_DEDUPE_CACHE.pop(k, None)
+
+    entries = _STREAM_DEDUPE_CACHE.setdefault(session_key, [])
+    # Evict expired entries older than window_seconds
+    entries[:] = [(h, t) for (h, t) in entries if now - t < window_seconds]
+
+    for (h, _) in entries:
+        if h == norm_hash:
+            return True
+
+    # Limit maximum entries per session
+    if len(entries) > 200:
+        entries.pop(0)
+
+    entries.append((norm_hash, now))
+    return False
+
+
+ALLOWED_STREAM_AUDIO_MIMES = frozenset({
+    'audio/webm', 'audio/wav', 'audio/mp3', 'audio/mpeg',
+    'audio/ogg', 'audio/m4a', 'audio/x-m4a', 'audio/aac'
+})
+
+
+@factcheck_bp.route('/stream-audio', methods=['POST'])
+@login_required
+@limiter.limit("60 per minute")
+def stream_audio():
+    """Ingest live audio slice, transcribe, extract falsifiable claims, and triage.
+
+    Single-pass multimodal ingestion using Gemini Flash.
+    Calculates word count accumulation for CP billing.
+    Filters rhetorical hyperbole and conversational banter.
+    Deduplicates claims across overlapping chunk boundaries.
+    """
+    user = request.current_user
+    start_time = time.time()
+
+    # 1. Token balance check - require at least 1 CP to stream
+    token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
+    if not token_balance or token_balance.balance < 1:
+        current_bal = token_balance.balance if token_balance else 0
+        raise APIError(
+            'Insufficient tokens. Minimum 1 CP required for live stream verification.',
+            status_code=403,
+            payload={'code': 'INSUFFICIENT_FUNDS', 'balance': current_bal}
+        )
+
+    # 2. Extract audio bytes and MIME type
+    audio_bytes = None
+    mime_type = 'audio/webm'
+
+    if 'audio' in request.files:
+        audio_file = request.files['audio']
+        audio_bytes = audio_file.read()
+        if audio_file.content_type:
+            mime_type = audio_file.content_type.split(';')[0].strip().lower()
+    elif 'file' in request.files:
+        audio_file = request.files['file']
+        audio_bytes = audio_file.read()
+        if audio_file.content_type:
+            mime_type = audio_file.content_type.split(';')[0].strip().lower()
+    else:
+        # Check raw body
+        raw_data = request.get_data()
+        if raw_data:
+            audio_bytes = raw_data
+            if request.content_type:
+                mime_type = request.content_type.split(';')[0].strip().lower()
+
+    if not audio_bytes:
+        raise APIError('No audio data provided in request', status_code=400)
+
+    # Allow custom mime_type override from form
+    form_mime = request.form.get('mime_type')
+    if form_mime:
+        mime_type = form_mime.split(';')[0].strip().lower()
+
+    if mime_type not in ALLOWED_STREAM_AUDIO_MIMES:
+        raise APIError(
+            f'Unsupported audio format: {mime_type}. Supported: webm, wav, mp3, mpeg, ogg, m4a.',
+            status_code=400
+        )
+
+    session_id = (
+        request.form.get('session_id') or
+        request.headers.get('X-Stream-Session-Id') or
+        f"user_{user.id}"
+    )
+    context = request.form.get('context')
+    auto_verify_param = request.form.get('auto_verify', 'true').strip().lower()
+    auto_verify = auto_verify_param in ('1', 'true', 'yes')
+
+    gemini_service = get_gemini_service()
+
+    try:
+        # 3. Multimodal single-pass transcription + claim extraction
+        ingest_result = gemini_service.transcribe_and_extract_claims_from_audio(
+            audio_bytes=audio_bytes,
+            mime_type=mime_type,
+            context=context
+        )
+
+        transcript = ingest_result.get('transcript', '')
+        raw_claims = ingest_result.get('claims', [])
+        word_count = ingest_result.get('word_count', 0)
+
+        # 4. Word-accumulation token billing
+        current_unbilled = token_balance.unbilled_words or 0
+        total_unbilled = current_unbilled + word_count
+        token_cost = (total_unbilled // Config.WORDS_PER_CP) * Config.TOKENS_PER_CP_UNIT
+        remainder_words = total_unbilled % Config.WORDS_PER_CP
+
+        if token_cost > 0:
+            token_balance.balance = max(0, token_balance.balance - token_cost)
+            token_balance.unbilled_words = remainder_words
+        else:
+            token_balance.unbilled_words = total_unbilled
+
+        token_balance.last_updated = datetime.now(UTC)
+        db_session.commit()
+
+        # 5. Sliding window deduplication
+        candidate_claims = []
+        for c in raw_claims:
+            claim_text = c.get('claim', '').strip() if isinstance(c, dict) else str(c).strip()
+            if not claim_text:
+                continue
+            if not _is_claim_duplicate_in_session(session_id, claim_text):
+                candidate_claims.append({
+                    'claim': claim_text,
+                    'timestamp': c.get('timestamp') if isinstance(c, dict) else None,
+                    'quote': c.get('quote') if isinstance(c, dict) else None
+                })
+
+        # 6. Flash Triage (drop hyperbole and banter)
+        verified_claims = []
+        if candidate_claims:
+            claim_texts = [c['claim'] for c in candidate_claims]
+            triage_results = gemini_service.triage_for_stream(claim_texts, stream_context=context)
+
+            claims_to_verify = []
+            for idx, c_item in enumerate(candidate_claims):
+                triage_info = triage_results[idx] if idx < len(triage_results) else {}
+                priority = str(triage_info.get('priority', 'NORMAL')).lower()
+                strategy = triage_info.get('strategy', 'SEARCH_VERIFY')
+                is_hyperbole = bool(triage_info.get('is_hyperbole', False))
+
+                c_item['priority'] = priority
+                c_item['strategy'] = strategy
+                c_item['is_hyperbole'] = is_hyperbole
+
+                # Filter: SKIP or rhetorical hyperbole without empirical anchors
+                if priority != 'skip' and not is_hyperbole:
+                    claims_to_verify.append(c_item)
+
+            # 7. Verification: Cross-User Global Cache Check & Agentic Verification
+            if claims_to_verify and auto_verify:
+                uncached_claims = []
+                recent_cutoff = datetime.now(UTC) - timedelta(hours=48)
+
+                for c_item in claims_to_verify:
+                    clean_c = c_item['claim']
+                    # Global cache lookup: matches any recent check across all users
+                    cached_fc = db_session.query(FactCheck).filter(
+                        FactCheck.claim_text == clean_c,
+                        FactCheck.timestamp >= recent_cutoff
+                    ).order_by(FactCheck.timestamp.desc()).first()
+
+                    if cached_fc:
+                        logger.info(f"Stream verification Global Cache HIT: {clean_c[:40]}")
+                        verified_claims.append({
+                            'claim': clean_c,
+                            'timestamp': c_item.get('timestamp'),
+                            'verdict': cached_fc.verdict,
+                            'explanation': cached_fc.explanation,
+                            'fallacy': cached_fc.fallacy,
+                            'sources': json.loads(cached_fc.sources) if cached_fc.sources else [],
+                            'source_reliability': cached_fc.source_reliability,
+                            'is_cached': True
+                        })
+                    else:
+                        uncached_claims.append(c_item)
+
+                if uncached_claims:
+                    try:
+                        batch_res = gemini_service.analyze_claims_batch(
+                            [c['claim'] for c in uncached_claims],
+                            context=context
+                        )
+                        fc_records_to_persist = []
+                        for i, c_item in enumerate(uncached_claims):
+                            verdict_info = batch_res[i] if i < len(batch_res) else {}
+                            v_record = {
+                                'claim': c_item['claim'],
+                                'timestamp': c_item.get('timestamp'),
+                                'verdict': verdict_info.get('verdict', 'COULD_NOT_VERIFY'),
+                                'explanation': verdict_info.get('explanation', ''),
+                                'fallacy': verdict_info.get('fallacy'),
+                                'sources': verdict_info.get('sources', []),
+                                'source_reliability': verdict_info.get('source_reliability', 'MEDIUM'),
+                                'is_cached': False
+                            }
+                            verified_claims.append(v_record)
+
+                            # Stage for batch persistence to seed global cache
+                            fc_records_to_persist.append(FactCheck(
+                                user_id=user.id,
+                                claim_text=c_item['claim'],
+                                is_claim=verdict_info.get('is_claim', True),
+                                verdict=v_record['verdict'],
+                                explanation=v_record['explanation'],
+                                fallacy=v_record['fallacy'],
+                                sources=json.dumps(v_record['sources']),
+                                source_reliability=v_record['source_reliability'],
+                                processing_time=time.time() - start_time
+                            ))
+
+                        # Single commit for all verified claims
+                        if fc_records_to_persist:
+                            try:
+                                db_session.add_all(fc_records_to_persist)
+                                db_session.commit()
+                            except Exception as persist_err:
+                                db_session.rollback()
+                                logger.warning(f"Could not persist stream factchecks: {persist_err}")
+                    except Exception as verify_err:
+                        logger.error(f"Live verification batch failed: {verify_err}")
+
+        elapsed = time.time() - start_time
+        logger.info(
+            f"Stream slice processed for {user.email}: "
+            f"{word_count} words, {len(candidate_claims)} candidate claims, "
+            f"{len(verified_claims)} verified in {elapsed:.2f}s"
+        )
+
+        return jsonify({
+            'success': True,
+            'transcript': transcript,
+            'word_count': word_count,
+            'candidate_claims': candidate_claims,
+            'verified_claims': verified_claims,
+            'tokens_used': token_cost,
+            'balance': token_balance.balance,
+            'processing_time': elapsed
+        })
+
+    except APIError:
+        raise
+    except Exception as e:
+        db_session.rollback()
+        logger.error(f"Stream audio processing error: {e}", exc_info=True)
+        raise APIError('Failed to process stream audio slice', status_code=500)
+
 

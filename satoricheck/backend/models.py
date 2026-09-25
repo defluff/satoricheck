@@ -211,6 +211,7 @@ class MediaCheck(Base):
     confidence = Column(Integer)
     reasoning = Column(Text)
     criteria_json = Column(Text)  # JSON storage for detailed criteria
+    claims_json = Column(Text, nullable=True)  # JSON storage for extracted spoken claims with timestamps
     
     # Fingerprinting
     embedding_json = Column(Text)  # JSON storage for multimodal embedding vector

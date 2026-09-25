@@ -411,7 +411,7 @@
                         <span class="ma-drop-zone-icon">🖼️</span>
                         <p class="ma-drop-zone-title">Drop image or video here to check if it is ai generated</p>
                         <p class="ma-drop-zone-hint">or click to browse your files</p>
-                        <p class="ma-drop-zone-formats">JPG · PNG · WebP · GIF · MP4 · WebM · MOV</p>
+                        <p class="ma-drop-zone-formats">JPG · PNG · WebP · GIF · MP4 · WebM · MOV · MP3 · WAV · OGG · M4A</p>
                         <!-- File selected state -->
                         <div class="ma-file-selected">
                             <span class="ma-file-selected-icon">✓</span>
@@ -420,37 +420,83 @@
                         </div>
                     </div>
                     <input type="file" id="ma-file-input"
-                        accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime"
-                        aria-label="Upload image or video file" />
+                        accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime,video/x-matroska,audio/mpeg,audio/mp3,audio/wav,audio/webm,audio/ogg,audio/x-m4a,audio/aac,audio/m4a"
+                        aria-label="Upload image, video or audio file" />
+                    <button class="ma-analyse-btn" id="ma-upload-analyse-btn" disabled>
+                        Analyse Uploaded Media
+                    </button>
                 </div>
 
                 <!-- URL panel (hidden by default) -->
                 <div class="ma-url-panel hidden" id="ma-url-panel">
                     <label class="ma-url-label" for="ma-url-input">
-                        Paste a public link to an image or video
+                        Paste a public link to an image, video, or audio
                     </label>
                     <div class="ma-url-input-row">
                         <input class="ma-url-input" id="ma-url-input" type="url"
-                            placeholder="https://example.com/image.jpg or youtube.com/watch?v=…" autocomplete="off"
+                            placeholder="https://example.com/video.mp4 or youtube.com/watch?v=…" autocomplete="off"
                             spellcheck="false" />
+                        <button class="ma-analyse-btn ma-analyse-btn-inline" id="ma-analyse-btn" disabled>
+                            Analyse Media
+                        </button>
                     </div>
-                    <p class="ma-url-hint">⚠️ Only publicly accessible, non-gated URLs are supported.</p>
+                    <p class="ma-url-hint">⚠️ Only publicly accessible, non-gated URLs are supported. Press Enter to analyse.</p>
                 </div>
-
-                <!-- CTA -->
-                <button class="ma-analyse-btn" id="ma-analyse-btn" disabled>
-                    Analyse Media
-                </button>
 
                 <p class="ma-disclaimer">
                     🛡️ Media is processed in-session only and never stored or used for training.
                 </p>
+
+                <!-- Media Preview Card (Preview Player & Canvas) -->
+                <div class="ma-preview-card hidden" id="ma-preview-card">
+                    <div class="ma-preview-header">
+                        <div class="ma-preview-meta">
+                            <span class="ma-preview-icon" id="ma-preview-icon">🎬</span>
+                            <span class="ma-preview-filename" id="ma-preview-filename">Media Preview</span>
+                        </div>
+                        <span class="ma-preview-badge" id="ma-preview-badge">VIDEO</span>
+                    </div>
+                    <div class="ma-player-stage">
+                        <video id="ma-player" class="ma-player-media hidden" controls playsinline preload="metadata"></video>
+                        <audio id="ma-audio-player" class="ma-player-audio hidden" controls preload="metadata"></audio>
+                        <img id="ma-image-preview" class="ma-player-image hidden" alt="Media preview" />
+                        <div id="ma-youtube-container" class="ma-youtube-container hidden">
+                            <div class="ma-yt-thumbnail-wrapper" id="ma-yt-thumbnail-wrapper">
+                                <img id="ma-yt-thumb" class="ma-yt-thumb" alt="YouTube Thumbnail" />
+                                <div class="ma-yt-overlay">
+                                    <span class="ma-yt-play-icon">▶</span>
+                                    <span class="ma-yt-hint-text">Click to load player</span>
+                                </div>
+                                <a id="ma-yt-external-link" href="#" target="_blank" rel="noopener noreferrer" class="ma-yt-external-btn" title="Open in YouTube">
+                                    Watch on YouTube ↗
+                                </a>
+                            </div>
+                            <iframe id="ma-youtube-player" class="ma-player-media ma-player-youtube hidden" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                        </div>
+                        <div class="ma-scanner-beam hidden" id="ma-scanner-beam"></div>
+                    </div>
+                </div>
             </section>
 
             <!-- Right column: idle placeholder -->
             <section class="ma-result-placeholder" id="ma-result-placeholder">
                 <span class="ma-placeholder-icon">🧬</span>
                 <p class="ma-placeholder-text">Upload or link a file to begin authenticity analysis</p>
+            </section>
+
+            <!-- Active loading state -->
+            <section class="ma-loading-section hidden" id="ma-loading-section">
+                <div class="ma-radar-wrapper">
+                    <div class="ma-radar-ping"></div>
+                    <div class="ma-radar-core">🔬</div>
+                </div>
+                <h3 class="ma-loading-title">Analysing media...</h3>
+                <p class="ma-loading-step" id="ma-loading-step">
+                    Checking audio and visual authenticity...
+                </p>
+                <div class="ma-progress-track">
+                    <div class="ma-progress-bar-animated"></div>
+                </div>
             </section>
 
             <!-- Right column: Result panel (hidden until analysis completes) -->
@@ -525,7 +571,41 @@
                         </p>
                     </div>
 
-                    <!-- 3. Contextual Coherence -->
+                    <!-- 3. Temporal & Motion Coherence (Video) -->
+                    <div class="ma-criterion">
+                        <div class="ma-criterion-header">
+                            <span class="ma-criterion-name">
+                                Temporal & Motion Coherence
+                            </span>
+                            <span class="ma-signal-tag" data-signal="clear" id="ma-signal-temporal">Clean</span>
+                        </div>
+                        <div class="ma-signal-bar-track">
+                            <div class="ma-signal-bar-fill" data-signal="clear" id="ma-bar-temporal"
+                                style="--fill: 0%"></div>
+                        </div>
+                        <p class="ma-criterion-desc" id="ma-desc-temporal">
+                            Frame-to-frame motion continuity is consistent with no morphing.
+                        </p>
+                    </div>
+
+                    <!-- 4. Audio & Vocal Forensics (Audio/Video) -->
+                    <div class="ma-criterion">
+                        <div class="ma-criterion-header">
+                            <span class="ma-criterion-name">
+                                Audio & Vocal Forensics
+                            </span>
+                            <span class="ma-signal-tag" data-signal="clear" id="ma-signal-audio">Clean</span>
+                        </div>
+                        <div class="ma-signal-bar-track">
+                            <div class="ma-signal-bar-fill" data-signal="clear" id="ma-bar-audio"
+                                style="--fill: 0%"></div>
+                        </div>
+                        <p class="ma-criterion-desc" id="ma-desc-audio">
+                            Natural speech cadence, breathing, and room acoustics.
+                        </p>
+                    </div>
+
+                    <!-- 5. Contextual Coherence -->
                     <div class="ma-criterion">
                         <div class="ma-criterion-header">
                             <span class="ma-criterion-name">
@@ -544,7 +624,7 @@
                         </p>
                     </div>
 
-                    <!-- 4. Compression & Artifact Forensics -->
+                    <!-- 6. Compression & Artifact Forensics -->
                     <div class="ma-criterion">
                         <div class="ma-criterion-header">
                             <span class="ma-criterion-name">
@@ -563,7 +643,7 @@
                         </p>
                     </div>
 
-                    <!-- 5. Metadata Signals -->
+                    <!-- 7. Metadata Signals -->
                     <div class="ma-criterion">
                         <div class="ma-criterion-header">
                             <span class="ma-criterion-name">
@@ -582,6 +662,25 @@
                         </p>
                     </div>
                 </div>
+
+                <!-- Spoken Factual Claims Desk -->
+                <section class="ma-claims-desk hidden" id="ma-claims-desk">
+                    <div class="ma-claims-header">
+                        <div class="ma-claims-title-wrap">
+                            <h3 class="ma-claims-title">🎙️ Spoken Factual Claims</h3>
+                            <span class="ma-claims-count-badge" id="ma-claims-count-badge">0 claims</span>
+                        </div>
+                        <button class="ma-verify-all-btn" id="ma-verify-all-btn" title="Verify all extracted claims with search & source grounding">
+                            <span class="btn-text">⚡ Verify All Claims</span>
+                        </button>
+                    </div>
+                    <p class="ma-claims-hint">
+                        Falsifiable claims extracted from dialogue with precise timestamps. Click any timestamp to jump the preview player.
+                    </p>
+                    <div class="ma-claims-list" id="ma-claims-list">
+                        <!-- Dynamic claim cards rendered here -->
+                    </div>
+                </section>
 
                 <!-- Reasoning is now inside the verdict card above -->
 

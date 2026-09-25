@@ -115,7 +115,7 @@ def test_claim_priority_enum():
 def test_triage_for_stream_classifies_claims(gemini_service):
     """Verify triage_for_stream calls Flash-Lite and returns structured results."""
     gemini_service.client.models.generate_content.return_value = make_mock_response(
-        '[{"index": 1, "priority": "IMMEDIATE", "strategy": "SOCIAL_VERIFY"}, {"index": 2, "priority": "NORMAL", "strategy": "SEARCH_VERIFY"}]'
+        '[{"index": 1, "priority": "IMMEDIATE", "strategy": "SOCIAL_VERIFY", "is_hyperbole": false}, {"index": 2, "priority": "NORMAL", "strategy": "SEARCH_VERIFY", "is_hyperbole": false}]'
     )
     
     claims = ["Breaking news claim", "Historical fact"]
@@ -125,11 +125,58 @@ def test_triage_for_stream_classifies_claims(gemini_service):
     assert results[0]["claim"] == "Breaking news claim"
     assert results[0]["priority"] == ClaimPriority.IMMEDIATE
     assert results[0]["strategy"] == "SOCIAL_VERIFY"
+    assert results[0]["is_hyperbole"] is False
     assert results[1]["claim"] == "Historical fact"
     assert results[1]["priority"] == ClaimPriority.NORMAL
+    assert results[1]["is_hyperbole"] is False
+
+def test_triage_for_stream_flags_hyperbole_as_skip(gemini_service):
+    """Verify triage_for_stream auto-assigns ClaimPriority.SKIP when is_hyperbole is True."""
+    gemini_service.client.models.generate_content.return_value = make_mock_response(
+        '[{"index": 1, "priority": "NORMAL", "strategy": "SEARCH_VERIFY", "is_hyperbole": true}, '
+        '{"index": 2, "priority": "NORMAL", "strategy": "SEARCH_VERIFY", "is_hyperbole": false}]'
+    )
+    
+    claims = [
+        "This is literally the greatest disaster in the entire history of mankind",
+        "Inflation was measured at 3.2% in August 2024"
+    ]
+    results = gemini_service.triage_for_stream(claims)
+    
+    assert len(results) == 2
+    # Even though model returned NORMAL in priority field, is_hyperbole=True forces SKIP
+    assert results[0]["priority"] == ClaimPriority.SKIP
+    assert results[0]["is_hyperbole"] is True
+    # Non-hyperbole claim stays NORMAL
+    assert results[1]["priority"] == ClaimPriority.NORMAL
+    assert results[1]["is_hyperbole"] is False
+
+def test_triage_for_stream_spoken_transcript_calibration(gemini_service):
+    """Verify triage_for_stream handles spoken conversational stream claims correctly."""
+    gemini_service.client.models.generate_content.return_value = make_mock_response(
+        '['
+        '{"index": 1, "priority": "SKIP", "strategy": "KNOWLEDGE_CHECK", "is_hyperbole": true}, '
+        '{"index": 2, "priority": "IMMEDIATE", "strategy": "SEARCH_VERIFY", "is_hyperbole": false}, '
+        '{"index": 3, "priority": "SKIP", "strategy": "KNOWLEDGE_CHECK", "is_hyperbole": false}'
+        ']'
+    )
+    
+    spoken_claims = [
+        "Everyone in Silicon Valley literally uses this 24/7",
+        "The Federal Reserve cut interest rates by 50 basis points today",
+        "I think that movie was pretty awesome"
+    ]
+    results = gemini_service.triage_for_stream(spoken_claims, stream_context="Tech podcast live debate")
+    
+    assert len(results) == 3
+    assert results[0]["priority"] == ClaimPriority.SKIP
+    assert results[0]["is_hyperbole"] is True
+    assert results[1]["priority"] == ClaimPriority.IMMEDIATE
+    assert results[1]["is_hyperbole"] is False
+    assert results[2]["priority"] == ClaimPriority.SKIP
 
 def test_triage_fallback_on_error(gemini_service):
-    """Verify triage falls back to NORMAL priority on API error."""
+    """Verify triage falls back to NORMAL priority on API error with is_hyperbole=False."""
     gemini_service.client.models.generate_content.side_effect = Exception("API Error")
     
     claims = ["Some claim"]
@@ -138,6 +185,7 @@ def test_triage_fallback_on_error(gemini_service):
     # Should fallback to NORMAL
     assert len(results) == 1
     assert results[0]["priority"] == ClaimPriority.NORMAL
+    assert results[0]["is_hyperbole"] is False
 
 def test_normalize_claim_text():
     """Verify claim text normalization strips punctuation, collapses whitespace, lowercases."""

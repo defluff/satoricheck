@@ -197,15 +197,25 @@
     text-align: center;
 }
 
-.ma-url-input {
+.ma-url-input-row {
+    display: flex;
+    gap: var(--spacing-sm);
     width: 100%;
+    align-items: stretch;
+}
+
+.ma-url-input {
+    flex: 1;
+    min-width: 0;
+    height: 46px;
     background: var(--color-surface-elevated);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
-    padding: var(--spacing-sm) var(--spacing-md);
+    padding: 0 var(--spacing-md);
     color: var(--color-text);
     font-size: 0.9375rem;
-    transition: border-color var(--transition-base);
+    line-height: 44px;
+    transition: border-color var(--transition-base), box-shadow var(--transition-base);
     box-sizing: border-box;
 }
 
@@ -215,7 +225,7 @@
 
 .ma-url-input:focus {
     outline: none;
-    border-color: var(--color-primary);
+    border-color: var(--color-primary-strong);
     box-shadow: 0 0 0 3px var(--glow-primary-light);
 }
 
@@ -226,31 +236,52 @@
     text-align: center;
 }
 
+.ma-analyse-btn-inline {
+    margin: 0 !important;
+    width: auto !important;
+    min-width: 154px;
+    height: 46px !important;
+    white-space: nowrap;
+    padding: 0 var(--spacing-lg) !important;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    border-radius: var(--radius-md) !important;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-xs);
+    line-height: 1;
+}
+
 /* --- Analyse Button — mirrors .pd-generate-btn --- */
 .ma-analyse-btn {
     width: 100%;
     max-width: 280px;
+    height: 46px;
     margin: var(--spacing-md) auto 0;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: var(--spacing-sm);
-    padding: var(--spacing-sm) var(--spacing-xl);
+    padding: 0 var(--spacing-xl);
     background: var(--color-primary);
     color: var(--color-primary-text, white);
     border: none;
-    border-radius: var(--radius-lg);
-    font-size: 1rem;
+    border-radius: var(--radius-md);
+    font-size: 0.9375rem;
     font-weight: 600;
     cursor: pointer;
     transition: all var(--transition-base);
     box-shadow: 0 4px 15px var(--glow-primary);
     letter-spacing: 0.02em;
+    box-sizing: border-box;
 }
 
 .ma-analyse-btn:hover:not(:disabled) {
     transform: translateY(-2px);
     box-shadow: 0 6px 20px var(--glow-primary-strong);
+    background: var(--color-primary-hover);
 }
 
 .ma-analyse-btn:active:not(:disabled) {
@@ -258,9 +289,26 @@
 }
 
 .ma-analyse-btn:disabled {
-    opacity: 0.5;
+    opacity: 0.45;
     cursor: not-allowed;
     box-shadow: none;
+}
+
+.ma-analyse-btn.is-loading {
+    opacity: 1 !important;
+    cursor: wait !important;
+    background: var(--color-primary-hover) !important;
+    color: var(--color-primary-strong) !important;
+    box-shadow: 0 0 20px rgba(0, 0, 128, 0.25) !important;
+    pointer-events: none;
+}
+
+.ma-analyse-btn.is-loading .loading-spinner,
+.ma-analyse-btn.is-loading .spinner {
+    width: 18px;
+    height: 18px;
+    border-width: 2.5px;
+    border-color: var(--color-primary-strong) transparent var(--color-primary-strong) transparent;
 }
 
 .ma-disclaimer {
@@ -305,6 +353,135 @@
 
 .ma-placeholder-text {
     margin: 0;
+}
+
+/* ============================================================
+   ACTIVE FORENSIC LOADING STATE
+   ============================================================ */
+
+.ma-loading-section {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-xl);
+    padding: var(--spacing-xl);
+    box-shadow: var(--shadow-lg);
+    backdrop-filter: blur(8px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: var(--spacing-md);
+    margin-top: var(--spacing-md);
+    position: relative;
+    overflow: hidden;
+}
+
+.ma-loading-section.hidden {
+    display: none;
+}
+
+.ma-loading-section::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--color-primary-strong), #38bdf8, var(--color-error), var(--color-primary-strong));
+    background-size: 200% 100%;
+    animation: maGradientSlide 2s linear infinite;
+}
+
+@keyframes maGradientSlide {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
+}
+
+.ma-radar-wrapper {
+    position: relative;
+    width: 68px;
+    height: 68px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: var(--spacing-xs);
+}
+
+.ma-radar-ping {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: rgba(56, 189, 248, 0.2);
+    border: 2px solid #38bdf8;
+    animation: maRadarPing 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@keyframes maRadarPing {
+    0% { transform: scale(0.6); opacity: 1; }
+    100% { transform: scale(1.4); opacity: 0; }
+}
+
+.ma-radar-core {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--color-surface-elevated);
+    border: 1px solid var(--color-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    z-index: 2;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.ma-loading-title {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: var(--color-text);
+    letter-spacing: -0.01em;
+}
+
+.ma-loading-step {
+    margin: 0;
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+    min-height: 1.5em;
+    font-weight: 500;
+    transition: opacity 0.2s ease;
+    max-width: 520px;
+}
+
+.ma-progress-track {
+    width: 100%;
+    max-width: 420px;
+    height: 6px;
+    background: var(--color-surface-elevated);
+    border-radius: 9999px;
+    overflow: hidden;
+    margin: var(--spacing-xs) 0;
+    border: 1px solid var(--color-border);
+}
+
+.ma-progress-bar-animated {
+    width: 45%;
+    height: 100%;
+    background: linear-gradient(90deg, #38bdf8, var(--color-primary-strong));
+    border-radius: 9999px;
+    animation: maProgressIndeterminate 1.6s ease-in-out infinite alternate;
+}
+
+@keyframes maProgressIndeterminate {
+    0% {
+        transform: translateX(-40%);
+        width: 30%;
+    }
+    100% {
+        transform: translateX(260%);
+        width: 60%;
+    }
 }
 
 /* ============================================================
@@ -602,4 +779,438 @@
     margin: 0;
     line-height: 1.4;
 }
+
+/* ============================================================
+   PREVIEW PLAYER CARD
+   ============================================================ */
+
+.ma-preview-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-xl);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: var(--shadow-lg);
+    backdrop-filter: blur(8px);
+    transition: all var(--transition-base);
+}
+
+.ma-preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--color-surface-elevated);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.ma-preview-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    overflow: hidden;
+}
+
+.ma-preview-icon {
+    font-size: 1rem;
+}
+
+.ma-preview-filename {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--color-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 280px;
+}
+
+.ma-preview-badge {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary-subtle);
+    color: var(--color-primary-strong);
+    border: 1px solid var(--color-border);
+}
+
+.ma-player-stage {
+    position: relative;
+    background: var(--color-bg);
+    min-height: 180px;
+    max-height: 400px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.ma-scanner-beam {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, transparent, #38bdf8, var(--color-error), #38bdf8, transparent);
+    box-shadow: 0 0 15px rgba(56, 189, 248, 0.8), 0 0 30px rgba(239, 68, 68, 0.6);
+    z-index: 10;
+    pointer-events: none;
+    animation: maScanSweep 2s ease-in-out infinite alternate;
+}
+
+.ma-scanner-beam.hidden {
+    display: none;
+}
+
+@keyframes maScanSweep {
+    0% {
+        top: 0%;
+        opacity: 0.8;
+    }
+    100% {
+        top: 98%;
+        opacity: 1;
+    }
+}
+
+.ma-player-media {
+    width: 100%;
+    max-height: 400px;
+    outline: none;
+}
+
+.ma-player-audio {
+    width: 90%;
+    margin: var(--spacing-lg) auto;
+}
+
+.ma-player-image {
+    max-width: 100%;
+    max-height: 380px;
+    object-fit: contain;
+}
+
+.ma-youtube-container {
+    position: relative;
+    width: 100%;
+    min-height: 260px;
+    max-height: 380px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-bg);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.ma-yt-thumbnail-wrapper {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 260px;
+    max-height: 380px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    background: var(--color-bg);
+}
+
+.ma-yt-thumb {
+    width: 100%;
+    height: 100%;
+    max-height: 380px;
+    object-fit: cover;
+    filter: brightness(0.85);
+    transition: filter var(--transition-base), transform var(--transition-base);
+}
+
+.ma-yt-thumbnail-wrapper:hover .ma-yt-thumb {
+    filter: brightness(0.95);
+    transform: scale(1.01);
+}
+
+.ma-yt-overlay {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-xs);
+    pointer-events: none;
+}
+
+.ma-yt-play-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: var(--color-error);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+    padding-left: 3px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    transition: transform var(--transition-base);
+}
+
+.ma-yt-thumbnail-wrapper:hover .ma-yt-play-icon {
+    transform: scale(1.1);
+}
+
+.ma-yt-hint-text {
+    font-size: 0.8125rem;
+    color: var(--color-text);
+    font-weight: 500;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+}
+
+.ma-yt-external-btn {
+    position: absolute;
+    top: var(--spacing-sm);
+    right: var(--spacing-sm);
+    background: rgba(0, 0, 0, 0.75);
+    color: white;
+    font-size: 0.75rem;
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    text-decoration: none;
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    transition: background var(--transition-base);
+}
+
+.ma-yt-external-btn:hover {
+    background: var(--color-error);
+    color: white;
+}
+
+.ma-player-youtube {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    height: 360px;
+    border: none;
+    border-radius: var(--radius-md);
+}
+
+/* ============================================================
+   INTERACTIVE CLAIMS DESK
+   ============================================================ */
+
+.ma-claims-desk {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-xl);
+    padding: var(--spacing-lg);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+    box-shadow: var(--shadow-lg);
+    backdrop-filter: blur(8px);
+    margin-top: var(--spacing-md);
+}
+
+.ma-claims-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+}
+
+.ma-claims-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.ma-claims-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--color-text);
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+.ma-claims-count-badge {
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: var(--color-surface-elevated);
+    color: var(--color-text-secondary);
+    border: 1px solid var(--color-border);
+    padding: 2px 8px;
+    border-radius: 999px;
+}
+
+.ma-verify-all-btn {
+    background: var(--gradient-primary);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-md);
+    padding: var(--spacing-xs) var(--spacing-md);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 2px 8px var(--glow-primary);
+    transition: all var(--transition-fast);
+}
+
+.ma-verify-all-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px var(--glow-primary);
+}
+
+.ma-verify-all-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.ma-claims-hint {
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+    margin: 0;
+}
+
+.ma-claims-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+/* Individual Claim Item Card */
+.ma-claim-item {
+    background: var(--color-surface-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+    transition: border-color var(--transition-fast);
+    position: relative;
+    overflow: hidden;
+}
+
+.ma-claim-item:hover {
+    border-color: var(--color-primary-hover);
+}
+
+.ma-claim-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-sm);
+}
+
+.ma-timestamp-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--bg-primary-subtle);
+    color: var(--color-accent-text);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: 2px 8px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    font-family: monospace;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.ma-timestamp-tag:hover {
+    background: var(--color-primary);
+    color: var(--color-primary-text);
+    border-color: var(--color-primary);
+}
+
+.ma-claim-status-pill {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 2px 8px;
+    border-radius: 999px;
+    text-transform: uppercase;
+}
+
+.ma-claim-status-pill[data-verdict="true"] {
+    background: var(--bg-success-subtle);
+    color: var(--color-success);
+    border: 1px solid var(--color-success);
+}
+
+.ma-claim-status-pill[data-verdict="false"] {
+    background: var(--bg-error-subtle);
+    color: var(--color-false);
+    border: 1px solid var(--color-false);
+}
+
+.ma-claim-status-pill[data-verdict="misleading"],
+.ma-claim-status-pill[data-verdict="unverified"] {
+    background: var(--bg-warning-subtle);
+    color: var(--color-warning);
+    border: 1px solid var(--color-warning);
+}
+
+.ma-claim-status-pill[data-verdict="pending"] {
+    background: var(--bg-neutral-subtle);
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
+}
+
+.ma-claim-text {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-text);
+    margin: 0;
+    line-height: 1.5;
+}
+
+.ma-claim-verdict-details {
+    margin-top: var(--spacing-xs);
+    padding-top: var(--spacing-xs);
+    border-top: 1px solid var(--color-border);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.ma-claim-explanation {
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+    line-height: 1.4;
+    margin: 0;
+}
+
+.ma-claim-sources {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.ma-source-link {
+    font-size: 0.75rem;
+    color: var(--color-accent-text);
+    text-decoration: none;
+    background: var(--color-surface);
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--color-border);
+    transition: all var(--transition-fast);
+}
+
+.ma-source-link:hover {
+    color: var(--color-primary-text);
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+}
+
+
 

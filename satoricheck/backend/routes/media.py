@@ -28,7 +28,10 @@ media_bp = Blueprint('media', __name__, url_prefix='/api/media')
 # Whitelist for supported media types
 ALLOWED_MIME_TYPES = {
     'image/jpeg', 'image/png', 'image/webp', 'image/gif',
-    'video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska'
+    'video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska',
+    'video/m4v', 'video/x-m4v', 'video/avi', 'video/x-msvideo', 'video/3gpp', 'video/ogg',
+    'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/webm', 'audio/ogg',
+    'audio/x-m4a', 'audio/aac', 'audio/m4a'
 }
 
 # Simple regex for initial URL validation
@@ -39,6 +42,8 @@ URL_REGEX = re.compile(
     r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # ...or ip
     r'(?::\d+)?'  # optional port
     r'(?:/?|[/?]\S+)$', re.IGNORECASE)
+
+from backend.services.gemini.media import GeminiServiceMedia
 
 # Hostnames of platforms that serve HTML pages (not direct media files).
 # Maps hostname substrings to human-readable names for error messages.
@@ -53,8 +58,6 @@ _PLATFORM_HOSTS = {
     'vimeo.com': 'Vimeo',
     'x.com': 'X (Twitter)',
     'twitter.com': 'X (Twitter)',
-    'youtu.be': 'YouTube',
-    'youtube.com': 'YouTube',
 }
 
 
@@ -121,6 +124,8 @@ def _analyze_media(
 
         processing_time = time.time() - start_time
 
+        claims = result.get('claims', [])
+
         # Persist to database
         url_value = source if input_type == 'url' else f"upload://{display_name}"
         media_check = MediaCheck(
@@ -131,6 +136,7 @@ def _analyze_media(
             confidence=result.get('confidence'),
             reasoning=result.get('explanation'),
             criteria_json=json.dumps(result.get('criteria')),
+            claims_json=json.dumps(claims) if claims else None,
             embedding_json=json.dumps(embedding),
             processing_time=processing_time,
         )
@@ -144,6 +150,7 @@ def _analyze_media(
                 'confidence': result.get('confidence'),
                 'explanation': result.get('explanation'),
                 'criteria': result.get('criteria'),
+                'claims': claims,
                 'processing_time': processing_time,
             },
             'new_balance': token_balance.balance,
@@ -173,9 +180,25 @@ def analyze_url() -> tuple:
         # Early regex validation
         if not URL_REGEX.match(url):
             raise APIError('Invalid URL format. Must start with http:// or https://', status_code=400)
+
+        # YouTube URL handling: Gemini natively supports public YouTube URLs via Part.from_uri
+        parsed_url = urlparse(url)
+        hostname = (parsed_url.hostname or '').lower().removeprefix('www.')
+        if hostname in ('youtube.com', 'm.youtube.com', 'youtu.be') or hostname.endswith('.youtube.com'):
+            yt_id = GeminiServiceMedia.extract_youtube_id(url)
+            if not yt_id:
+                raise APIError(
+                    'Invalid YouTube URL. Please provide a link to a specific YouTube video '
+                    '(e.g. https://www.youtube.com/watch?v=... or https://youtu.be/...).',
+                    status_code=400
+                )
+            canonical_url = f"https://www.youtube.com/watch?v={yt_id}"
+            return jsonify(
+                _analyze_media(canonical_url, 'url', 'video/mp4', request.current_user, f"YouTube ({yt_id})")
+            )
             
         # Determine MIME type: try URL extension first, then HEAD request
-        parsed_path = urlparse(url).path
+        parsed_path = parsed_url.path
         mime_type, _ = mimetypes.guess_type(parsed_path)
 
         # Fallback: extension-based heuristic for common suffixes
@@ -183,11 +206,22 @@ def analyze_url() -> tuple:
             lower_path = parsed_path.lower()
             if lower_path.endswith(('.jpg', '.jpeg', '.png', '.webp')):
                 mime_type = 'image/jpeg'
-            elif lower_path.endswith(('.mp4', '.mov', '.webm')):
+            elif lower_path.endswith(('.mp4', '.mov', '.webm', '.mkv')):
                 mime_type = 'video/mp4'
+            elif lower_path.endswith(('.mp3', '.m4a', '.aac')):
+                mime_type = 'audio/mpeg'
+            elif lower_path.endswith('.wav'):
+                mime_type = 'audio/wav'
+            elif lower_path.endswith('.ogg'):
+                mime_type = 'audio/ogg'
 
         # Fallback: probe Content-Type via HEAD (handles CDN/API URLs with no extension)
         if not mime_type:
+            # SSRF check: ensure URL points to a public, non-private IP before issuing HEAD request
+            gemini_service = get_gemini_service()
+            if not gemini_service._validate_url(url):
+                raise APIError('Invalid or restricted URL. The address cannot be resolved or is not accessible.', status_code=400)
+
             import requests as http_requests
             try:
                 head_resp = http_requests.head(url, timeout=5, allow_redirects=True)
@@ -206,15 +240,15 @@ def analyze_url() -> tuple:
             if platform:
                 raise APIError(
                     f'{platform} links are not yet supported. '
-                    'Please paste a direct image or video URL '
-                    '(e.g. right-click an image → "Copy image address").',
+                    'Please paste a direct image, video, or audio URL '
+                    '(e.g. right-click media → "Copy media address").',
                     status_code=400
                 )
             raise APIError(
                 'This URL type is not supported. '
-                'Please paste a direct link to an image or video file '
-                '(e.g. right-click an image → "Copy image address"). '
-                'Supported formats: JPEG, PNG, WebP, MP4, MOV, WebM.',
+                'Please paste a direct link to an image, video, or audio file '
+                '(e.g. right-click media → "Copy link address"). '
+                'Supported formats: JPEG, PNG, WebP, MP4, MOV, WebM, MP3, WAV, OGG, M4A.',
                 status_code=400
             )
 
@@ -246,12 +280,47 @@ def analyze_upload() -> tuple:
         if file.filename == '':
             raise APIError('No file selected', status_code=400)
         
+        # MIME type normalization & filename-based fallback
         mime_type = file.content_type
+        if mime_type:
+            mime_type = mime_type.split(';')[0].strip().lower()
+
+        if not mime_type or mime_type == 'application/octet-stream' or mime_type not in ALLOWED_MIME_TYPES:
+            guessed, _ = mimetypes.guess_type(file.filename)
+            if guessed and guessed in ALLOWED_MIME_TYPES:
+                mime_type = guessed
+            else:
+                lower_fn = file.filename.lower()
+                if lower_fn.endswith(('.mp4', '.m4v')):
+                    mime_type = 'video/mp4'
+                elif lower_fn.endswith('.mov'):
+                    mime_type = 'video/quicktime'
+                elif lower_fn.endswith('.webm'):
+                    mime_type = 'video/webm'
+                elif lower_fn.endswith('.mkv'):
+                    mime_type = 'video/x-matroska'
+                elif lower_fn.endswith(('.jpg', '.jpeg')):
+                    mime_type = 'image/jpeg'
+                elif lower_fn.endswith('.png'):
+                    mime_type = 'image/png'
+                elif lower_fn.endswith('.webp'):
+                    mime_type = 'image/webp'
+                elif lower_fn.endswith('.mp3'):
+                    mime_type = 'audio/mpeg'
+                elif lower_fn.endswith('.wav'):
+                    mime_type = 'audio/wav'
+                elif lower_fn.endswith(('.m4a', '.aac')):
+                    mime_type = 'audio/m4a'
+
         if not mime_type or mime_type not in ALLOWED_MIME_TYPES:
-            raise APIError(f'Unsupported media type: {mime_type}', status_code=400)
+            raise APIError(
+                f'Unsupported media format ({mime_type or "unknown"}). '
+                'Supported formats: MP4, MOV, WebM, MKV, MP3, WAV, OGG, M4A, JPEG, PNG, WebP.',
+                status_code=400
+            )
 
         # Secure temporary storage
-        filename = secure_filename(file.filename)
+        filename = secure_filename(file.filename) or 'uploaded_media'
         fd, temp_path = tempfile.mkstemp(suffix=f"_{filename}")
         os.close(fd)
         file.save(temp_path)
@@ -262,10 +331,19 @@ def analyze_upload() -> tuple:
 
     except APIError:
         raise
+    except ValueError as e:
+        db_session.rollback()
+        logger.error(f"Media validation error: {e}")
+        raise APIError(str(e), status_code=400)
     except Exception as e:
         db_session.rollback()
         logger.error(f"Media upload error: {e}", exc_info=True)
-        raise APIError('Failed to process uploaded media')
+        err_msg = str(e)
+        if 'codec' in err_msg.lower() or 'decode' in err_msg.lower():
+            user_msg = 'The video could not be decoded. Please verify the file is encoded in standard H.264 MP4, MOV, or WebM format.'
+        else:
+            user_msg = f'Failed to process uploaded media: {err_msg}'
+        raise APIError(user_msg, status_code=400)
     finally:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)

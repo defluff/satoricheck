@@ -26,6 +26,13 @@ def run_migration():
         except Exception as e:
             print(f"Note (source_reliability): {e}")
         
+        # Migration 4: claims_json column in media_checks
+        try:
+            conn.execute(text("ALTER TABLE media_checks ADD COLUMN claims_json TEXT"))
+            print("✓ Added claims_json column to media_checks")
+        except Exception as e:
+            print(f"Note (claims_json): {e}")
+        
         # Commit changes
         conn.commit()
         print("Migration complete!")
