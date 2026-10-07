@@ -192,9 +192,9 @@ class GeminiServiceBatch(GeminiServiceUtils):
                 include_server_side_tool_invocations=True
             ),
             thinking_config=types.ThinkingConfig(
+                thinking_level="high",
                 include_thoughts=True
-            ),
-            temperature=1.0
+            )
         )
         
         if cache_name:
@@ -282,7 +282,10 @@ class GeminiServiceBatch(GeminiServiceUtils):
                 logger.info("Agentic closing turn (producing final answer from tool results)...")
                 closing_config = types.GenerateContentConfig(
                     system_instruction=system_instruction,
-                    thinking_config=types.ThinkingConfig(include_thoughts=True),
+                    thinking_config=types.ThinkingConfig(
+                        thinking_level="high",
+                        include_thoughts=True
+                    ),
                     tool_config=types.ToolConfig(
                         function_calling_config=types.FunctionCallingConfig(
                             mode=types.FunctionCallingMode.NONE
@@ -439,7 +442,9 @@ For each claim, select the appropriate strategy from your guidelines, verify it,
         
         config = types.GenerateContentConfig(
             system_instruction=system_instruction,
-            temperature=0.2,
+            thinking_config=types.ThinkingConfig(
+                thinking_level="minimal"
+            )
         )
         prompt = f"""CLAIMS TO CATEGORIZE:
 {claims_str}

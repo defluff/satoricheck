@@ -260,7 +260,9 @@ class GeminiServiceMedia(GeminiServiceClaims):
 
             config = types.GenerateContentConfig(
                 system_instruction=system_instruction,
-                temperature=0.2,
+                thinking_config=types.ThinkingConfig(
+                    thinking_level="minimal"
+                )
             )
 
             if self.client:

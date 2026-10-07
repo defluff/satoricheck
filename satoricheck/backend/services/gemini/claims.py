@@ -92,6 +92,7 @@ Verify the claim and respond with JSON matching the required schema."""
                         include_server_side_tool_invocations=True
                     ),
                     thinking_config=types.ThinkingConfig(
+                        thinking_level="high",
                         include_thoughts=True
                     )
                 )
