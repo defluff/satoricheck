@@ -55,8 +55,9 @@ docs/
 **/docs/
 satoricheck/docs/
 
-# Agent configuration and rules
-.agent/
+# Agent configuration (.agents/ rules, skills, workflows) is intentionally TRACKED:
+# it is shared engineering process, including the security gates. Keep machine-local
+# overrides in ~/.gemini/config instead of ignoring this directory.
 
 # User Content (Pitch Decks & Exports - Local Only)
 *.pdf

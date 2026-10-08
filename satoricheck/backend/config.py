@@ -42,7 +42,9 @@ class Config:
     MAINTENANCE_MODE = os.getenv('MAINTENANCE_MODE', 'false').lower() == 'true'
     DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///authenix.db')
     
-    # Scheduler auth (Cloud Scheduler cron jobs)
+    # Scheduler auth (Cloud Scheduler cron jobs). The random fallback keeps dev/test
+    # endpoints un-guessable, but is per-process, so production must set it explicitly
+    # (enforced in validate()).
     SCHEDULER_SECRET = os.getenv('SCHEDULER_SECRET', secrets.token_hex(32))
     
     # Server
@@ -128,6 +130,8 @@ class Config:
             required.append('GEMINI_API_KEY')
         if not cls.STRIPE_SECRET_KEY and not cls.TEST_MODE:
             required.append('STRIPE_SECRET_KEY')
+        if cls.ENV == 'production' and not os.getenv('SCHEDULER_SECRET'):
+            required.append('SCHEDULER_SECRET')
             
         if required:
             raise ValueError(f"Missing required environment variables: {', '.join(required)}")

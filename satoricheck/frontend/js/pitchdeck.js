@@ -12,6 +12,10 @@
 import ui from './ui.js';
 import api from './api.js';
 
+// Self-hosted PDF.js (see frontend/vendor/pdfjs-3.11.174/README.md for provenance)
+const PDFJS_LIB_SRC = '/vendor/pdfjs-3.11.174/pdf.min.js';
+const PDFJS_WORKER_SRC = '/vendor/pdfjs-3.11.174/pdf.worker.min.js';
+
 class PitchdeckModule {
     constructor() {
         this.isActive = false;
@@ -89,9 +93,7 @@ class PitchdeckModule {
         }
 
         // Configure PDF.js worker if available
-        if (window.pdfjsLib) {
-            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
-        }
+        this.configurePdfWorker();
 
         this.setupEventListeners();
     }
@@ -229,43 +231,31 @@ class PitchdeckModule {
     }
 
     /**
+     * Point PDF.js at the self-hosted worker (no-op until the library is loaded).
+     * The worker is self-hosted because Web Workers cannot be SRI-pinned.
+     */
+    configurePdfWorker() {
+        if (window.pdfjsLib && !window.pdfjsLib.GlobalWorkerOptions?.workerSrc) {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_SRC;
+        }
+    }
+
+    /**
      * Ensure the PDF.js library script is loaded in window and worker configured
      */
     async ensurePdfJsLibLoaded() {
-        if (window.pdfjsLib) {
-            if (!window.pdfjsLib.GlobalWorkerOptions?.workerSrc) {
-                window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
-            }
-            return true;
+        if (!window.pdfjsLib) {
+            await new Promise((resolve) => {
+                const script = document.createElement('script');
+                script.src = PDFJS_LIB_SRC;
+                script.onload = resolve;
+                script.onerror = resolve;
+                document.head.appendChild(script);
+            });
         }
 
-        return new Promise((resolve) => {
-            const script = document.createElement('script');
-            script.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
-            script.onload = () => {
-                if (window.pdfjsLib) {
-                    window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
-                    resolve(true);
-                } else {
-                    resolve(false);
-                }
-            };
-            script.onerror = () => {
-                const fallbackScript = document.createElement('script');
-                fallbackScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-                fallbackScript.onload = () => {
-                    if (window.pdfjsLib) {
-                        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-                        resolve(true);
-                    } else {
-                        resolve(false);
-                    }
-                };
-                fallbackScript.onerror = () => resolve(false);
-                document.head.appendChild(fallbackScript);
-            };
-            document.head.appendChild(script);
-        });
+        this.configurePdfWorker();
+        return Boolean(window.pdfjsLib);
     }
 
     /**

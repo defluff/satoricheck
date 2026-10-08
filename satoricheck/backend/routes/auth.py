@@ -6,6 +6,7 @@ Uses JWT tokens for stateless authentication (Cloud Run compatible).
 from flask import Blueprint, request, session, jsonify, make_response, url_for, redirect
 from functools import wraps
 import bcrypt
+import hmac
 import logging
 from datetime import datetime, UTC
 import secrets
@@ -93,6 +94,28 @@ def login_required(f):
         
         raise APIError('Authentication required', status_code=401)
     
+    return decorated_function
+
+
+def scheduler_secret_required(f):
+    """Decorator to authenticate Cloud Scheduler cron calls via X-Scheduler-Secret.
+
+    Uses a constant-time comparison so the secret cannot be recovered through
+    response-timing differences. Both sides are encoded to bytes because
+    hmac.compare_digest raises TypeError on non-ASCII str, which would turn a
+    malformed header into a 500 instead of a 401.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        provided = request.headers.get('X-Scheduler-Secret', '')
+        expected = Config.SCHEDULER_SECRET or ''
+        if not provided or not expected or not hmac.compare_digest(
+            provided.encode('utf-8'), expected.encode('utf-8')
+        ):
+            logger.warning("Scheduler endpoint %s called with invalid secret", request.path)
+            raise APIError('Unauthorized', status_code=401)
+        return f(*args, **kwargs)
+
     return decorated_function
 
 

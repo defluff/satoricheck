@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, UTC
 
 from backend.database import db_session
 from backend.models import TokenBalance, Transaction
-from backend.routes.auth import login_required
+from backend.routes.auth import login_required, scheduler_secret_required
 from backend.config import Config
 from backend.error_handlers import APIError
 
@@ -331,6 +331,7 @@ def stripe_webhook():
 
 
 @billing_bp.route('/wizard-refill', methods=['POST'])
+@scheduler_secret_required
 def wizard_monthly_refill():
     """
     Monthly wizard token refill - called by Cloud Scheduler.
@@ -338,16 +339,9 @@ def wizard_monthly_refill():
     Cloud Scheduler setup:
     - Frequency: 0 0 1 * * (1st of every month at midnight)
     - Target: POST /api/billing/wizard-refill
-    - Auth: Include SCHEDULER_SECRET in header
+    - Auth: Include SCHEDULER_SECRET in X-Scheduler-Secret header
     """
     try:
-        # Verify scheduler secret (dedicated secret for cron jobs)
-        scheduler_secret = request.headers.get('X-Scheduler-Secret')
-        
-        if not scheduler_secret or scheduler_secret != Config.SCHEDULER_SECRET:
-            logger.warning("Wizard refill called with invalid secret")
-            raise APIError('Unauthorized', status_code=401)
-        
         # Find all active wizard users
         wizard_balances = db_session.query(TokenBalance).filter(
             TokenBalance.is_wizard == True,

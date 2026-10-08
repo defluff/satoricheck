@@ -995,13 +995,17 @@
     <div class="toast-container" id="toast-container"></div>
 
     <!-- Security: DOMPurify for XSS protection -->
-    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.12/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.12/dist/purify.min.js"
+            integrity="sha384-piCcpDdJ7qVeK4Tv8Z6Hpcr3ZBIgP16TxQTPVfsLFdZ5uDgwc3Y8Ho7oUnqf12qu"
+            crossorigin="anonymous"></script>
 
     <!-- html-to-image for share card generation -->
-    <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.min.js"
+            integrity="sha384-lELZMVO0WZSKHeOrm8rKLCq9ZXjY1+2I9uL/QyDxIXSd83b3/z5xBXb1uDoFi3P/"
+            crossorigin="anonymous"></script>
 
-    <!-- PDF.js for fast client-side pitch deck slide rendering -->
-    <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+    <!-- PDF.js (self-hosted: workers cannot be SRI-pinned; see vendor/pdfjs-3.11.174/README.md) -->
+    <script src="/vendor/pdfjs-3.11.174/pdf.min.js"></script>
 
     <!-- Share module (image generation, platform sharing) -->
     <script src="js/share.js?v=1"></script>

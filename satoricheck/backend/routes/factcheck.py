@@ -11,8 +11,8 @@ import time
 from datetime import datetime, UTC, timedelta
 
 from backend.database import db_session
-from backend.models import FactCheck, TokenBalance
-from backend.routes.auth import login_required
+from backend.models import FactCheck, MediaCheck, TokenBalance
+from backend.routes.auth import login_required, scheduler_secret_required
 from backend.error_handlers import APIError
 from backend.services import get_gemini_service
 from backend.config import Config
@@ -848,5 +848,31 @@ def stream_audio():
         db_session.rollback()
         logger.error(f"Stream audio processing error: {e}", exc_info=True)
         raise APIError('Failed to process stream audio slice', status_code=500)
+
+
+@factcheck_bp.route('/cleanup-expired', methods=['POST'])
+@scheduler_secret_required
+def cleanup_expired_checks():
+    """Purge fact-checks and media-checks older than 7 days.
+
+    Cloud Scheduler endpoint for automated GDPR data retention.
+    Requires X-Scheduler-Secret header matching Config.SCHEDULER_SECRET.
+    """
+    cutoff = datetime.now(UTC) - timedelta(days=7)
+    try:
+        fc_count = db_session.query(FactCheck).filter(FactCheck.timestamp < cutoff).delete()
+        mc_count = db_session.query(MediaCheck).filter(MediaCheck.timestamp < cutoff).delete()
+        db_session.commit()
+        logger.info(f"Cleanup: purged {fc_count} fact-checks, {mc_count} media-checks older than 7 days")
+        return jsonify({
+            'success': True,
+            'deleted_fact_checks': fc_count,
+            'deleted_media_checks': mc_count
+        }), 200
+    except Exception as e:
+        db_session.rollback()
+        logger.error(f"Cleanup expired job failed: {e}", exc_info=True)
+        raise APIError('Database cleanup failed', status_code=500)
+
 
 

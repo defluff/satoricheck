@@ -5,7 +5,6 @@ Tests for critical vulnerabilities found during the security audit.
 Covers:
 1. IDOR: Batch cache must scope queries to the authenticated user
 2. SSRF: _validate_url must block private/internal IPs
-3. WebSocket: _authenticate_ws_user must verify JWT ownership
 """
 import pytest
 from unittest.mock import patch, MagicMock

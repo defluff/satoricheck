@@ -68,3 +68,40 @@ class TestRateLimiting:
         assert limiter is not None
         # Rate limiter should be enabled
         assert limiter.enabled is True
+
+
+class TestCleanupExpiredChecks:
+    """Retention behaviour of /api/factcheck/cleanup-expired (auth: see test_scheduler_auth.py)."""
+
+    def test_cleanup_purges_only_records_older_than_7_days(self, client, test_user, db_session_fixture):
+        """Expired records (>7d) are purged; recent records (<7d) are preserved."""
+        from datetime import datetime, UTC, timedelta
+        from backend.config import Config
+        from backend.models import FactCheck, MediaCheck
+
+        old_time = datetime.now(UTC) - timedelta(days=8)
+        recent_time = datetime.now(UTC) - timedelta(days=2)
+
+        db_session_fixture.add_all([
+            FactCheck(user_id=test_user.id, claim_text="Old claim", timestamp=old_time),
+            FactCheck(user_id=test_user.id, claim_text="Recent claim", timestamp=recent_time),
+            MediaCheck(user_id=test_user.id, url="https://example.com/old.jpg", timestamp=old_time),
+            MediaCheck(user_id=test_user.id, url="https://example.com/recent.jpg", timestamp=recent_time),
+        ])
+        db_session_fixture.commit()
+
+        response = client.post('/api/factcheck/cleanup-expired', headers={
+            'X-Scheduler-Secret': Config.SCHEDULER_SECRET
+        })
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['success'] is True
+        assert data['deleted_fact_checks'] == 1
+        assert data['deleted_media_checks'] == 1
+
+        remaining_claims = [f.claim_text for f in db_session_fixture.query(FactCheck).all()]
+        remaining_urls = [m.url for m in db_session_fixture.query(MediaCheck).all()]
+        assert remaining_claims == ["Recent claim"]
+        assert remaining_urls == ["https://example.com/recent.jpg"]
+

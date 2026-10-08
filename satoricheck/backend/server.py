@@ -110,8 +110,8 @@ def set_security_headers(response):
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; "
         "media-src 'self' blob: data: https:; "
-        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://js.stripe.com; "
-        "worker-src 'self' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://js.stripe.com; "
+        "worker-src 'self' blob:; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
         "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
         "img-src 'self' data: https:; "
@@ -210,46 +210,8 @@ logger.info("Initializing database...")
 init_db()
 logger.info("✓ Database initialized")
 
-# Initialize background scheduler for cleanup tasks
-from apscheduler.schedulers.background import BackgroundScheduler
+# Database retention cleanup is handled by Cloud Scheduler via POST /api/factcheck/cleanup-expired
 
-
-def cleanup_old_checks():
-    """Delete fact-checks and media checks older than 7 days.
-
-    Keeps the database lean — old claim results have no long-term
-    value and would otherwise grow unbounded across all users.
-    """
-    from datetime import timedelta
-    from backend.models import FactCheck, MediaCheck
-
-    cutoff = datetime.now(UTC) - timedelta(days=7)
-    try:
-        fc_count = db_session.query(FactCheck).filter(FactCheck.timestamp < cutoff).delete()
-        mc_count = db_session.query(MediaCheck).filter(MediaCheck.timestamp < cutoff).delete()
-        db_session.commit()
-        if fc_count or mc_count:
-            logger.info(f"Cleanup: deleted {fc_count} fact-checks, {mc_count} media-checks older than 7 days")
-    except Exception as e:
-        db_session.rollback()
-        logger.error(f"Cleanup job failed: {e}")
-
-
-scheduler = BackgroundScheduler()
-scheduler.add_job(
-    func=cleanup_old_checks,
-    trigger='interval',
-    hours=24,
-    id='cleanup_old_checks',
-    name='Delete fact-checks and media-checks older than 7 days',
-    replace_existing=True
-)
-
-# Only start scheduler in main process (not reloader)
-import os
-if os.environ.get('WERKZEUG_RUN_MAIN') != 'true' or not app.debug:
-    scheduler.start()
-    logger.info("✓ Background scheduler started (cleanup every 24h)")
 
 
 @app.route('/')
