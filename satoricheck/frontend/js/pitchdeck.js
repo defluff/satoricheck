@@ -544,9 +544,9 @@ class PitchdeckModule {
                 ui.showToast(error.message || 'Analysis failed. Please try again.', 'error');
             }
 
-            summarySkeleton?.classList.remove('hidden');
+            summarySkeleton?.classList.add('hidden');
             summaryLoading?.classList.add('hidden');
-            marketSkeleton?.classList.remove('hidden');
+            marketSkeleton?.classList.add('hidden');
             marketLoading?.classList.add('hidden');
 
             this.elements.generateBtn.disabled = false;
