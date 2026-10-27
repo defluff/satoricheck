@@ -214,6 +214,14 @@ class App {
                 this.switchView('pitchdeck');
             });
         }
+        const navPitchdeckContainer = document.querySelector('.module-nav-single');
+        if (navPitchdeckContainer && navPitchdeckBtn) {
+            navPitchdeckContainer.addEventListener('click', (e) => {
+                if (e.target !== navPitchdeckBtn) {
+                    navPitchdeckBtn.click();
+                }
+            });
+        }
 
         // Handle token package purchases (Event Delegation)
         document.body.addEventListener('click', async (e) => {

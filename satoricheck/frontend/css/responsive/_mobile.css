@@ -103,6 +103,7 @@
         grid-template-columns: 1fr;
     }
 
+    .module-nav-container,
     .module-nav-toggle {
         order: -1;
         margin-right: auto;
