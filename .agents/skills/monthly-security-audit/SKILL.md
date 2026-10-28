@@ -92,8 +92,9 @@ Confirm every route calling Gemini/Grok checks `TokenBalance` first and enforces
 
 ### 4a. Live security headers
 ```bash
-curl -sI https://authenix.ai | grep -iE "strict-transport|x-frame|x-content-type|content-security|referrer-policy"
+curl -sI https://satoricheck-829698588154.europe-west6.run.app/ | grep -iE "strict-transport|x-frame|x-content-type|content-security|referrer-policy"
 ```
+
 | Header | Expected |
 |---|---|
 | `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` |
@@ -102,8 +103,7 @@ curl -sI https://authenix.ai | grep -iE "strict-transport|x-frame|x-content-type
 | `Referrer-Policy` | `strict-origin-when-cross-origin` |
 | `Content-Security-Policy` | `default-src 'self'`, `frame-ancestors 'none'`, `worker-src 'self' blob:` |
 
-The emitted-header contract is unit-tested (`tests/test_security_headers.py`); this check detects
-drift introduced by the load balancer or domain configuration. Known weakness to track:
+Emitted-header contract is unit-tested (`tests/test_security_headers.py`). Known weakness to track:
 CSP `script-src` still allows `'unsafe-inline'`.
 
 ### 4b. TLS
@@ -115,7 +115,7 @@ Check the certificate expiry and grade (e.g. SSL Labs) for the production domain
 
 ### 5a. Dockerfile
 ```bash
-head -n 1 Dockerfile                               # prefer pinning by @sha256 digest
+grep -E "^FROM python:" Dockerfile
 grep -E "^USER " Dockerfile || echo "❌ no non-root USER"
 grep -iE "^ENV.*(KEY|SECRET|PASSWORD|TOKEN)" Dockerfile && echo "❌ secret in image" || echo "✓ clean"
 ```
