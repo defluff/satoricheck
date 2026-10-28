@@ -149,15 +149,15 @@ class APIClient {
         });
     }
 
-    async analyzeBatch(claims, context = null, cache_name = null) {
-        // Micro-batching handled here for standard fact-check mode
-        const CHUNK_SIZE = 3;
+    async analyzeBatch(claims, context = null, cache_name = null, pre_triaged = true) {
+        // Batch size aligned with backend MAX_CLAIMS_PER_PROMPT (8)
+        const CHUNK_SIZE = 8;
         const allResults = [];
         let newBalance = null;
 
         for (let i = 0; i < claims.length; i += CHUNK_SIZE) {
             const chunk = claims.slice(i, i + CHUNK_SIZE);
-            const payload = { claims: chunk };
+            const payload = { claims: chunk, pre_triaged };
             if (context) payload.context = context;
             if (cache_name) payload.cache_name = cache_name;
 

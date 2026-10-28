@@ -115,3 +115,90 @@ class TestSkillOptimizations:
         assert "Rhetorical Hyperbole" in skill_text
         assert "Conversational Filler & Disfluencies" in skill_text
 
+    def test_audio_stream_ingestion_and_stream_triage_skills_loaded(self, app):
+        """Verify dedicated skill files for audio_stream_ingestion and stream_triage load properly."""
+        from backend.services.gemini.batch import GeminiServiceBatch
+        media_svc = GeminiServiceMedia()
+        batch_svc = GeminiServiceBatch()
+
+        audio_skill = media_svc._load_skill("audio_stream_ingestion")
+        triage_skill = batch_svc._load_skill("stream_triage")
+
+        assert "Audio Stream Ingestion" in audio_skill
+        assert "Falsifiability Standard" in audio_skill
+        assert "Stream Claim Triage" in triage_skill
+        assert "is_hyperbole" in triage_skill
+
+    def test_batch_parser_standardizes_verdict_and_source_reliability(self, app):
+        """Verify _parse_thinking_batch_response normalizes UNVERIFIABLE and extracts source_reliability."""
+        from backend.services.gemini.batch import GeminiServiceBatch
+        batch_svc = GeminiServiceBatch()
+
+        mock_resp = {
+            "candidates": [{
+                "content": {
+                    "parts": [{
+                        "text": '''{
+                            "results": [
+                                {
+                                    "claim_index": 1,
+                                    "verdict": "UNVERIFIABLE",
+                                    "explanation": "No public record found.",
+                                    "source_reliability": "LOW",
+                                    "sources": []
+                                },
+                                {
+                                    "claim_index": 2,
+                                    "verdict": "PARTIALLY TRUE",
+                                    "explanation": "Revenue grew, but by 150%, not 300%.",
+                                    "source_reliability": "HIGH",
+                                    "sources": ["https://sec.gov/filing"]
+                                }
+                            ]
+                        }'''
+                    }]
+                }
+            }]
+        }
+
+        with patch.object(batch_svc, '_validate_url', return_value=True):
+            parsed = batch_svc._parse_thinking_batch_response(mock_resp, expected_count=2)
+
+        assert len(parsed) == 2
+        assert parsed[0]["verdict"] == "COULD_NOT_VERIFY"
+        assert parsed[0]["source_reliability"] == "LOW"
+        assert parsed[1]["verdict"] == "PARTIALLY TRUE"
+        assert parsed[1]["source_reliability"] == "HIGH"
+
+    def test_single_pass_json_calls_enforce_response_mime_type(self, app):
+        """Verify single-pass JSON calls set response_mime_type='application/json'."""
+        from backend.services.gemini.batch import GeminiServiceBatch
+        utils = GeminiServiceUtils()
+        batch_svc = GeminiServiceBatch()
+        media_svc = GeminiServiceMedia()
+
+        mock_resp = MagicMock()
+        mock_resp.text = '{"claims": ["The Earth orbits the Sun every 365.25 days."]}'
+        with patch.object(utils, 'client') as mock_client:
+            mock_client.models.generate_content.return_value = mock_resp
+            utils.identify_claims("The Earth orbits the Sun every 365.25 days.")
+            cfg = mock_client.models.generate_content.call_args.kwargs['config']
+            assert cfg.response_mime_type == "application/json"
+
+        mock_triage_resp = MagicMock()
+        mock_triage_resp.text = '[{"index": 1, "priority": "NORMAL", "strategy": "SEARCH_VERIFY", "is_hyperbole": false}]'
+        with patch.object(batch_svc, 'client') as mock_client:
+            mock_client.models.generate_content.return_value = mock_triage_resp
+            batch_svc.triage_for_stream(["Claim 1"])
+            cfg = mock_client.models.generate_content.call_args.kwargs['config']
+            assert cfg.response_mime_type == "application/json"
+
+        mock_audio_resp = MagicMock()
+        mock_audio_resp.text = '{"transcript": "Hello world", "claims": []}'
+        with patch.object(media_svc, 'client') as mock_client:
+            mock_client.models.generate_content.return_value = mock_audio_resp
+            media_svc.transcribe_and_extract_claims_from_audio(b"audio_bytes")
+            cfg = mock_client.models.generate_content.call_args.kwargs['config']
+            assert cfg.response_mime_type == "application/json"
+
+

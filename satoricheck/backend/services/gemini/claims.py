@@ -85,20 +85,31 @@ Verify the claim and respond with JSON matching the required schema."""
                 
                 # Configure generation with Thinking Mode, Google Search, and Grok tool
                 google_search_tool = types.Tool(google_search=types.GoogleSearch())
-                config = types.GenerateContentConfig(
-                    system_instruction=system_instruction_full,
-                    tools=[google_search_tool, grok_tool],
-                    tool_config=types.ToolConfig(
-                        include_server_side_tool_invocations=True
-                    ),
-                    thinking_config=types.ThinkingConfig(
-                        thinking_level="high",
-                        include_thoughts=True
-                    )
+                tools_list = [google_search_tool, grok_tool]
+                tool_cfg = types.ToolConfig(
+                    include_server_side_tool_invocations=True
                 )
-                
+
+                # In the Gemini API, a GenerateContentConfig referencing cached_content
+                # cannot also set system_instruction, tools, or tool_config.
                 if cache_name:
-                    config.cached_content = cache_name
+                    config = types.GenerateContentConfig(
+                        cached_content=cache_name,
+                        thinking_config=types.ThinkingConfig(
+                            thinking_level="high",
+                            include_thoughts=True
+                        )
+                    )
+                else:
+                    config = types.GenerateContentConfig(
+                        system_instruction=system_instruction_full,
+                        tools=tools_list,
+                        tool_config=tool_cfg,
+                        thinking_config=types.ThinkingConfig(
+                            thinking_level="high",
+                            include_thoughts=True
+                        )
+                    )
                 
                 turn_response = None
                 turn_exception = None
@@ -109,7 +120,10 @@ Verify the claim and respond with JSON matching the required schema."""
                             model=self.MODEL_PRO,
                             contents=conversation_history,
                             config=config,
-                            context_label=f"agentic turn {current_turn}"
+                            context_label=f"agentic turn {current_turn}",
+                            fallback_system_instruction=system_instruction_full,
+                            fallback_tools=tools_list,
+                            fallback_tool_config=tool_cfg,
                         )
                         if cache_cleared:
                             cache_name = None
@@ -139,26 +153,9 @@ Verify the claim and respond with JSON matching the required schema."""
                     conversation_history.append(content)
                     
                     logger.info(f"Agent decided to call {len(response.function_calls)} tools.")
-                    for fc in response.function_calls:
-                        fn_name = fc.name
-                        fn_args = fc.args
-                        
-                        tool_result = {}
-                        if fn_name == 'search_social':
-                            query = fn_args.get('query')
-                            logger.info(f"🛠️ Executing Tool: search_social(query='{query}')")
-                            tool_result = grok.search_social(query)
-                        else:
-                            tool_result = {"error": f"Unknown tool: {fn_name}"}
-                            
-                        # Add tool response part in correct role format
-                        function_response_part = types.Part.from_function_response(
-                            name=fn_name,
-                            response=tool_result
-                        )
-                        conversation_history.append(
-                            types.Content(role="tool", parts=[function_response_part])
-                        )
+                    conversation_history.extend(
+                        self._execute_tool_calls(response.function_calls, grok)
+                    )
                     continue
  
                 # Parse response text

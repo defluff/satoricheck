@@ -84,6 +84,15 @@ class GeminiServiceUtils(GeminiServiceClient):
                 result['sources'] = []
             elif not isinstance(result['sources'], list):
                 result['sources'] = [result['sources']]
+
+            # Merge server-side Google Search grounding URLs (prioritizing verified grounding chunks)
+            grounding_urls = self._extract_grounding_urls(candidate)
+            if grounding_urls:
+                combined_sources = list(grounding_urls)
+                for src in result['sources']:
+                    if isinstance(src, str) and src not in combined_sources:
+                        combined_sources.append(src)
+                result['sources'] = combined_sources
             
             # Ensure fallacy is present
             if 'fallacy' not in result:
@@ -234,7 +243,10 @@ mentions "Biden" and this chunk says "He", replace "He" with "Biden".
                 fallback="You are a meticulous fact-checker assistant. Your job is to extract EVERY verifiable factual claim from this text."
             )
                 
-            config = types.GenerateContentConfig(system_instruction=system_instruction)
+            config = types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                response_mime_type="application/json"
+            )
             
             prompt = f"""{preamble}TEXT TO ANALYZE (Part {i+1}/{len(chunks)}):
 \"\"\"

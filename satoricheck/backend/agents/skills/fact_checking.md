@@ -64,7 +64,7 @@ You must respond with ONLY valid JSON. No markdown code blocks, no preamble, and
 
 ## Field Specifications:
 * `is_claim`: boolean (Is the text a verifiable claim?)
-* `verdict`: 'TRUE' | 'FALSE' | 'MISLEADING' | 'PARTIALLY TRUE' | 'COULD_NOT_VERIFY'
+* `verdict`: 'TRUE' | 'FALSE' | 'MISLEADING' | 'PARTIALLY TRUE' | 'COULD_NOT_VERIFY' | 'FUTURE_PROJECTION'
 * `explanation`: Concise 2-sentence explanation of the verdict based on evidence.
 * `fallacy`: Name of the logical fallacy if present, or `null`.
 * `sources`: A list of 1-5 reputable, live website URLs used to verify the claim.

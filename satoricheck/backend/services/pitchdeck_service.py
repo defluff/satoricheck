@@ -15,6 +15,3 @@ class PitchdeckService(GeminiServicePitchdeck):
     """Service for analyzing pitch deck PDFs with Gemini Vision."""
     pass
 
-
-# Singleton instance
-pitchdeck_service = PitchdeckService()

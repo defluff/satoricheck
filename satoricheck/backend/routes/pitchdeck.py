@@ -7,7 +7,9 @@ import base64
 import logging
 
 from backend.routes.auth import login_required
+from backend.routes.tokens import reserve_flat_tokens, refund_flat_tokens
 from backend.error_handlers import APIError
+from backend.services import get_pitchdeck_service
 from backend.services.pitchdeck_service import PitchdeckService
 
 # Lazy import to avoid circular dependency if possible, or use current_app
@@ -16,6 +18,15 @@ from backend.extensions import limiter
 logger = logging.getLogger(__name__)
 
 pitchdeck_bp = Blueprint('pitchdeck', __name__, url_prefix='/api/pitchdeck')
+
+_OriginalPitchdeckService = PitchdeckService
+
+
+def _resolve_pitchdeck_service() -> PitchdeckService:
+    """Return the singleton PitchdeckService, or instantiate if patched in tests."""
+    if PitchdeckService is not _OriginalPitchdeckService:
+        return PitchdeckService()
+    return get_pitchdeck_service()
 
 
 @pitchdeck_bp.route('/analyze', methods=['POST'])
@@ -77,20 +88,14 @@ def analyze_pitch_deck():
         
         logger.info(f"[Pitchdeck] Pricing: {page_count} pages (effective {effective_pages}) -> {cost} CP")
 
-        # 3. Check Balance
-        if not user.token_balance:
-            from backend.models import TokenBalance
-            # Auto-create if missing (edge case)
-            user.token_balance = TokenBalance(user_id=user.id, balance=0)
-            logger.warning(f"[Pitchdeck] Created missing TokenBalance for user {user.id}")
-
-        if user.token_balance.balance < cost:
-            raise APIError(f'Insufficient tokens. Analysis requires {cost} CP.', status_code=403)
-            
-        # 4. Deduct Tokens (Optimistic Reservation)
-        user.token_balance.balance -= cost
+        # 3. Atomically Reserve Tokens (Optimistic Reservation)
         from backend.database import db_session
-        db_session.commit()
+        reserve_flat_tokens(
+            user.id,
+            cost,
+            error_message=f'Insufficient tokens. Analysis requires {cost} CP.',
+            auto_create=True
+        )
         # ---------------------
         
         # Analyze with service
@@ -104,7 +109,7 @@ def analyze_pitch_deck():
                 user.current_pitchdeck_cache = None
                 db_session.commit()
 
-            service = PitchdeckService()
+            service = _resolve_pitchdeck_service()
             result = service.analyze_pitch_deck(pdf_bytes)
             
             # Use the cache_name from the result
@@ -115,11 +120,6 @@ def analyze_pitch_deck():
             # Privacy: Log ID instead of email
             logger.info(f"[Pitchdeck] Analysis complete for user {user.id}. Cost: {cost} CP")
             
-            # Since we successfully analyzed, results from here will be stored 
-            # with source='pitchdeck' in future calls. 
-            # Note: PitchdeckService.analyze_pitch_deck handles its own internal storage
-            # but we can pass source='pitchdeck' if it supported it, or mark it here.
-            
             return jsonify({
                 'success': True,
                 'cost_incurred': cost, 
@@ -129,16 +129,14 @@ def analyze_pitch_deck():
         except (ValueError, TimeoutError) as e:
             # Revert deduction on known failures
             logger.warning(f"[Pitchdeck] Refunding {cost} CP due to expected error: {e}")
-            user.token_balance.balance += cost
-            db_session.commit()
+            refund_flat_tokens(user.id, cost)
             status_code = 400 if isinstance(e, ValueError) else 504
             raise APIError(str(e), status_code=status_code)
             
         except Exception as e:
             # Revert deduction on unexpected failures
             logger.error(f"[Pitchdeck] Refunding {cost} CP due to unexpected error: {e}", exc_info=True)
-            user.token_balance.balance += cost
-            db_session.commit()
+            refund_flat_tokens(user.id, cost)
             raise APIError('Analysis failed. Please try again.', status_code=500)
             
     except APIError:
@@ -186,23 +184,16 @@ def verify_market_claims():
         logger.info(f"[Pitchdeck] Verify request - claims: {len(verifiable_claims)}, company: {company}, cache: {bool(cache_name)}")
         
         # --- PRICING: 1 CP flat per market verification ---
-        from backend.database import db_session
-        from backend.models import TokenBalance
-        
-        token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
-        if not token_balance:
-            raise APIError('No token balance found', status_code=403)
-        
         cost = 1  # Flat rate: 1 CP per verification call
-        if token_balance.balance < cost:
-            raise APIError(f'Insufficient tokens. Verification requires {cost} CP.', status_code=403)
-        
-        token_balance.balance -= cost
-        db_session.commit()
+        token_balance = reserve_flat_tokens(
+            user.id,
+            cost,
+            error_message=f'Insufficient tokens. Verification requires {cost} CP.'
+        )
         
         # Verify claims using service
         try:
-            service = PitchdeckService()
+            service = _resolve_pitchdeck_service()
             findings = service.verify_market_claims(
                 verifiable_claims=verifiable_claims,
                 market_size=market_size,
@@ -214,8 +205,7 @@ def verify_market_claims():
             )
         except Exception as e:
             # Refund on service failure
-            token_balance.balance += cost
-            db_session.commit()
+            refund_flat_tokens(user.id, cost)
             raise
         
         logger.info(f"[Pitchdeck] Verification complete for user {user.id}: {len(findings)} findings. Cost: {cost} CP")

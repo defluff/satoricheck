@@ -41,6 +41,7 @@ class Config:
     TEST_MODE = os.getenv('TEST_MODE', 'false').lower() == 'true'
     MAINTENANCE_MODE = os.getenv('MAINTENANCE_MODE', 'false').lower() == 'true'
     DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///authenix.db')
+    RATELIMIT_STORAGE_URI = os.getenv('RATELIMIT_STORAGE_URI', 'memory://')
     
     # Scheduler auth (Cloud Scheduler cron jobs). The random fallback keeps dev/test
     # endpoints un-guessable, but is per-process, so production must set it explicitly

@@ -94,3 +94,38 @@ class TestBatchOptimization:
         # 1 triage + 1 batch verify = 2 calls
         assert mock_gemini_client.models.generate_content.call_count == 2
         print(f"\n[Batch] Sent {len(claims)} claims -> {mock_gemini_client.models.generate_content.call_count} API calls (Expected: 2 with triage)")
+
+    def test_batch_endpoint_pre_triaged_skips_flash_triage(self, auth_client, mock_gemini_client):
+        """
+        When claims are already extracted by an upstream LLM pass (pre_triaged=True),
+        analyze-batch must skip the redundant Flash triage call and verify in 1 call.
+        """
+        batch_response = make_mock_response(
+            '{"results": ['
+            '{"claim_index": 1, "is_claim": true, "verdict": "TRUE", "explanation": "Verified.", "sources": ["http://example.com"]}, '
+            '{"claim_index": 2, "is_claim": true, "verdict": "FALSE", "explanation": "Debunked.", "sources": []}, '
+            '{"claim_index": 3, "is_claim": true, "verdict": "MISLEADING", "explanation": "Context missing.", "sources": []}, '
+            '{"claim_index": 4, "is_claim": true, "verdict": "TRUE", "explanation": "Confirmed.", "sources": []}'
+            ']}'
+        )
+        mock_gemini_client.models.generate_content.return_value = batch_response
+
+        claims = [
+            "Claim 1 from identify_claims",
+            "Claim 2 from identify_claims",
+            "Claim 3 from identify_claims",
+            "Claim 4 from identify_claims",
+        ]
+
+        response = auth_client.post('/api/factcheck/analyze-batch', json={
+            'claims': claims,
+            'pre_triaged': True
+        })
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['success'] is True
+        assert len(data['results']) == 4
+
+        # Zero triage calls + 1 batch verify call = 1 call total
+        assert mock_gemini_client.models.generate_content.call_count == 1

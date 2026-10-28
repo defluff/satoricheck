@@ -38,9 +38,12 @@ def get_grok_service() -> GrokService:
 
 
 def get_pitchdeck_service() -> PitchdeckService:
-    """Get global Pitchdeck service instance."""
+    """Get global Pitchdeck service instance, sharing the Gemini SDK client."""
     global _pitchdeck_service
     if _pitchdeck_service is None:
-        _pitchdeck_service = PitchdeckService()
-        logger.info("✓ Pitchdeck service initialized")
+        gemini_svc = get_gemini_service()
+        _pitchdeck_service = PitchdeckService.__new__(PitchdeckService)
+        _pitchdeck_service.api_key = gemini_svc.api_key
+        _pitchdeck_service.client = gemini_svc.client
+        logger.info("✓ Pitchdeck service initialized (shared Gemini client)")
     return _pitchdeck_service

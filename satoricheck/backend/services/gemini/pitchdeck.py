@@ -137,7 +137,9 @@ class GeminiServicePitchdeck(GeminiServiceMedia):
         if self.client:
             try:
                 pdf_part = types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
-                config = types.GenerateContentConfig()
+                config = types.GenerateContentConfig(
+                    response_mime_type="application/json"
+                )
                 if system_instruction:
                     config.system_instruction = system_instruction
 
@@ -180,6 +182,9 @@ class GeminiServicePitchdeck(GeminiServiceMedia):
             payload["systemInstruction"] = {
                 "parts": [{"text": system_instruction}]
             }
+        payload["generationConfig"] = {
+            "responseMimeType": "application/json"
+        }
 
         url = self._get_api_url(target_model)
         resp = requests.post(
@@ -266,7 +271,7 @@ USP: {result.get('usp')}
 EXTRACTED CLAIMS:
 {json.dumps(result.get('verifiable_claims', []), indent=2)}
 """
-            cache_name = self.create_cache(deck_content, ttl_minutes=10)
+            cache_name = self.create_cache(deck_content, ttl_minutes=10, include_agent_tools=True)
             result['cache_name'] = cache_name
             logger.info(f"[Pitchdeck] Created context cache: {cache_name}")
         except Exception as e:
@@ -522,7 +527,8 @@ EXTRACTED CLAIMS:
                 batch_results = gemini_svc.analyze_claims_batch(
                     batch_inputs,
                     context=rich_context,
-                    cache_name=cache_name
+                    cache_name=cache_name,
+                    pre_triaged=True
                 )
             except Exception as e:
                 logger.warning(f"[Pitchdeck] Batch verification failed: {e}")
@@ -561,7 +567,8 @@ EXTRACTED CLAIMS:
                 batch_results = gemini_svc.analyze_claims_batch(
                     legacy_claims,
                     context=f"Startup Industry Vertical: {industry_ctx}",
-                    cache_name=cache_name
+                    cache_name=cache_name,
+                    pre_triaged=True
                 )
             except Exception as e:
                 logger.warning(f"[Pitchdeck] Legacy batch verification failed: {e}")

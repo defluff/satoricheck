@@ -223,6 +223,55 @@ class TestValidateUrlSSRF:
         assert service._validate_url('ftp://internal/file') is False
         assert service._validate_url('gopher://evil.com') is False
 
+    def test_validate_sources_concurrent_and_caps_at_five(self):
+        """_validate_sources must validate multiple URLs concurrently, filter private/dead links, and cap at 5."""
+        service = self._get_service()
+        urls = [
+            f"https://valid-{i}.example.com/article" for i in range(7)
+        ] + ["http://127.0.0.1/admin", "https://dead.example.com/404"]
+
+        def fake_validate(url):
+            return url.startswith("https://valid-")
+
+        with patch.object(service, '_validate_url', side_effect=fake_validate) as mock_val:
+            valid = service._validate_sources(urls)
+
+        assert len(valid) == 5
+        assert all(u.startswith("https://valid-") for u in valid)
+        assert "http://127.0.0.1/admin" not in valid
+        assert mock_val.call_count == 9
+
+    def test_batch_response_filters_ssrf_and_extracts_grounding_urls(self):
+        """_parse_thinking_batch_response must filter invalid/SSRF URLs and merge grounding_metadata URLs."""
+        service = self._get_service()
+
+        part = MagicMock()
+        part.thought = False
+        part.text = '{"results": [{"claim_index": 1, "verdict": "TRUE", "explanation": "Grounded", "sources": ["http://169.254.169.254/latest"]}]}'
+
+        web_chunk = MagicMock()
+        web_chunk.uri = "https://nasa.gov/artemis"
+        chunk = MagicMock()
+        chunk.web = web_chunk
+        grounding_meta = MagicMock()
+        grounding_meta.grounding_chunks = [chunk]
+
+        candidate = MagicMock()
+        candidate.content.parts = [part]
+        candidate.grounding_metadata = grounding_meta
+
+        response = MagicMock()
+        response.candidates = [candidate]
+
+        def fake_validate(url):
+            return url == "https://nasa.gov/artemis"
+
+        with patch.object(service, '_validate_url', side_effect=fake_validate):
+            parsed = service._parse_thinking_batch_response(response, expected_count=1)
+
+        assert len(parsed) == 1
+        assert parsed[0]["sources"] == ["https://nasa.gov/artemis"]
+
 
 
 
@@ -483,4 +532,86 @@ class TestWalletDrainProtections:
         })
         assert resp.status_code == 400
         assert 'exceeds maximum limit' in resp.get_json().get('error', '')
+
+    def test_tokens_committed_before_external_llm_call(self, auth_client, test_user, db_session_fixture):
+        """Token reservation must be committed to DB BEFORE calling external Gemini API."""
+        from backend.models import TokenBalance
+
+        tb = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).first()
+        tb.balance = 10
+        tb.unbilled_words = 1245  # +10 words = 1255 words -> costs 1 CP
+        db_session_fixture.commit()
+
+        balance_during_llm_call = []
+
+        def inspect_db_during_call(*args, **kwargs):
+            # Query balance inside the LLM call to verify the reservation is already committed
+            current_tb = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).first()
+            db_session_fixture.refresh(current_tb)
+            balance_during_llm_call.append(current_tb.balance)
+            return {
+                'is_claim': True,
+                'verdict': 'TRUE',
+                'explanation': 'Verified',
+                'fallacy': None,
+                'sources': [],
+                'source_reliability': 'HIGH'
+            }
+
+        with patch('backend.services.gemini_service.GeminiService.analyze_claim', side_effect=inspect_db_during_call):
+            resp = auth_client.post('/api/factcheck/analyze', json={
+                'text': 'One two three four five six seven eight nine ten.'
+            })
+
+        assert resp.status_code == 200
+        assert balance_during_llm_call == [9], "Balance deduction must be committed before calling Gemini"
+
+
+# =============================================================================
+# Fix 8: Service Singleton Sharing & Multi-Instance Migration Safety
+# =============================================================================
+
+class TestMultiInstanceHardening:
+    """Verify singleton SDK client sharing and concurrent schema migration safety."""
+
+    def test_pitchdeck_service_singleton_shares_gemini_client(self):
+        """get_pitchdeck_service() must share the underlying client with get_gemini_service()."""
+        import backend.services as svc_mod
+        svc_mod._pitchdeck_service = None
+
+        gemini_svc = svc_mod.get_gemini_service()
+        pitchdeck_svc = svc_mod.get_pitchdeck_service()
+
+        assert pitchdeck_svc.client is gemini_svc.client
+        assert pitchdeck_svc.api_key == gemini_svc.api_key
+
+    def test_apply_migrations_tolerates_concurrent_duplicate_column(self):
+        """_apply_migrations() must not crash if a concurrent worker already added a column."""
+        from sqlalchemy.exc import OperationalError
+        import backend.database as db_mod
+
+        mock_inspector = MagicMock()
+        mock_inspector.get_table_names.return_value = ['users']
+        # Pretend 'current_pitchdeck_cache' is missing when inspected
+        mock_inspector.get_columns.return_value = [
+            {'name': 'id'}, {'name': 'email'}, {'name': 'name'},
+            {'name': 'picture'}, {'name': 'google_id'}, {'name': 'created_at'},
+            {'name': 'last_login'}, {'name': 'streak_count'}, {'name': 'last_check_date'}
+        ]
+
+        mock_conn = MagicMock()
+        mock_conn.execute.side_effect = OperationalError(
+            "ALTER TABLE users ADD COLUMN current_pitchdeck_cache",
+            {},
+            Exception("duplicate column name: current_pitchdeck_cache")
+        )
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = mock_conn
+        mock_ctx.__exit__.return_value = False
+
+        with patch('backend.database.inspect', return_value=mock_inspector), \
+             patch.object(db_mod.engine, 'begin', return_value=mock_ctx):
+            # Should complete cleanly without raising OperationalError
+            db_mod._apply_migrations()
+
 

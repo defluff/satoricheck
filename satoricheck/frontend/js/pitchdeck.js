@@ -893,6 +893,85 @@ class PitchdeckModule {
     }
 
     /**
+     * Verify a batch of claims in a single API call (up to 10 claims per batch)
+     */
+    async verifyClaimsBatch(claimsToVerify) {
+        if (!claimsToVerify || claimsToVerify.length === 0) return;
+
+        const BATCH_SIZE = 10;
+        for (let i = 0; i < claimsToVerify.length; i += BATCH_SIZE) {
+            const batch = claimsToVerify.slice(i, i + BATCH_SIZE);
+
+            // Set loading state on all buttons in this batch
+            batch.forEach(claim => {
+                const checkBtn = document.querySelector(`.pd-claim-check-btn[data-claim-index="${claim.originalIndex}"]`);
+                if (checkBtn) {
+                    checkBtn.disabled = true;
+                    checkBtn.innerHTML = '<span class="spinner" style="width:12px;height:12px;margin-right:6px;"></span> Checking...';
+                    checkBtn.classList.add('loading');
+                }
+            });
+
+            try {
+                const payload = {
+                    company: this.globalDeckContext?.company,
+                    summary: this.globalDeckContext?.summary,
+                    industry: this.globalDeckContext?.industry,
+                    cache_name: this.globalDeckContext?.cache_name,
+                    verifiable_claims: batch.map(claim => ({
+                        claim: claim.claim,
+                        category: claim.category,
+                        source_cited: claim.source_cited,
+                        slide_number: claim.slide_number,
+                        context: claim.context
+                    }))
+                };
+
+                const data = await api.verifyMarketClaims(payload);
+
+                if (data.success && Array.isArray(data.findings)) {
+                    batch.forEach((claim, idx) => {
+                        const finding = data.findings[idx];
+                        const checkBtn = document.querySelector(`.pd-claim-check-btn[data-claim-index="${claim.originalIndex}"]`);
+                        if (finding) {
+                            claim.verificationResult = finding;
+                            this.displayClaimResult(claim.originalIndex, finding);
+                            if (checkBtn) {
+                                checkBtn.disabled = false;
+                                checkBtn.innerHTML = 'Verified ✓';
+                                checkBtn.classList.remove('loading');
+                                checkBtn.classList.add('verified');
+                            }
+                        } else if (checkBtn) {
+                            checkBtn.disabled = false;
+                            checkBtn.textContent = 'Retry';
+                            checkBtn.classList.remove('loading');
+                        }
+                    });
+                } else {
+                    throw new Error('Verification returned no findings');
+                }
+
+                if (data.new_balance !== undefined) {
+                    ui.updateBalance(data.new_balance);
+                }
+            } catch (error) {
+                console.error('[Pitchdeck] Batch claim verification error:', error);
+                batch.forEach(claim => {
+                    const checkBtn = document.querySelector(`.pd-claim-check-btn[data-claim-index="${claim.originalIndex}"]`);
+                    if (checkBtn) {
+                        checkBtn.disabled = false;
+                        checkBtn.textContent = 'Retry';
+                        checkBtn.classList.remove('loading');
+                    }
+                });
+                ui.showToast(error.message || 'Verification failed. Please try again.', 'error');
+                if (error.status === 403 || error.status === 401) break;
+            }
+        }
+    }
+
+    /**
      * Verify all unverified claims on the current slide in batch
      */
     async verifyCurrentSlideClaims() {
@@ -908,10 +987,7 @@ class PitchdeckModule {
             btn.textContent = `Verifying ${slideClaims.length} Claims...`;
         }
 
-        for (const claim of slideClaims) {
-            await this.verifySingleClaim(claim.originalIndex);
-            await new Promise(r => setTimeout(r, 600));
-        }
+        await this.verifyClaimsBatch(slideClaims);
 
         if (btn) {
             btn.disabled = false;
@@ -921,7 +997,7 @@ class PitchdeckModule {
     }
 
     /**
-     * Verify all claims in the deck sequentially
+     * Verify all claims in the deck in batches
      */
     async checkAllClaims() {
         const unverified = this.extractedClaims.filter(c => !c.verificationResult);
@@ -936,10 +1012,7 @@ class PitchdeckModule {
             btn.textContent = 'Verifying Deck...';
         }
 
-        for (const claim of unverified) {
-            await this.verifySingleClaim(claim.originalIndex);
-            await new Promise(r => setTimeout(r, 1000));
-        }
+        await this.verifyClaimsBatch(unverified);
 
         if (btn) {
             btn.disabled = false;

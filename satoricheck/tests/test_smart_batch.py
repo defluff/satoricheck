@@ -61,7 +61,7 @@ def test_analyze_claims_batch_with_context_cache(gemini_service):
     results = gemini_service.analyze_claims_batch(claims, context=context)
     
     # Verify Cache created
-    gemini_service.create_cache.assert_called_once_with(context, ttl_minutes=5)
+    gemini_service.create_cache.assert_called_once_with(context, ttl_minutes=5, include_agent_tools=True)
     
     # Verify result returned
     assert len(results) == 1
@@ -85,10 +85,13 @@ def test_analyze_claims_batch_reuses_precreated_cache(gemini_service):
     gemini_service.create_cache.assert_not_called()
     assert results[0]["verdict"] == "FALSE"
 
-    # Verify cachedContent was injected into config
+    # Verify cachedContent was injected into config and conflicting fields omitted
     call_args = gemini_service.client.models.generate_content.call_args
     config = call_args.kwargs.get('config')
     assert config.cached_content == cache_name
+    assert config.system_instruction is None
+    assert config.tools is None
+    assert config.tool_config is None
 
 def test_analyze_claims_batch_sub_batches_large_lists(gemini_service):
     """Verify large claim lists are split into sub-batches."""

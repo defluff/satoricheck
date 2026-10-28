@@ -13,6 +13,7 @@ from datetime import datetime, UTC, timedelta
 from backend.database import db_session
 from backend.models import FactCheck, MediaCheck, TokenBalance
 from backend.routes.auth import login_required, scheduler_secret_required
+from backend.routes.tokens import reserve_word_tokens, refund_word_tokens
 from backend.error_handlers import APIError
 from backend.services import get_gemini_service
 from backend.config import Config
@@ -53,17 +54,6 @@ def analyze_claim():
         # Calculate word count
         word_count = len(text.split())
         
-        # Get token balance
-        token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
-        if not token_balance:
-            # Should not happen for authenticated users usually, but handle it
-            raise APIError('No token balance found', status_code=403)
-
-        # FAIR PRICING LOGIC: Accumulate words
-        # 1 CP per 250 words. calculate total unbilled words
-        current_unbilled = token_balance.unbilled_words or 0
-        total_unbilled = current_unbilled + word_count
-        
         # Get optional context
         context = data.get('context')
         
@@ -76,22 +66,8 @@ def analyze_claim():
         # Get global Gemini service (needed for pre-analysis)
         gemini_service = get_gemini_service()
 
-        # Calculate base tokens (Word Accumulation Model)
-        token_cost = (total_unbilled // Config.WORDS_PER_CP) * Config.TOKENS_PER_CP_UNIT
-        remainder_words = total_unbilled % Config.WORDS_PER_CP
-        
-        # Check balance (Checks FINAL calculated cost and requires at least 1 CP to initiate check)
-        min_required = max(1, token_cost)
-        if token_balance.balance < min_required:
-            raise APIError(
-                f'Insufficient tokens. Need {min_required} CP, you have {token_balance.balance} CP',
-                status_code=403
-            )
-        
-        # Deduct tokens (Deducts FINAL calculated cost)
-        token_balance.balance -= token_cost
-        token_balance.unbilled_words = remainder_words
-        token_balance.last_updated = datetime.now(UTC)
+        # Atomically reserve and commit tokens BEFORE calling external AI APIs
+        token_balance, token_cost, current_unbilled = reserve_word_tokens(user.id, word_count)
         
         logger.info(f"Analyzing claim for user {user.email}: {text[:100]}... (Cost: {token_cost} CP)")
         
@@ -118,9 +94,7 @@ def analyze_claim():
         except Exception as e:
             # Refund tokens if analysis fails
             logger.error(f"Gemini analysis failed: {e}", exc_info=True)
-            token_balance.balance += token_cost
-            token_balance.unbilled_words = current_unbilled
-            db_session.commit()
+            refund_word_tokens(user.id, token_cost, current_unbilled)
             raise APIError('Analysis temporarily unavailable. Please try again.', status_code=503)
         
         # Calculate processing time
@@ -204,7 +178,7 @@ def create_context_cache():
             return jsonify({'success': True, 'cache_name': None})
         
         gemini_service = get_gemini_service()
-        cache_name = gemini_service.create_cache(text, ttl_minutes=5)
+        cache_name = gemini_service.create_cache(text, ttl_minutes=5, include_agent_tools=True)
         
         logger.info(f"Pre-created context cache: {cache_name}")
         return jsonify({'success': True, 'cache_name': cache_name})
@@ -240,6 +214,7 @@ def analyze_batch_claims():
         user = request.current_user
         context = data.get('context')
         cache_name = data.get('cache_name')  # Pre-created cache from /create-context-cache
+        pre_triaged = bool(data.get('pre_triaged', False))
         
         # 1. Cache Lookup
         # We look for RECENT exact matches to avoid stale checks if world events change
@@ -292,29 +267,10 @@ def analyze_batch_claims():
             texts_to_analyze = [c[1] for c in claims_to_process]
             total_word_count = sum(len(t.split()) for t in texts_to_analyze)
             
-            # Token Balance Check
-            token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
-            if not token_balance:
-                raise APIError('No token balance found', status_code=403)
-                
-            current_unbilled = token_balance.unbilled_words or 0
-            total_unbilled = current_unbilled + total_word_count
-            
-            # Cost calculation
-            token_cost = (total_unbilled // Config.WORDS_PER_CP) * Config.TOKENS_PER_CP_UNIT
-            remainder_words = total_unbilled % Config.WORDS_PER_CP
-            
-            # Batch analysis is now the standard path — no cost multiplier
-            token_cost = max(1, token_cost) if token_cost > 0 else 0
-            
-            min_required = max(1, token_cost)
-            if token_balance.balance < min_required:
-                 raise APIError(f'Insufficient tokens. Need {min_required} CP, you have {token_balance.balance} CP', status_code=403)
-                 
-            # Deduct
-            token_balance.balance -= token_cost
-            token_balance.unbilled_words = remainder_words
-            token_balance.last_updated = datetime.now(UTC)
+            # Atomically reserve and commit tokens BEFORE calling external AI APIs
+            token_balance, token_cost, current_unbilled = reserve_word_tokens(
+                user.id, total_word_count, min_cost=1
+            )
             
             # Call API with Context (only reuse cache_name if explicitly provided).
             # Guard against stale caches (expired TTL): retry without cache on failure.
@@ -323,22 +279,20 @@ def analyze_batch_claims():
                 effective_cache = cache_name
                 try:
                     api_results = gemini_service.analyze_claims_batch(
-                        texts_to_analyze, context=context, cache_name=effective_cache
+                        texts_to_analyze, context=context, cache_name=effective_cache, pre_triaged=pre_triaged
                     )
                 except Exception:
                     if effective_cache:
                         logger.warning(f"Volatile cache {effective_cache} failed, retrying without cache")
                         api_results = gemini_service.analyze_claims_batch(
-                            texts_to_analyze, context=context, cache_name=None
+                            texts_to_analyze, context=context, cache_name=None, pre_triaged=pre_triaged
                         )
                     else:
                         raise
                 
             except Exception as e:
-                # Refund
-                token_balance.balance += token_cost
-                token_balance.unbilled_words = current_unbilled
-                db_session.commit()
+                # Refund committed reservation
+                refund_word_tokens(user.id, token_cost, current_unbilled)
                 logger.error(f"Batch analysis failed: {e}")
                 raise APIError("Batch analysis service unavailable")
 
@@ -522,37 +476,21 @@ def analyze_ai():
         if word_count < 20:
             raise APIError('Text too short. Please provide at least 20 words for accurate AI detection.')
         
-        # Get token balance
-        token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
-        if not token_balance:
-            raise APIError('No token balance found', status_code=403)
-        
-        # Same token logic as fact-checking (1 CP per 250 words)
-        current_unbilled = token_balance.unbilled_words or 0
-        total_unbilled = current_unbilled + word_count
-        
-        # Calculate tokens
-        token_cost = (total_unbilled // Config.WORDS_PER_CP) * Config.TOKENS_PER_CP_UNIT
-        remainder_words = total_unbilled % Config.WORDS_PER_CP
-        
-        # Check balance - require at least 1 CP to initiate AI detection
-        min_required = max(1, token_cost)
-        if token_balance.balance < min_required:
-            raise APIError(f'Insufficient tokens. Need {min_required} CP, have {token_balance.balance} CP', status_code=402)
+        # Atomically reserve and commit tokens BEFORE calling external AI APIs
+        token_balance, token_cost, current_unbilled = reserve_word_tokens(
+            user.id, word_count, error_status=402
+        )
         
         # Get Gemini service and analyze
         gemini_service = get_gemini_service()
-        result = gemini_service.analyze_ai_content(text)
+        try:
+            result = gemini_service.analyze_ai_content(text)
+        except Exception:
+            refund_word_tokens(user.id, token_cost, current_unbilled)
+            raise
         
-        # Deduct tokens if applicable
         if token_cost > 0:
-            token_balance.balance -= token_cost
-            token_balance.unbilled_words = remainder_words
             logger.info(f"AI Detection deducted {token_cost} CP from user {user.email}")
-        else:
-            token_balance.unbilled_words = total_unbilled
-        
-        db_session.commit()
         
         elapsed = time.time() - start_time
         logger.info(f"AI Detection completed for user {user.email}: {result['ai_probability']}% in {elapsed:.2f}s")
@@ -783,7 +721,8 @@ def stream_audio():
                     try:
                         batch_res = gemini_service.analyze_claims_batch(
                             [c['claim'] for c in uncached_claims],
-                            context=context
+                            context=context,
+                            pre_triaged=True
                         )
                         fc_records_to_persist = []
                         for i, c_item in enumerate(uncached_claims):

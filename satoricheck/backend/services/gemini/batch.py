@@ -11,8 +11,24 @@ logger = logging.getLogger(__name__)
 class GeminiServiceBatch(GeminiServiceUtils):
     """Batch claim verification and triage methods for GeminiService."""
 
-    def create_cache(self, content: str | dict | list, system_instruction: str | None = None, ttl_minutes: int = 15) -> str:
-        """Create a Context Cache for Gemini."""
+    def create_cache(
+        self,
+        content: str | dict | list,
+        system_instruction: str | None = None,
+        ttl_minutes: int = 15,
+        tools: list | None = None,
+        tool_config: types.ToolConfig | None = None,
+        include_agent_tools: bool = False,
+    ) -> str:
+        """Create a Context Cache for Gemini.
+
+        In the Gemini API, a GenerateContent call that references cached_content
+        cannot specify system_instruction, tools, or tool_config—those must be
+        baked into the CachedContent resource at creation time. When
+        include_agent_tools=True (or when creating a batch verification cache),
+        we automatically bundle the batch verification system instruction,
+        Google Search grounding, and the Grok social tool into the cache.
+        """
         if not self.client:
             return None
         
@@ -34,8 +50,30 @@ class GeminiServiceBatch(GeminiServiceUtils):
                 contents=contents,
                 ttl=ttl_str
             )
+
+            if include_agent_tools:
+                if not system_instruction:
+                    system_instruction = self._load_skill(
+                        "batch_verification",
+                        fallback="You are an expert fact-checker. Verify claims accurately and minimize API calls."
+                    )
+                if tools is None:
+                    from backend.services.grok_service import get_grok_service
+                    grok = get_grok_service()
+                    grok_tool = self._build_grok_tool(grok)
+                    google_search_tool = types.Tool(google_search=types.GoogleSearch())
+                    tools = [google_search_tool, grok_tool]
+                if tool_config is None:
+                    tool_config = types.ToolConfig(
+                        include_server_side_tool_invocations=True
+                    )
+
             if system_instruction:
                 cache_config.system_instruction = system_instruction
+            if tools:
+                cache_config.tools = tools
+            if tool_config:
+                cache_config.tool_config = tool_config
 
             cache = self.client.caches.create(
                 model=self.MODEL_PRO,
@@ -81,15 +119,25 @@ class GeminiServiceBatch(GeminiServiceUtils):
             logger.error(f"Failed to generate with cache: {e}")
             raise
 
-    def analyze_claims_batch(self, claims, context=None, cache_name=None):
-        """Agentic Batch Analysis with Flash Triage + Thinking Mode + Tool Calling."""
+    def analyze_claims_batch(self, claims, context=None, cache_name=None, pre_triaged: bool = False):
+        """Agentic Batch Analysis with Flash Triage + Thinking Mode + Tool Calling.
+
+        Args:
+            claims:      List of claim strings to verify.
+            context:     Optional source document or session context string.
+            cache_name:  Optional Gemini Context Cache name.
+            pre_triaged: Set True when claims were already extracted and filtered
+                         for falsifiability by an upstream agent pass (`identify_claims`,
+                         `vc_analyst`, or `media_forensics`), skipping redundant
+                         `triage_for_stream` calls.
+        """
         if not claims:
             return []
         
-        logger.info(f"Starting Batch Analysis for {len(claims)} claims.")
+        logger.info(f"Starting Batch Analysis for {len(claims)} claims (pre_triaged={pre_triaged}).")
         
-        # STEP 1: Fast Triage
-        if len(claims) <= 2:
+        # STEP 1: Fast Triage (skipped when claims are pre-extracted or batch is small)
+        if pre_triaged or len(claims) <= 2:
             triaged = [
                 {"claim": c, "index": i, "priority": ClaimPriority.NORMAL, "strategy": "SEARCH_VERIFY"}
                 for i, c in enumerate(claims)
@@ -127,7 +175,7 @@ class GeminiServiceBatch(GeminiServiceUtils):
         elif context:
             if len(context) > 4000:
                 try:
-                    cache_name = self.create_cache(context, ttl_minutes=5)
+                    cache_name = self.create_cache(context, ttl_minutes=5, include_agent_tools=True)
                     logger.info(f"Created Context Cache: {cache_name}")
                 except Exception as e:
                     logger.warning(f"Cache creation failed, using inline: {e}")
@@ -175,6 +223,10 @@ class GeminiServiceBatch(GeminiServiceUtils):
         """Execute the agentic loop for a single batch of claims."""
         grok_tool = self._build_grok_tool(grok)
         google_search_tool = types.Tool(google_search=types.GoogleSearch())
+        tools_list = [google_search_tool, grok_tool]
+        tool_cfg = types.ToolConfig(
+            include_server_side_tool_invocations=True
+        )
         
         conversation = [
             types.Content(role="user", parts=[types.Part.from_text(text=prompt)])
@@ -185,20 +237,26 @@ class GeminiServiceBatch(GeminiServiceUtils):
             fallback="You are an expert fact-checker. Verify claims accurately and minimize API calls."
         )
 
-        config = types.GenerateContentConfig(
-            system_instruction=system_instruction,
-            tools=[google_search_tool, grok_tool],
-            tool_config=types.ToolConfig(
-                include_server_side_tool_invocations=True
-            ),
-            thinking_config=types.ThinkingConfig(
-                thinking_level="high",
-                include_thoughts=True
-            )
-        )
-        
+        # In the Gemini API, a GenerateContentConfig referencing cached_content
+        # cannot also set system_instruction, tools, or tool_config.
         if cache_name:
-            config.cached_content = cache_name
+            config = types.GenerateContentConfig(
+                cached_content=cache_name,
+                thinking_config=types.ThinkingConfig(
+                    thinking_level="high",
+                    include_thoughts=True
+                )
+            )
+        else:
+            config = types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                tools=tools_list,
+                tool_config=tool_cfg,
+                thinking_config=types.ThinkingConfig(
+                    thinking_level="high",
+                    include_thoughts=True
+                )
+            )
             
         max_turns = 3
         
@@ -211,7 +269,10 @@ class GeminiServiceBatch(GeminiServiceUtils):
                         model=self.MODEL_PRO,
                         contents=conversation,
                         config=config,
-                        context_label=f"batch turn {turn + 1}"
+                        context_label=f"batch turn {turn + 1}",
+                        fallback_system_instruction=system_instruction,
+                        fallback_tools=tools_list,
+                        fallback_tool_config=tool_cfg,
                     )
                     if cache_cleared:
                         cache_name = None
@@ -232,36 +293,9 @@ class GeminiServiceBatch(GeminiServiceUtils):
                 # Check for Function Calls
                 if response.function_calls:
                     logger.info(f"Executing {len(response.function_calls)} tool calls...")
-                    
-                    for fc in response.function_calls:
-                        fn_name = fc.name
-                        fn_args = fc.args
-                        
-                        result = {}
-                        if fn_name == 'search_social':
-                            query = fn_args.get('query', '')
-                            logger.info(f"🔍 Social Search: {query[:50]}...")
-                            result = grok.search_social(query)
-                            if result.get('error'):
-                                logger.info(f"Grok failed ({result['error']}), injecting fallback hint.")
-                                result['found'] = False
-                                result['instruction'] = (
-                                    "The social search tool is unavailable. "
-                                    "Do NOT call search_social again. "
-                                    "Proceed to produce the final JSON verdict using your own knowledge."
-                                )
-                        elif fn_name == 'google_search':
-                            result = {"status": "search_executed", "query": fn_args.get('query')}
-                        else:
-                            result = {"error": f"Unknown tool: {fn_name}"}
-                            
-                        function_response_part = types.Part.from_function_response(
-                            name=fn_name,
-                            response=result
-                        )
-                        conversation.append(
-                            types.Content(role="tool", parts=[function_response_part])
-                        )
+                    conversation.extend(
+                        self._execute_tool_calls(response.function_calls, grok)
+                    )
                     continue  # Next turn
  
                 # Extract text (skip thoughts)
@@ -280,26 +314,38 @@ class GeminiServiceBatch(GeminiServiceUtils):
         if conversation and conversation[-1].role == "tool":
             try:
                 logger.info("Agentic closing turn (producing final answer from tool results)...")
-                closing_config = types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    thinking_config=types.ThinkingConfig(
-                        thinking_level="high",
-                        include_thoughts=True
-                    ),
-                    tool_config=types.ToolConfig(
-                        function_calling_config=types.FunctionCallingConfig(
-                            mode=types.FunctionCallingMode.NONE
-                        )
+                closing_tool_cfg = types.ToolConfig(
+                    function_calling_config=types.FunctionCallingConfig(
+                        mode=types.FunctionCallingMode.NONE
                     )
                 )
                 if cache_name:
-                    closing_config.cached_content = cache_name
+                    closing_config = types.GenerateContentConfig(
+                        cached_content=cache_name,
+                        response_mime_type="application/json",
+                        thinking_config=types.ThinkingConfig(
+                            thinking_level="high",
+                            include_thoughts=True
+                        )
+                    )
+                else:
+                    closing_config = types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json",
+                        thinking_config=types.ThinkingConfig(
+                            thinking_level="high",
+                            include_thoughts=True
+                        ),
+                        tool_config=closing_tool_cfg
+                    )
                     
                 response, _ = self._generate_with_cache_fallback(
                     model=self.MODEL_PRO,
                     contents=conversation,
                     config=closing_config,
-                    context_label="batch closing turn"
+                    context_label="batch closing turn",
+                    fallback_system_instruction=system_instruction,
+                    fallback_tool_config=closing_tool_cfg,
                 )
                 if response.candidates:
                     return self._parse_thinking_batch_response(response, len(claims_to_verify))
@@ -371,6 +417,36 @@ For each claim, select the appropriate strategy from your guidelines, verify it,
             json_text = self._extract_json(content_text)
             result_data = json.loads(json_text)
             results = result_data.get('results', [])
+
+            grounding_urls = self._extract_grounding_urls(candidate)
+
+            # Collect all unique candidate URLs across the batch and validate once in parallel
+            all_raw_urls = []
+            seen_raw_urls = set()
+            for r in results:
+                if isinstance(r, dict):
+                    for u in r.get('sources', []) or []:
+                        if isinstance(u, str) and u.strip() and u.strip() not in seen_raw_urls:
+                            seen_raw_urls.add(u.strip())
+                            all_raw_urls.append(u.strip())
+            for u in grounding_urls:
+                if u not in seen_raw_urls:
+                    seen_raw_urls.add(u)
+                    all_raw_urls.append(u)
+
+            valid_url_set = set()
+            if all_raw_urls:
+                if len(all_raw_urls) == 1:
+                    if self._validate_url(all_raw_urls[0]):
+                        valid_url_set.add(all_raw_urls[0])
+                else:
+                    import concurrent.futures
+                    max_workers = min(8, len(all_raw_urls))
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        validity_flags = list(executor.map(self._validate_url, all_raw_urls))
+                    valid_url_set = {u for u, ok in zip(all_raw_urls, validity_flags) if ok}
+
+            valid_grounding_urls = [u for u in grounding_urls if u in valid_url_set]
             
             normalized = []
             used_indices = set()
@@ -388,11 +464,24 @@ For each claim, select the appropriate strategy from your guidelines, verify it,
                 
                 if claim_result:
                     used_indices.add(claim_result.get('claim_index'))
+                    raw_sources = claim_result.get('sources', []) or []
+                    filtered_sources = [
+                        u.strip() for u in raw_sources
+                        if isinstance(u, str) and u.strip() in valid_url_set
+                    ]
+                    raw_verdict = claim_result.get('verdict', 'COULD_NOT_VERIFY')
+                    if raw_verdict == 'UNVERIFIABLE':
+                        raw_verdict = 'COULD_NOT_VERIFY'
+
+                    if not filtered_sources and valid_grounding_urls and raw_verdict not in ('NOT_A_CLAIM', 'COULD_NOT_VERIFY'):
+                        filtered_sources = valid_grounding_urls[:3]
+
                     result = {
                         "is_claim": True,
-                        "verdict": claim_result.get('verdict', 'UNVERIFIABLE'),
+                        "verdict": raw_verdict,
                         "explanation": claim_result.get('explanation', ''),
-                        "sources": claim_result.get('sources', [])[:5],
+                        "sources": filtered_sources[:5],
+                        "source_reliability": claim_result.get('source_reliability', 'MEDIUM'),
                         "fallacy": claim_result.get('fallacy'),
                         "is_quote_claim": claim_result.get('is_quote_claim', False),
                         "quote_attribution": claim_result.get('quote_attribution'),
@@ -409,7 +498,8 @@ For each claim, select the appropriate strategy from your guidelines, verify it,
                         "is_claim": True,
                         "verdict": "COULD_NOT_VERIFY",
                         "explanation": "Result missing from model response",
-                        "sources": []
+                        "sources": [],
+                        "source_reliability": "LOW"
                     })
             
             logger.info(f"Parsed {len(normalized)} results from One-Shot response")
@@ -421,7 +511,8 @@ For each claim, select the appropriate strategy from your guidelines, verify it,
                 "is_claim": True,
                 "verdict": "COULD_NOT_VERIFY",
                 "explanation": "Failed to parse model response",
-                "sources": []
+                "sources": [],
+                "source_reliability": "LOW"
             } for _ in range(expected_count)]
  
     def triage_for_stream(self, claims: list, stream_context: str = None) -> list:
@@ -435,13 +526,17 @@ For each claim, select the appropriate strategy from your guidelines, verify it,
         if stream_context:
             context_hint = f"\nSOURCE CONTEXT: {stream_context[:200]}"
         
-        system_instruction = (
-            "You are a fact-checking triage assistant. Categorize each input claim for fact-check priority "
-            "and strategy based on the instructions. Respond ONLY with a JSON array, one object per claim."
+        system_instruction = self._load_skill(
+            "stream_triage",
+            fallback=(
+                "You are a fact-checking triage assistant. Categorize each input claim for fact-check priority "
+                "and strategy based on the instructions. Respond ONLY with a JSON array, one object per claim."
+            )
         )
         
         config = types.GenerateContentConfig(
             system_instruction=system_instruction,
+            response_mime_type="application/json",
             thinking_config=types.ThinkingConfig(
                 thinking_level="minimal"
             )

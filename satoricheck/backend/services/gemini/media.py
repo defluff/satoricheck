@@ -155,7 +155,8 @@ class GeminiServiceMedia(GeminiServiceClaims):
             )
             
             config = types.GenerateContentConfig(
-                system_instruction=system_instruction
+                system_instruction=system_instruction,
+                response_mime_type="application/json"
             )
             
             is_video = 'video' in mime_type
@@ -230,15 +231,18 @@ class GeminiServiceMedia(GeminiServiceClaims):
         try:
             part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
 
-            system_instruction = (
-                "You are an expert live audio transcriber and real-time fact-checking triage assistant. "
-                "Your objective is twofold:\n"
-                "1. Accurately transcribe the spoken audio dialogue.\n"
-                "2. Extract distinct, falsifiable factual claims from the dialogue that meet the Falsifiability Standard "
-                "(can be confirmed or refuted by empirical data, statistics, public records, legislation, or official statements). "
-                "Exclude conversational banter, verbal fillers ('you know', 'like', 'literally'), pure opinions, "
-                "rhetorical hyperbole lacking empirical anchors, and unfinished speech fragments.\n"
-                "Respond ONLY with a JSON object."
+            system_instruction = self._load_skill(
+                "audio_stream_ingestion",
+                fallback=(
+                    "You are an expert live audio transcriber and real-time fact-checking triage assistant. "
+                    "Your objective is twofold:\n"
+                    "1. Accurately transcribe the spoken audio dialogue.\n"
+                    "2. Extract distinct, falsifiable factual claims from the dialogue that meet the Falsifiability Standard "
+                    "(can be confirmed or refuted by empirical data, statistics, public records, legislation, or official statements). "
+                    "Exclude conversational banter, verbal fillers ('you know', 'like', 'literally'), pure opinions, "
+                    "rhetorical hyperbole lacking empirical anchors, and unfinished speech fragments.\n"
+                    "Respond ONLY with a JSON object."
+                )
             )
 
             context_hint = f"\nSTREAM CONTEXT: {context[:300]}" if context else ""
@@ -260,6 +264,7 @@ class GeminiServiceMedia(GeminiServiceClaims):
 
             config = types.GenerateContentConfig(
                 system_instruction=system_instruction,
+                response_mime_type="application/json",
                 thinking_config=types.ThinkingConfig(
                     thinking_level="minimal"
                 )

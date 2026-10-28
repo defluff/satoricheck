@@ -2,6 +2,7 @@
 Database initialization and session management.
 """
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import sessionmaker, scoped_session
 from backend.models import Base
 from backend.config import Config
@@ -108,11 +109,20 @@ def _apply_migrations():
                 elif isinstance(default_val, (int, float)):
                     default_clause = f" DEFAULT {default_val}"
 
-            stmt = f'ALTER TABLE {table.name} ADD COLUMN {col_name} {ddl_type}{default_clause}'
+            is_postgres = engine.dialect.name in ('postgresql', 'postgres')
+            if_not_exists = 'IF NOT EXISTS ' if is_postgres else ''
+            stmt = f'ALTER TABLE {table.name} ADD COLUMN {if_not_exists}{col_name} {ddl_type}{default_clause}'
             logger.info(f"↗ Auto-migrating: {stmt}")
 
-            with engine.begin() as conn:
-                conn.execute(text(stmt))
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(stmt))
+            except (OperationalError, ProgrammingError) as exc:
+                err_msg = str(exc).lower()
+                if 'duplicate column' in err_msg or 'already exists' in err_msg:
+                    logger.info(f"Column {table.name}.{col_name} already added by a concurrent worker; skipping.")
+                else:
+                    raise
 
     logger.info("✓ Schema migration check complete")
 

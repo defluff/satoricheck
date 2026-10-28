@@ -259,8 +259,9 @@ class FactCheckManager {
                     }
                 }
 
-                // 2c. Progressive Micro-Batches: Process 3 claims at a time for faster feedback
-                const MICRO_BATCH_SIZE = 3;
+                // 2c. Progressive Batches: Process up to 8 claims at a time (matching backend MAX_CLAIMS_PER_PROMPT)
+                // to preserve cross-claim entity clustering and minimize LLM round-trips
+                const MICRO_BATCH_SIZE = 8;
                 let processedCount = 0;
 
                 for (let i = 0; i < uncheckedClaims.length; i += MICRO_BATCH_SIZE) {
@@ -275,10 +276,12 @@ class FactCheckManager {
                     const totalBatches = Math.ceil(uncheckedClaims.length / MICRO_BATCH_SIZE);
 
                     try {
-                        // Call batch API with pre-created cache_name
+                        // Call batch API with pre-created cache_name and pre_triaged=true
+                        // since identifyClaims already filtered for falsifiability
                         const batchBody = {
                             claims: chunk,
-                            context: text  // Pass original text as context
+                            context: text,  // Pass original text as context
+                            pre_triaged: true
                         };
                         if (cacheName) {
                             batchBody.cache_name = cacheName;

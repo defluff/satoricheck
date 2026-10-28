@@ -37,14 +37,15 @@ Return a JSON object containing a `results` array with objects in the exact same
     {
       "claim_index": 1,
       "strategy_used": "SEARCH_VERIFY",
-      "verdict": "TRUE|FALSE|MISLEADING|COULD_NOT_VERIFY|FUTURE_PROJECTION",
+      "verdict": "TRUE|FALSE|MISLEADING|PARTIALLY TRUE|COULD_NOT_VERIFY|FUTURE_PROJECTION",
       "explanation": "Brief explanation (max 3 sentences)",
       "fallacy": null or "Logical Fallacy Name",
+      "source_reliability": "HIGH|MEDIUM|LOW",
       "is_quote_claim": true or false,
       "quote_attribution": "Person name or null",
       "quote_verified": true or false or null,
       "quote_source": "Where/when they said it or null",
-      "meta_truth_verdict": "TRUE|FALSE|MISLEADING|COULD_NOT_VERIFY or null",
+      "meta_truth_verdict": "TRUE|FALSE|MISLEADING|PARTIALLY TRUE|COULD_NOT_VERIFY or null",
       "sources": ["https://authoritative-source.com/article"],
       "social_context": "Optional: string explaining social context if SOCIAL_VERIFY was used"
     }

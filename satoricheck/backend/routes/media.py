@@ -16,6 +16,7 @@ import tempfile
 from backend.database import db_session
 from backend.models import MediaCheck, TokenBalance
 from backend.routes.auth import login_required
+from backend.routes.tokens import reserve_flat_tokens, refund_flat_tokens
 from backend.error_handlers import APIError
 from backend.services import get_gemini_service
 from backend.config import Config
@@ -84,13 +85,11 @@ def _analyze_media(
     """
     cost = getattr(Config, 'MEDIA_ANALYSIS_COST', 1)
 
-    token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
-    if not token_balance or token_balance.balance < cost:
-        raise APIError(f'Insufficient tokens. Media analysis costs {cost} CP.', status_code=403)
-
-    token_balance.balance -= cost
-    token_balance.last_updated = datetime.now(UTC)
-    db_session.commit()
+    token_balance = reserve_flat_tokens(
+        user.id,
+        cost,
+        error_message=f'Insufficient tokens. Media analysis costs {cost} CP.'
+    )
 
     logger.info(
         f"Media analysis started for user {user.email}: "
@@ -156,12 +155,8 @@ def _analyze_media(
             'new_balance': token_balance.balance,
         }
     except Exception:
-        try:
-            token_balance.balance += cost
-            db_session.commit()
-            logger.info(f"Refunded {cost} CP to user {user.email} due to analysis failure")
-        except Exception as refund_err:
-            logger.error(f"Failed to refund tokens: {refund_err}")
+        refund_flat_tokens(user.id, cost)
+        logger.info(f"Refunded {cost} CP to user {user.email} due to analysis failure")
         raise
 
 

@@ -1,3 +1,4 @@
+import concurrent.futures
 import functools
 import ipaddress
 import logging
@@ -137,18 +138,31 @@ class GeminiServiceClient:
         )
 
     def _generate_with_cache_fallback(
-        self, model: str, contents, config: types.GenerateContentConfig, context_label: str = ""
+        self,
+        model: str,
+        contents,
+        config: types.GenerateContentConfig,
+        context_label: str = "",
+        fallback_system_instruction: str | None = None,
+        fallback_tools: list | None = None,
+        fallback_tool_config: types.ToolConfig | None = None,
     ):
         """Call generate_content, automatically clearing cached_content on failure and retrying.
 
-        This centralises the try→catch→clear-cache→retry pattern used across
-        agentic loops in claims.py and batch.py.
+        In the Gemini API, a GenerateContentConfig referencing cached_content cannot
+        also specify system_instruction, tools, or tool_config (those are baked into
+        the CachedContent resource at creation time). If the cache expired or failed,
+        this helper clears cached_content and restores the fallback system_instruction,
+        tools, and tool_config before retrying.
 
         Args:
-            model:         Model identifier (e.g. self.MODEL_PRO).
-            contents:      Prompt or conversation history.
-            config:        GenerateContentConfig (may include cached_content).
-            context_label: Descriptive label for log messages.
+            model:                       Model identifier (e.g. self.MODEL_PRO).
+            contents:                    Prompt or conversation history.
+            config:                      GenerateContentConfig (may include cached_content).
+            context_label:               Descriptive label for log messages.
+            fallback_system_instruction: Restored onto config if cache is cleared.
+            fallback_tools:              Restored onto config if cache is cleared.
+            fallback_tool_config:        Restored onto config if cache is cleared.
 
         Returns:
             Tuple of (response, cache_was_cleared: bool).
@@ -172,11 +186,54 @@ class GeminiServiceClient:
                     f"clearing cache and retrying: {e}"
                 )
                 config.cached_content = None
+                if fallback_system_instruction is not None:
+                    config.system_instruction = fallback_system_instruction
+                if fallback_tools is not None:
+                    config.tools = fallback_tools
+                if fallback_tool_config is not None:
+                    config.tool_config = fallback_tool_config
                 response = self.client.models.generate_content(
                     model=model, contents=contents, config=config
                 )
                 return response, True
             raise
+
+    @staticmethod
+    def _execute_tool_calls(function_calls, grok) -> list[types.Content]:
+        """Execute client-side tool calls emitted by Gemini and return tool role Content entries.
+
+        Centralises tool dispatch across single-claim (`claims.py`) and batch (`batch.py`)
+        agentic loops, including graceful fallback instructions if Grok social search is
+        unavailable or times out.
+        """
+        tool_contents = []
+        for fc in function_calls:
+            fn_name = fc.name
+            fn_args = fc.args or {}
+
+            if fn_name == 'search_social':
+                query = fn_args.get('query', '')
+                logger.info(f"🔍 Executing Tool: search_social(query='{query[:50]}')")
+                result = grok.search_social(query)
+                if result.get('error'):
+                    logger.info(f"Grok failed ({result['error']}), injecting fallback hint.")
+                    result['found'] = False
+                    result['instruction'] = (
+                        "The social search tool is unavailable. "
+                        "Do NOT call search_social again. "
+                        "Proceed to produce the final JSON verdict using your own knowledge."
+                    )
+            else:
+                result = {"error": f"Unknown tool: {fn_name}"}
+
+            function_response_part = types.Part.from_function_response(
+                name=fn_name,
+                response=result
+            )
+            tool_contents.append(
+                types.Content(role="tool", parts=[function_response_part])
+            )
+        return tool_contents
 
     @staticmethod
     def _is_private_ip(ip_str: str) -> bool:
@@ -232,13 +289,71 @@ class GeminiServiceClient:
             return False
 
     def _validate_sources(self, sources):
-        """Filter sources to only include live public URLs. Enforces max 5 sources."""
+        """Filter sources to only include live public URLs concurrently. Enforces max 5 sources."""
         if not sources or not isinstance(sources, list):
             return []
+
+        # Deduplicate while preserving order, inspect at most 10 candidates
+        candidates = []
+        seen = set()
+        for url in sources:
+            if isinstance(url, str):
+                clean = url.strip()
+                if clean and clean not in seen:
+                    seen.add(clean)
+                    candidates.append(clean)
+                    if len(candidates) >= 10:
+                        break
+
+        if not candidates:
+            return []
+
+        if len(candidates) == 1:
+            return candidates if self._validate_url(candidates[0]) else []
+
+        # Validate URLs in parallel to avoid blocking Gunicorn worker threads sequentially
+        max_workers = min(5, len(candidates))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            checks = list(executor.map(self._validate_url, candidates))
+
         valid_sources = []
-        for url in sources[:10]:
-            if self._validate_url(url):
+        for url, is_valid in zip(candidates, checks):
+            if is_valid:
                 valid_sources.append(url)
                 if len(valid_sources) >= 5:
                     break
         return valid_sources
+
+    @staticmethod
+    def _extract_grounding_urls(candidate) -> list[str]:
+        """Extract verified web source URLs from Gemini's server-side Google Search grounding metadata."""
+        if not candidate:
+            return []
+
+        grounding_meta = (
+            candidate.get('groundingMetadata') or candidate.get('grounding_metadata')
+            if isinstance(candidate, dict)
+            else getattr(candidate, 'grounding_metadata', None)
+        )
+        if not grounding_meta:
+            return []
+
+        chunks = (
+            grounding_meta.get('groundingChunks') or grounding_meta.get('grounding_chunks')
+            if isinstance(grounding_meta, dict)
+            else getattr(grounding_meta, 'grounding_chunks', None)
+        )
+        if not chunks or not isinstance(chunks, (list, tuple)):
+            return []
+
+        urls = []
+        seen = set()
+        for chunk in chunks:
+            web = chunk.get('web') if isinstance(chunk, dict) else getattr(chunk, 'web', None)
+            if not web:
+                continue
+            uri = web.get('uri') if isinstance(web, dict) else getattr(web, 'uri', None)
+            if isinstance(uri, str) and uri.startswith(('http://', 'https://')) and uri not in seen:
+                seen.add(uri)
+                urls.append(uri)
+        return urls

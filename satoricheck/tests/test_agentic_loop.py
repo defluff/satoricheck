@@ -156,9 +156,13 @@ class TestAgenticLoop:
         recorded_configs = []
         def side_effect(*args, **kwargs):
             cfg = kwargs.get('config')
-            recorded_configs.append(cfg.cached_content if cfg else None)
+            recorded_configs.append({
+                "cached_content": cfg.cached_content if cfg else None,
+                "system_instruction": cfg.system_instruction if cfg else None,
+                "tools": cfg.tools if cfg else None,
+            })
             if len(recorded_configs) == 1:
-                raise Exception("400 Cache conflict tools")
+                raise Exception("400 Cache expired")
             return resp
             
         mock_client.models.generate_content.side_effect = side_effect
@@ -174,9 +178,70 @@ class TestAgenticLoop:
         # generate_content should have been called exactly 2 times
         assert mock_client.models.generate_content.call_count == 2
         
-        # Verify cached_content at the time of each call
+        # Verify cached_content and that system_instruction/tools are omitted when cached,
+        # then restored when falling back to uncached retry
         assert len(recorded_configs) == 2
-        assert recorded_configs[0] == "cachedContents/conflict-cache"
-        assert recorded_configs[1] is None
+        assert recorded_configs[0]["cached_content"] == "cachedContents/conflict-cache"
+        assert recorded_configs[0]["system_instruction"] is None
+        assert recorded_configs[0]["tools"] is None
+        assert recorded_configs[1]["cached_content"] is None
+        assert recorded_configs[1]["system_instruction"] is not None
+        assert recorded_configs[1]["tools"] is not None
+
+    @patch('backend.services.gemini.client.genai.Client')
+    @patch('backend.services.grok_service.get_grok_service')
+    def test_single_agentic_loop_injects_grok_error_fallback_hint(self, mock_get_grok, mock_client_class):
+        """
+        Verify that when Grok returns an error in the single-claim agentic loop,
+        _execute_tool_calls injects the 'Do NOT call search_social again' instruction
+        so the model does not get stuck retrying a down tool.
+        """
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
+
+        mock_grok = MagicMock()
+        mock_grok.get_tool_definition.return_value = {"name": "search_social"}
+        mock_grok.search_social.return_value = {"found": False, "error": "timeout"}
+        mock_get_grok.return_value = mock_grok
+
+        fc = MagicMock()
+        fc.name = "search_social"
+        fc.args = {"query": "viral rumor"}
+
+        part_fc = MagicMock()
+        part_fc.thought = False
+        part_fc.text = None
+        content1 = MagicMock()
+        content1.parts = [part_fc]
+        candidate1 = MagicMock()
+        candidate1.content = content1
+        resp1 = MagicMock()
+        resp1.candidates = [candidate1]
+        resp1.function_calls = [fc]
+
+        part_text = MagicMock()
+        part_text.thought = False
+        part_text.text = '{"verdict": "COULD_NOT_VERIFY", "is_claim": true, "explanation": "Social search timed out."}'
+        content2 = MagicMock()
+        content2.parts = [part_text]
+        candidate2 = MagicMock()
+        candidate2.content = content2
+        resp2 = MagicMock()
+        resp2.candidates = [candidate2]
+        resp2.function_calls = []
+
+        mock_client.models.generate_content.side_effect = [resp1, resp2]
+
+        service = GeminiService()
+        result = service._analyze_claim_agentic("Did @someone tweet this just now?")
+
+        assert result['verdict'] == "COULD_NOT_VERIFY"
+        assert mock_grok.search_social.call_count == 1
+        # Check that the tool response passed to turn 2 included the fallback instruction
+        second_call_contents = mock_client.models.generate_content.call_args_list[1].kwargs['contents']
+        tool_msg = second_call_contents[-1]
+        assert tool_msg.role == "tool"
+        fn_resp = tool_msg.parts[0].function_response.response
+        assert "Do NOT call search_social again" in fn_resp.get("instruction", "")
 
 
