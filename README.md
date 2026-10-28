@@ -10,19 +10,19 @@ Authenix is my AI-powered verification platform for live audio streams, text cla
 
 ## Features
 
-- **Live Audio & Text Verification**: Real-time speech stream transcription and claim extraction via Gemini.
-- **Pitch Deck & Media Forensics**: Presentation claim validation and AI-generated image/video manipulation analysis.
-- **Multi-Source Grounding**: Multi-agent reasoning pipeline grounded in Google Search and xAI Grok.
-- **Chrome Extension (MV3)**: Persistent side panel with 1-click Google OAuth and contextual verification.
-- **Gamification & Billing**: Daily login streak rewards, check points (CP), and Stripe checkout integration.
-- **Privacy & GDPR Compliance**: Ephemeral media processing and automated retention cleanup. 
+- **Live Audio & Text Verification**: Real-time speech stream transcription, falsifiable claim extraction, and Flash triage via Gemini Multimodal (`audio_stream_ingestion` & `stream_triage` skills).
+- **Pitch Deck & Media Forensics**: Investor workstation with slide-by-slide claim extraction, batch market verification, and AI-generated image/video/audio manipulation forensics.
+- **Multi-Source Agentic Grounding**: Thinking-mode verification pipeline grounded in live Google Search metadata and xAI Grok social context, with Gemini Context Caching and concurrent SSRF-safe URL validation.
+- **Chrome Extension (MV3)**: Persistent side panel with 1-click Google OAuth, AES-GCM-256 encrypted token storage, and contextual verification.
+- **Gamification & Atomic Billing**: Daily login streak rewards, word-accumulated Check Points (CP) with row-level reservation (`SELECT ... FOR UPDATE`), and Stripe webhook fulfillment.
+- **Privacy & Swiss nDSG / GDPR Compliance**: In-memory media/PDF processing, 7-day rolling cache auto-purge via Cloud Scheduler, and self-service cascading account deletion.
 
 ---
 
 ## Local Setup & Prerequisites
 
 ### Prerequisites
-- Python 3.11+
+- Python 3.12+
 - Virtual environment (`.venv`) at repository root
 
 ### Quick Start
@@ -30,13 +30,13 @@ Authenix is my AI-powered verification platform for live audio streams, text cla
 ```bash
 # 1. Install dependencies
 cd satoricheck
-pip install -r requirements.txt
+../.venv/bin/pip install -r requirements.txt
 
 # 2. Configure environment
 cp .env.example .env    # Configure GEMINI_API_KEY, FLASK_SECRET_KEY
 
 # 3. Start development server
-python3 -m backend.server
+../.venv/bin/python -m backend.server
 ```
 
 Open **http://127.0.0.1:8000** in your browser.
@@ -50,7 +50,7 @@ Open **http://127.0.0.1:8000** in your browser.
 Run the test suite from the repository root:
 
 ```bash
-pytest satoricheck/tests/ --ignore=satoricheck/tests/e2e
+PYTHONPATH=satoricheck .venv/bin/pytest satoricheck/tests/ --ignore=satoricheck/tests/e2e -v
 ```
 
 ---
@@ -60,15 +60,15 @@ pytest satoricheck/tests/ --ignore=satoricheck/tests/e2e
 ```mermaid
 graph LR
     Client[Web & Chrome Extension] --> API[Flask API & Auth]
-    API --> AI[Gemini & Grok AI Pipeline]
+    API --> AI[Gemini & Grok Agentic Pipeline]
     API --> DB[(PostgreSQL / SQLite)]
     API --> Stripe[Stripe Billing]
 ```
 
 - **Frontend:** Vanilla JavaScript (ES6+), HTML5, and CSS3 custom properties (mobile-first, dark theme).
-- **Backend:** Modular Flask blueprints (`auth`, `billing`, `factcheck`, `tokens`).
-- **Database:** SQLAlchemy ORM with SQLite (WAL mode) locally and Cloud SQL (PostgreSQL) in production.
-- **AI Engine:** Google Gemini (multimodal audio, thinking loops, search grounding) with xAI Grok integration.
+- **Backend:** Modular Flask blueprints (`auth`, `billing`, `factcheck`, `media`, `pitchdeck`, `tokens`, `analytics`, `export`).
+- **Database:** SQLAlchemy ORM with SQLite (WAL mode) locally and Cloud SQL (PostgreSQL) in production, with idempotent startup schema auto-migration.
+- **AI Engine:** Modular Gemini service (`backend/services/gemini/`) and domain skills (`backend/agents/skills/`) combining Gemini 3.1 Pro / 3 Flash (multimodal audio/video/PDF, thinking loops, context caching, search grounding) with xAI Grok social search.
 
 ---
 
