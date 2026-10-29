@@ -170,6 +170,79 @@
     <!-- Pitchdeck Workspace (hidden by default) -->
     <div id="pitchdeck-view" class="hidden">
         <main class="pitchdeck-workspace">
+            <!-- Feature A: Persistent Thesis Configuration Gate -->
+            <section class="pd-card pd-thesis-gate" id="pd-thesis-gate">
+                <div class="pd-thesis-bar">
+                    <div class="pd-thesis-bar-summary">
+                        <span class="pd-thesis-bar-title">🎯 Fund Thesis Mandate</span>
+                        <div class="pd-thesis-active-pills" id="pd-thesis-active-pills">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                    <div class="pd-thesis-bar-actions">
+                        <button type="button" class="btn-secondary btn-sm" id="pd-archive-toggle-btn"
+                            aria-expanded="false" title="View Zero-File Deal Archive & Decision Log">
+                            🗂️ Deal Archive (<span id="pd-archive-count">0</span>)
+                        </button>
+                        <button type="button" class="btn-secondary btn-sm" id="pd-thesis-toggle-btn"
+                            aria-expanded="false">
+                            ⚙️ Configure Thesis
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Feature C: Collapsible Zero-File Deal Archive Drawer -->
+                <div class="pd-archive-drawer hidden" id="pd-archive-drawer">
+                    <div class="pd-archive-drawer-header">
+                        <span class="pd-thesis-dim-label">Zero-File Deal Archive &amp; Decision Log (Local Browser Storage)</span>
+                        <span class="pd-archive-privacy-note">Raw PDFs are purged on new upload; only lightweight deal metadata is retained.</span>
+                    </div>
+                    <div class="pd-archive-list" id="pd-archive-list">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Collapsible Mandate Editor -->
+                <div class="pd-thesis-editor hidden" id="pd-thesis-editor">
+                    <div class="pd-thesis-dimension">
+                        <div class="pd-thesis-dim-header">
+                            <label class="pd-thesis-dim-label">Target Geographies</label>
+                            <div class="pd-thesis-custom-add">
+                                <input type="text" id="pd-thesis-geo-input" class="pd-thesis-input"
+                                    placeholder="+ Custom region (e.g. Nordics)" maxlength="40" />
+                                <button type="button" class="btn-secondary btn-sm" id="pd-thesis-geo-add-btn">Add</button>
+                            </div>
+                        </div>
+                        <div class="pd-thesis-tag-group" id="pd-thesis-geo-tags" data-dimension="geographies">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+
+                    <div class="pd-thesis-dimension">
+                        <div class="pd-thesis-dim-header">
+                            <label class="pd-thesis-dim-label">Target Sectors</label>
+                            <div class="pd-thesis-custom-add">
+                                <input type="text" id="pd-thesis-sector-input" class="pd-thesis-input"
+                                    placeholder="+ Custom sector (e.g. BioTech)" maxlength="40" />
+                                <button type="button" class="btn-secondary btn-sm" id="pd-thesis-sector-add-btn">Add</button>
+                            </div>
+                        </div>
+                        <div class="pd-thesis-tag-group" id="pd-thesis-sector-tags" data-dimension="sectors">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+
+                    <div class="pd-thesis-dimension">
+                        <div class="pd-thesis-dim-header">
+                            <label class="pd-thesis-dim-label">Target Stages</label>
+                        </div>
+                        <div class="pd-thesis-tag-group" id="pd-thesis-stage-tags" data-dimension="stages">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             <!-- Upload Section -->
             <section class="pd-upload-section">
                 <div class="pd-upload-zone" id="pd-upload-zone">
@@ -205,6 +278,76 @@
 
             <!-- Executive & Triage Dashboard (Top Overview) -->
             <section class="pd-triage-section">
+                <!-- Feature A & C: Thesis Match Header Scorecard, Decision Control & Deal Export -->
+                <div class="pd-card pd-thesis-scorecard hidden" id="pd-thesis-scorecard">
+                    <!-- Boomerang Startup Detection Alert -->
+                    <div class="pd-boomerang-banner hidden" id="pd-boomerang-banner">
+                        <span class="pd-boomerang-icon">🪃</span>
+                        <span class="pd-boomerang-text" id="pd-boomerang-text"></span>
+                        <button type="button" class="btn-secondary btn-sm" id="pd-boomerang-view-btn">View Prior Brief</button>
+                    </div>
+
+                    <div class="pd-scorecard-header">
+                        <div class="pd-scorecard-title-group">
+                            <span class="pd-scorecard-label">Thesis Alignment Scorecard</span>
+                            <span class="badge badge-neutral" id="pd-thesis-overall-badge">Pending</span>
+                        </div>
+
+                        <!-- Deal Header Bar: Investor Decision Control + Export Actions -->
+                        <div class="pd-deal-header-controls">
+                            <div class="pd-decision-group" id="pd-decision-group" role="group" aria-label="Investor Decision">
+                                <button type="button" class="pd-decision-btn pd-decision-btn--pass" data-decision="pass">
+                                    ✕ Pass
+                                </button>
+                                <button type="button" class="pd-decision-btn pd-decision-btn--watchlist" data-decision="watchlist">
+                                    ⏱ Watchlist
+                                </button>
+                                <button type="button" class="pd-decision-btn pd-decision-btn--advance" data-decision="advance_to_call">
+                                    ✓ Advance to Call
+                                </button>
+                            </div>
+
+                            <div class="pd-export-actions">
+                                <button type="button" class="btn-primary btn-sm" id="pd-copy-brief-btn"
+                                    title="Copy structured Markdown Deal Brief to clipboard for CRM / Slack / Notion">
+                                    📋 Copy Deal Brief
+                                </button>
+                                <button type="button" class="btn-secondary btn-sm" id="pd-export-pdf-btn"
+                                    title="Export structured Deal Brief as PDF">
+                                    📄 Export PDF
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="pd-scorecard-grid" id="pd-scorecard-grid">
+                        <div class="pd-scorecard-item" id="pd-scorecard-geo">
+                            <span class="pd-scorecard-dim">Geography</span>
+                            <span class="pd-scorecard-extracted" id="pd-scorecard-geo-val">—</span>
+                            <span class="badge badge-neutral" id="pd-scorecard-geo-badge">—</span>
+                        </div>
+                        <div class="pd-scorecard-item" id="pd-scorecard-sector">
+                            <span class="pd-scorecard-dim">Sector</span>
+                            <span class="pd-scorecard-extracted" id="pd-scorecard-sector-val">—</span>
+                            <span class="badge badge-neutral" id="pd-scorecard-sector-badge">—</span>
+                        </div>
+                        <div class="pd-scorecard-item" id="pd-scorecard-stage">
+                            <span class="pd-scorecard-dim">Stage</span>
+                            <span class="pd-scorecard-extracted" id="pd-scorecard-stage-val">—</span>
+                            <span class="badge badge-neutral" id="pd-scorecard-stage-badge">—</span>
+                        </div>
+                    </div>
+
+                    <!-- Investor 1-Line Note -->
+                    <div class="pd-investor-notes-bar">
+                        <label for="pd-investor-notes-input" class="pd-notes-label">📝 Investor Note:</label>
+                        <input type="text" id="pd-investor-notes-input" class="pd-notes-input"
+                            placeholder="Add a 1-line triage note (e.g. Strong team, but TAM is inflated. Ask about enterprise churn)..."
+                            maxlength="300" />
+                        <span class="pd-notes-saved-indicator hidden" id="pd-notes-saved-indicator">Saved to Archive ✓</span>
+                    </div>
+                </div>
+
                 <!-- Executive Summary Card -->
                 <div class="pd-card" id="pd-summary-card">
                     <h3 class="pd-card-header">Executive Summary</h3>
@@ -343,8 +486,8 @@
                     <div class="pd-card pd-claims-card" id="pd-claims-card">
                         <div class="pd-claims-header pd-card-header">
                             <div class="pd-claims-title-group">
-                                <h3 id="pd-claims-header-title">Claims for Slide <span
-                                        id="pd-active-slide-badge">1</span></h3>
+                                <h3 id="pd-claims-header-title">Risk-Priority Triage <span
+                                        id="pd-active-slide-badge" class="hidden">1</span></h3>
                                 <span class="badge badge-count" id="pd-slide-claims-count">0</span>
                             </div>
                             <div class="pd-claims-action-group">
@@ -352,21 +495,34 @@
                                     title="Verify claims on this slide">
                                     Verify Slide
                                 </button>
-                                <button class="btn-primary btn-sm hidden" id="pd-check-all-btn"
+                                <button class="btn-primary btn-sm hidden" id="pd-verify-public-btn"
+                                    title="Fact-check only external public claims (saves CP on internal data-room metrics)">
+                                    🔍 Verify Public Claims
+                                </button>
+                                <button class="btn-secondary btn-sm hidden" id="pd-check-all-btn"
                                     title="Fact-check all claims in deck">
                                     Check All
                                 </button>
                             </div>
                         </div>
 
-                        <!-- Filter Tabs -->
-                        <div class="pd-claims-filter-tabs" id="pd-claims-filter-tabs">
-                            <button class="btn-tab pd-tab-btn active" data-filter="slide">This Slide</button>
-                            <button class="btn-tab pd-tab-btn" data-filter="all">All Deck Claims</button>
-                            <button class="btn-tab pd-tab-btn" data-filter="financials">Financials & Traction</button>
+                        <!-- Feature B: Segmented View Switcher -->
+                        <div class="pd-claims-filter-tabs" id="pd-claims-filter-tabs" role="tablist">
+                            <button class="btn-tab pd-tab-btn active" data-filter="risk" role="tab" aria-selected="true">
+                                🎯 Risk Priority View
+                            </button>
+                            <button class="btn-tab pd-tab-btn" data-filter="slide" role="tab" aria-selected="false">
+                                🖼️ Slide-by-Slide View
+                            </button>
+                            <button class="btn-tab pd-tab-btn" data-filter="financials" role="tab" aria-selected="false">
+                                Financials &amp; Traction
+                            </button>
+                            <button class="btn-tab pd-tab-btn" data-filter="all" role="tab" aria-selected="false">
+                                All Claims
+                            </button>
                         </div>
 
-                        <p class="pd-card-subtitle">Click to verify individual claims via live search grounding</p>
+                        <p class="pd-card-subtitle">Sorted by dealbreaker risk &amp; founder call interrogation priority. Click any claim to sync slide viewer.</p>
 
                         <div class="pd-card-content">
                             <!-- Initial state (before analysis) -->
@@ -381,6 +537,9 @@
                     </div>
                 </div>
             </section>
+
+            <!-- Structured PDF Print Container (only visible during @media print) -->
+            <section class="pd-print-report hidden" id="pd-print-report" aria-hidden="true"></section>
 
             <!-- Privacy Footer -->
             <footer class="callout-privacy">

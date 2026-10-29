@@ -40,15 +40,25 @@ class GeminiServicePitchdeck(GeminiServiceMedia):
 
     # Allowed schema keys and categories for strict validation
     ALLOWED_TOP_LEVEL_KEYS = {
-        'company_name', 'summary', 'usp', 'industry', 'sector', 'market_size',
-        'competition', 'team_highlights', 'funding_ask', 'verifiable_claims',
-        'vc_metrics', 'red_flags', 'page_count', 'cache_name'
+        'company_name', 'summary', 'usp', 'industry', 'sector', 'startup_profile',
+        'market_size', 'competition', 'team_highlights', 'funding_ask',
+        'verifiable_claims', 'vc_metrics', 'red_flags', 'page_count', 'cache_name'
     }
 
     ALLOWED_CLAIM_CATEGORIES = {
         'market_size', 'revenue', 'growth_rate', 'roi', 'customer_count',
         'cost_savings', 'competitor', 'technology', 'clinical', 'product_feature',
         'other'
+    }
+
+    ALLOWED_RISK_LEVELS = {'high', 'low', 'medium', 'undefined'}
+
+    ALLOWED_STAGES = {'Pre-Seed', 'Seed', 'Series A', 'Series B+', 'Unknown'}
+
+    ALLOWED_VERIFIABILITY = {'ambiguous', 'internal', 'public'}
+
+    INTERNAL_DEFAULT_CATEGORIES = {
+        'cost_savings', 'customer_count', 'growth_rate', 'revenue', 'roi'
     }
 
     # Regex pattern for indirect prompt injection indicators
@@ -99,7 +109,7 @@ class GeminiServicePitchdeck(GeminiServiceMedia):
                 "[Attached Pitch Deck PDF Document]\n"
                 "</pitchdeck_data_boundary>\n\n"
                 "INSTRUCTION: Analyze this pitch deck PDF and return a JSON object with: "
-                "company_name, summary, usp, industry, sector, market_size, competition, "
+                "company_name, summary, usp, industry, sector, startup_profile, market_size, competition, "
                 "team_highlights, funding_ask, verifiable_claims, vc_metrics, red_flags. "
                 "Respond ONLY with valid JSON."
             )
@@ -375,6 +385,14 @@ EXTRACTED CLAIMS:
                 val = result.get(key)
                 sanitized[key] = self._clean_string(val, self.MAX_FIELD_LENGTH) if val is not None else None
 
+        # 2b. Startup Thesis Profile (Always normalized with safe fallbacks)
+        sanitized['startup_profile'] = self._sanitize_startup_profile(
+            result.get('startup_profile'),
+            fallback_sector=sanitized.get('sector'),
+            fallback_industry=sanitized.get('industry'),
+            fallback_funding=sanitized.get('funding_ask')
+        )
+
         # 3. Competition (List of strings)
         if 'competition' in result:
             raw_competition = result.get('competition', [])
@@ -387,7 +405,7 @@ EXTRACTED CLAIMS:
                             sanitized_competition.append(cleaned_comp)
             sanitized['competition'] = sanitized_competition
 
-        # 4. Verifiable Claims
+        # 4. Verifiable Claims (with Two-Stage Risk Triage & Interrogation Prep fields)
         if 'verifiable_claims' in result:
             raw_claims = result.get('verifiable_claims', [])
             sanitized_claims = []
@@ -410,13 +428,35 @@ EXTRACTED CLAIMS:
                     raw_ctx = c.get('context')
                     cleaned_ctx = self._clean_string(raw_ctx, 500) if raw_ctx else None
 
+                    raw_verif = str(c.get('verifiability', '')).strip().lower()
+                    if raw_verif in self.ALLOWED_VERIFIABILITY:
+                        verifiability = raw_verif
+                    else:
+                        verifiability = 'internal' if category in self.INTERNAL_DEFAULT_CATEGORIES else 'public'
+
+                    raw_risk = str(c.get('risk_level', '')).strip().lower()
+                    if raw_risk in self.ALLOWED_RISK_LEVELS:
+                        risk_level = raw_risk
+                    else:
+                        risk_level = 'medium' if verifiability == 'internal' else 'undefined'
+
+                    raw_finding = c.get('verification_finding')
+                    cleaned_finding = self._clean_string(raw_finding, 500) if raw_finding else None
+
+                    raw_question = c.get('suggested_question')
+                    cleaned_question = self._clean_string(raw_question, 500) if raw_question else None
+
                     sanitized_claims.append({
                         'claim': claim_text,
                         'category': category,
                         'source_cited': cleaned_source,
                         'is_quantitative': bool(c.get('is_quantitative', False)),
                         'slide_number': slide_number,
-                        'context': cleaned_ctx
+                        'context': cleaned_ctx,
+                        'verifiability': verifiability,
+                        'risk_level': risk_level,
+                        'verification_finding': cleaned_finding,
+                        'suggested_question': cleaned_question,
                     })
             sanitized['verifiable_claims'] = sanitized_claims
 
@@ -457,6 +497,65 @@ EXTRACTED CLAIMS:
 
         return sanitized
 
+    def _normalize_stage(self, raw_stage: Optional[str], fallback_funding: Optional[str] = None) -> str:
+        """Normalize startup stage to canonical thesis stages."""
+        candidates = [raw_stage or '', fallback_funding or '']
+        for text in candidates:
+            lowered = str(text).strip().lower()
+            if not lowered:
+                continue
+            if 'pre-seed' in lowered or 'pre seed' in lowered or 'preseed' in lowered:
+                return 'Pre-Seed'
+            if 'series b' in lowered or 'series c' in lowered or 'series d' in lowered or 'growth' in lowered:
+                return 'Series B+'
+            if 'series a' in lowered:
+                return 'Series A'
+            if 'seed' in lowered:
+                return 'Seed'
+        return 'Unknown'
+
+    def _sanitize_startup_profile(
+        self,
+        profile: Optional[dict],
+        fallback_sector: Optional[str] = None,
+        fallback_industry: Optional[str] = None,
+        fallback_funding: Optional[str] = None
+    ) -> dict:
+        """Sanitize and normalize the startup_profile object for thesis matching."""
+        raw_profile = profile if isinstance(profile, dict) else {}
+
+        raw_geo = raw_profile.get('geography')
+        geography = self._clean_string(raw_geo, 200) if raw_geo else 'Unknown'
+        if not geography:
+            geography = 'Unknown'
+
+        raw_tags = raw_profile.get('geography_tags', [])
+        geography_tags = []
+        if isinstance(raw_tags, list):
+            for tag in raw_tags[:10]:
+                if tag is not None:
+                    cleaned_tag = self._clean_string(tag, 100)
+                    if cleaned_tag:
+                        geography_tags.append(cleaned_tag)
+
+        raw_sector = raw_profile.get('sector')
+        sector = (
+            self._clean_string(raw_sector, 200)
+            if raw_sector
+            else (fallback_sector or fallback_industry or 'Unknown')
+        )
+        if not sector:
+            sector = 'Unknown'
+
+        stage = self._normalize_stage(raw_profile.get('stage'), fallback_funding=fallback_funding)
+
+        return {
+            'geography': geography,
+            'geography_tags': geography_tags,
+            'sector': sector,
+            'stage': stage,
+        }
+
     def _sanitize_vc_metrics(self, metrics: dict) -> dict:
         """Sanitize the nested vc_metrics structure."""
         sanitized = {}
@@ -483,6 +582,50 @@ EXTRACTED CLAIMS:
                 'detail': self._clean_string(metric_data.get('detail', ''), 200),
             }
         return sanitized
+
+    def _map_verdict_to_risk_level(self, verdict: Optional[str], claim: Optional[dict] = None) -> str:
+        """Map a live fact-check verdict to the two-stage investor risk taxonomy."""
+        v = str(verdict or 'UNVERIFIED').strip().upper()
+        if v in ('FALSE', 'DISPUTED', 'INCORRECT', 'MISLEADING'):
+            return 'high'
+        if v in ('TRUE', 'VERIFIED'):
+            return 'low'
+        if v == 'PARTIALLY TRUE':
+            return 'medium'
+
+        if isinstance(claim, dict):
+            existing_risk = str(claim.get('risk_level', '')).strip().lower()
+            if existing_risk in ('high', 'medium'):
+                return existing_risk
+            if (
+                claim.get('verifiability') == 'internal'
+                or claim.get('is_quantitative')
+                or claim.get('category') in (
+                    'market_size', 'revenue', 'growth_rate', 'roi',
+                    'customer_count', 'cost_savings', 'clinical'
+                )
+            ):
+                return 'medium'
+
+        return 'undefined'
+
+    def _build_fallback_question(
+        self,
+        claim: Optional[dict],
+        verdict: Optional[str],
+        risk_level: str
+    ) -> Optional[str]:
+        """Return existing suggested_question or synthesize a default founder question for high/medium risk claims."""
+        if isinstance(claim, dict):
+            existing = claim.get('suggested_question')
+            if existing and isinstance(existing, str) and existing.strip():
+                return self._clean_string(existing.strip(), 500)
+
+        if risk_level == 'high':
+            return 'External sources contradict this claim — can you walk us through the primary source and methodology?'
+        if risk_level == 'medium':
+            return 'Can you share the underlying Data Room documentation or cohort evidence to substantiate this figure?'
+        return None
 
     def verify_market_claims(
         self,
@@ -536,13 +679,22 @@ EXTRACTED CLAIMS:
 
             for i, c in enumerate(valid_claims):
                 res = batch_results[i] if i < len(batch_results) and batch_results[i] else {}
+                verdict = res.get("verdict", "UNVERIFIED")
+                explanation = res.get("explanation", "Verification unavailable")
+                risk_level = self._map_verdict_to_risk_level(verdict, c)
+                suggested_question = self._build_fallback_question(c, verdict, risk_level)
+
                 findings.append({
                     "claim_type": c.get("category", "other"),
                     "original_claim": c.get("claim", ""),
                     "source_cited": c.get("source_cited"),
                     "slide_number": c.get("slide_number"),
-                    "verdict": res.get("verdict", "UNVERIFIED"),
-                    "explanation": res.get("explanation", "Verification unavailable"),
+                    "verdict": verdict,
+                    "risk_level": risk_level,
+                    "verifiability": c.get("verifiability", "public"),
+                    "explanation": explanation,
+                    "verification_finding": explanation,
+                    "suggested_question": suggested_question,
                     "sources": res.get("sources", [])[:3]
                 })
             return findings
@@ -576,11 +728,17 @@ EXTRACTED CLAIMS:
 
             for i, meta in enumerate(legacy_meta):
                 res = batch_results[i] if i < len(batch_results) and batch_results[i] else {}
+                verdict = res.get("verdict", "UNVERIFIED")
+                explanation = res.get("explanation", "Verification unavailable")
+                risk_level = self._map_verdict_to_risk_level(verdict, {"category": meta["claim_type"]})
                 findings.append({
                     "claim_type": meta["claim_type"],
                     "original_claim": meta["original_claim"],
-                    "verdict": res.get("verdict", "UNVERIFIED"),
-                    "explanation": res.get("explanation", "Verification unavailable"),
+                    "verdict": verdict,
+                    "risk_level": risk_level,
+                    "explanation": explanation,
+                    "verification_finding": explanation,
+                    "suggested_question": self._build_fallback_question(None, verdict, risk_level),
                     "sources": res.get("sources", [])[:3]
                 })
 

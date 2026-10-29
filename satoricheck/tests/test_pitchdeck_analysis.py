@@ -1033,4 +1033,232 @@ startxref
             assert 'Healium SA' in context_arg
             assert 'Connected smart medical pillbox' in context_arg
 
+    def test_analyze_pdf_extracts_and_sanitizes_startup_profile(self, app):
+        """
+        Given: A pitch deck response containing startup_profile for thesis matching
+        When: analyze_pitch_deck() runs
+        Then: startup_profile fields (geography, geography_tags, sector, stage) are sanitized and normalized
+        """
+        from backend.services.pitchdeck_service import PitchdeckService
+
+        service = PitchdeckService()
+        pdf_bytes = self._create_minimal_pdf()
+
+        mock_payload = {
+            'company_name': 'AlpineAI',
+            'summary': 'Enterprise AI workflow automation.',
+            'usp': 'Zero-hallucination deterministic pipelines.',
+            'startup_profile': {
+                'geography': '<script>alert(1)</script>Zurich, Switzerland',
+                'geography_tags': ['Switzerland', 'DACH', '<b>Europe</b>'],
+                'sector': 'B2B SaaS',
+                'stage': 'pre-seed'
+            }
+        }
+
+        with patch.object(service, '_call_gemini_vision') as mock_gemini:
+            mock_gemini.return_value = {
+                'candidates': [{
+                    'content': {
+                        'parts': [{'text': json.dumps(mock_payload)}]
+                    }
+                }]
+            }
+
+            result = service.analyze_pitch_deck(pdf_bytes)
+
+            profile = result['startup_profile']
+            assert '<script>' not in profile['geography']
+            assert 'Zurich, Switzerland' in profile['geography']
+            assert profile['geography_tags'] == ['Switzerland', 'DACH', '&lt;b&gt;Europe&lt;/b&gt;']
+            assert profile['sector'] == 'B2B SaaS'
+            assert profile['stage'] == 'Pre-Seed'
+
+    def test_analyze_pdf_synthesizes_startup_profile_fallback_when_omitted(self, app):
+        """
+        Given: A pitch deck response where startup_profile is omitted but sector and funding_ask exist
+        When: analyze_pitch_deck() runs
+        Then: startup_profile is populated using fallback sector and inferred stage from funding_ask
+        """
+        from backend.services.pitchdeck_service import PitchdeckService
+
+        service = PitchdeckService()
+        pdf_bytes = self._create_minimal_pdf()
+
+        mock_payload = {
+            'company_name': 'FallbackCo',
+            'summary': 'FinTech infrastructure.',
+            'usp': 'Instant cross-border settlement.',
+            'industry': 'FinTech',
+            'sector': 'B2B Payments',
+            'funding_ask': '$4M Series A'
+        }
+
+        with patch.object(service, '_call_gemini_vision') as mock_gemini:
+            mock_gemini.return_value = {
+                'candidates': [{
+                    'content': {
+                        'parts': [{'text': json.dumps(mock_payload)}]
+                    }
+                }]
+            }
+
+            result = service.analyze_pitch_deck(pdf_bytes)
+
+            profile = result['startup_profile']
+            assert profile['geography'] == 'Unknown'
+            assert profile['geography_tags'] == []
+            assert profile['sector'] == 'B2B Payments'
+            assert profile['stage'] == 'Series A'
+
+    def test_analyze_pdf_extracts_claim_risk_triage_and_interrogation_fields(self, app):
+        """
+        Given: Extracted claims with Two-Stage Risk Triage fields (and one claim missing triage fields)
+        When: analyze_pitch_deck() runs
+        Then: verifiability, risk_level, verification_finding, and suggested_question are sanitized and defaulted properly
+        """
+        from backend.services.pitchdeck_service import PitchdeckService
+
+        service = PitchdeckService()
+        pdf_bytes = self._create_minimal_pdf()
+
+        mock_payload = {
+            'company_name': 'TriageCorp',
+            'summary': 'B2B SaaS analytics.',
+            'usp': 'Automated cohort intelligence.',
+            'verifiable_claims': [
+                {
+                    'claim': 'Gartner states the European market will reach $50B by 2027.',
+                    'category': 'market_size',
+                    'source_cited': 'Gartner',
+                    'is_quantitative': True,
+                    'slide_number': 4,
+                    'context': 'Market Opportunity Slide',
+                    'verifiability': 'public',
+                    'risk_level': 'high',
+                    'verification_finding': 'Contradicts Slide 2 TAM figure.',
+                    'suggested_question': 'Can you walk us through the bottom-up math behind the $50B market sizing?'
+                },
+                {
+                    'claim': '140% Net Dollar Retention across 12 enterprise logos.',
+                    'category': 'revenue',
+                    'source_cited': None,
+                    'is_quantitative': True,
+                    'slide_number': 9,
+                    'context': 'Traction Slide'
+                    # verifiability and risk_level omitted: should default to internal + medium for 'revenue'
+                }
+            ]
+        }
+
+        with patch.object(service, '_call_gemini_vision') as mock_gemini:
+            mock_gemini.return_value = {
+                'candidates': [{
+                    'content': {
+                        'parts': [{'text': json.dumps(mock_payload)}]
+                    }
+                }]
+            }
+
+            result = service.analyze_pitch_deck(pdf_bytes)
+            claims = result['verifiable_claims']
+
+            assert len(claims) == 2
+            assert claims[0]['verifiability'] == 'public'
+            assert claims[0]['risk_level'] == 'high'
+            assert claims[0]['verification_finding'] == 'Contradicts Slide 2 TAM figure.'
+            assert 'bottom-up math' in claims[0]['suggested_question']
+
+            # Default inference for internal financial category ('revenue')
+            assert claims[1]['verifiability'] == 'internal'
+            assert claims[1]['risk_level'] == 'medium'
+            assert claims[1]['verification_finding'] is None
+            assert claims[1]['suggested_question'] is None
+
+    def test_verify_market_claims_maps_verdict_to_risk_level_and_preserves_question(self, app):
+        """
+        Given: Claims verified against live search returning FALSE, TRUE, and COULD_NOT_VERIFY
+        When: verify_market_claims() runs
+        Then: Findings map verdicts to high/low/medium risk_level and preserve or synthesize suggested_question
+        """
+        from backend.services.pitchdeck_service import PitchdeckService
+
+        service = PitchdeckService()
+        claims = [
+            {
+                'claim': 'Gartner states the European market will reach $50B by 2027.',
+                'category': 'market_size',
+                'source_cited': 'Gartner',
+                'is_quantitative': True,
+                'slide_number': 4,
+                'verifiability': 'public',
+                'suggested_question': 'Can you walk us through the bottom-up math behind the $50B market sizing?'
+            },
+            {
+                'claim': 'FDA 510(k) clearance granted in 2024.',
+                'category': 'clinical',
+                'source_cited': 'FDA',
+                'is_quantitative': False,
+                'slide_number': 6,
+                'verifiability': 'public'
+            },
+            {
+                'claim': '140% Net Dollar Retention across 12 enterprise logos.',
+                'category': 'revenue',
+                'source_cited': 'Internal',
+                'is_quantitative': True,
+                'slide_number': 9,
+                'verifiability': 'internal'
+            }
+        ]
+
+        mock_batch_results = [
+            {
+                'is_claim': True,
+                'verdict': 'FALSE',
+                'explanation': 'Contradicted: Gartner 2025 report projects $12B by 2027.',
+                'sources': ['https://gartner.com/report']
+            },
+            {
+                'is_claim': True,
+                'verdict': 'TRUE',
+                'explanation': 'Confirmed in FDA 510(k) database.',
+                'sources': ['https://fda.gov/510k']
+            },
+            {
+                'is_claim': True,
+                'verdict': 'COULD_NOT_VERIFY',
+                'explanation': 'Private internal company metric.',
+                'sources': []
+            }
+        ]
+
+        with patch('backend.services.get_gemini_service') as mock_get_svc:
+            mock_gemini = MagicMock()
+            mock_gemini.analyze_claims_batch.return_value = mock_batch_results
+            mock_get_svc.return_value = mock_gemini
+
+            findings = service.verify_market_claims(
+                verifiable_claims=claims,
+                industry='B2B SaaS',
+                company='TestCo'
+            )
+
+            assert len(findings) == 3
+            # 1. FALSE -> high risk, preserves custom suggested_question
+            assert findings[0]['risk_level'] == 'high'
+            assert findings[0]['verification_finding'] == 'Contradicted: Gartner 2025 report projects $12B by 2027.'
+            assert findings[0]['suggested_question'] == 'Can you walk us through the bottom-up math behind the $50B market sizing?'
+
+            # 2. TRUE -> low risk, no question needed
+            assert findings[1]['risk_level'] == 'low'
+            assert findings[1]['suggested_question'] is None
+
+            # 3. COULD_NOT_VERIFY on internal/revenue claim -> medium risk + fallback question synthesized
+            assert findings[2]['risk_level'] == 'medium'
+            assert findings[2]['verifiability'] == 'internal'
+            assert findings[2]['suggested_question'] is not None
+            assert 'Data Room' in findings[2]['suggested_question']
+
+
 
