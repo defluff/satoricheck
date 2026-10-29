@@ -614,4 +614,34 @@ class TestMultiInstanceHardening:
             # Should complete cleanly without raising OperationalError
             db_mod._apply_migrations()
 
+    def test_normalize_database_url_maps_postgresql_to_psycopg2_driver(self):
+        """Bare postgresql:// and postgres:// URLs must resolve to psycopg2 under SQLAlchemy 2.1+."""
+        from sqlalchemy import create_engine
+        from backend.config import normalize_database_url
+
+        cloudsql_url = "postgresql://postgres:secret@/authenix?host=/cloudsql/proj:europe-west6:db"
+        normalized = normalize_database_url(cloudsql_url)
+        assert normalized.startswith("postgresql+psycopg2://")
+
+        assert normalize_database_url("postgres://u:p@host/db") == "postgresql+psycopg2://u:p@host/db"
+        assert normalize_database_url("postgresql+psycopg2://u:p@host/db") == "postgresql+psycopg2://u:p@host/db"
+        assert normalize_database_url("sqlite:///authenix.db") == "sqlite:///authenix.db"
+
+        # Verify SQLAlchemy 2.1+ engine creation loads psycopg2 without requiring psycopg v3
+        pg_engine = create_engine(normalized)
+        assert pg_engine.dialect.driver == "psycopg2"
+        pg_engine.dispose()
+
+    def test_dockerfile_gunicorn_uses_preload_and_no_control_socket(self):
+        """Dockerfile must preload WSGI app before binding $PORT so broken boots fail Cloud Run probes."""
+        import pathlib
+
+        dockerfile_path = pathlib.Path(__file__).resolve().parents[2] / "Dockerfile"
+        content = dockerfile_path.read_text(encoding="utf-8")
+
+        assert "--preload" in content, "Gunicorn must use --preload so app crashes fail before binding $PORT"
+        assert "--no-control-socket" in content, "Gunicorn 26.2+ in stateless container should disable control socket"
+        assert "useradd -r -m" in content, "Non-root user should have a valid home directory"
+
+
 

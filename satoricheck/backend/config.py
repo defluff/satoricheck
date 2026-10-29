@@ -10,6 +10,22 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def normalize_database_url(url: str | None) -> str:
+    """Ensure bare postgresql:// or postgres:// URLs explicitly use the psycopg2 driver.
+
+    Why: SQLAlchemy 2.1 changed the default dialect driver for bare 'postgresql://'
+    URLs from 'psycopg2' to 'psycopg' (v3). Since we package psycopg2-binary,
+    normalizing the scheme prevents ModuleNotFoundError('psycopg') in production.
+    """
+    if not url:
+        return 'sqlite:///authenix.db'
+    if url.startswith('postgres://'):
+        return url.replace('postgres://', 'postgresql+psycopg2://', 1)
+    if url.startswith('postgresql://'):
+        return url.replace('postgresql://', 'postgresql+psycopg2://', 1)
+    return url
+
+
 class Config:
     """Application configuration."""
     
@@ -40,7 +56,7 @@ class Config:
     # Application
     TEST_MODE = os.getenv('TEST_MODE', 'false').lower() == 'true'
     MAINTENANCE_MODE = os.getenv('MAINTENANCE_MODE', 'false').lower() == 'true'
-    DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///authenix.db')
+    DATABASE_URL = normalize_database_url(os.getenv('DATABASE_URL', 'sqlite:///authenix.db'))
     RATELIMIT_STORAGE_URI = os.getenv('RATELIMIT_STORAGE_URI', 'memory://')
     
     # Scheduler auth (Cloud Scheduler cron jobs). The random fallback keeps dev/test

@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker, scoped_session
 from backend.models import Base
 from backend.config import Config
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,10 @@ else:
         pool_recycle=3600,        # Recycle connections every hour
         pool_timeout=30           # Wait for connection availability
     )
+
+    # Ensure forked Gunicorn workers (with --preload) do not share parent DB file descriptors
+    if hasattr(os, 'register_at_fork'):
+        os.register_at_fork(after_in_child=lambda: engine.dispose(close=False))
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -131,6 +136,9 @@ def init_db():
     """Initialize database tables and apply any pending column migrations."""
     Base.metadata.create_all(bind=engine)
     _apply_migrations()
+    if 'sqlite' not in Config.DATABASE_URL:
+        # Close initial migration connection before Gunicorn (--preload) forks workers
+        engine.dispose()
     logger.info("✓ Database initialized")
 
 

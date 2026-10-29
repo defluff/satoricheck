@@ -25,12 +25,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from backend.config import normalize_database_url
 from backend.models import Base, User, TokenBalance, Streak, Transaction, FactCheck
 
 
 # Configuration
 SQLITE_URL = 'sqlite:///authenix.db'
-POSTGRES_URL = os.getenv('DATABASE_URL')
+POSTGRES_URL = normalize_database_url(os.getenv('DATABASE_URL')) if os.getenv('DATABASE_URL') else None
 
 if not POSTGRES_URL or 'postgresql' not in POSTGRES_URL:
     print("❌ Error: Set DATABASE_URL to a PostgreSQL connection string")
