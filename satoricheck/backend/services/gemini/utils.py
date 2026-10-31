@@ -294,7 +294,14 @@ Go through the text SENTENCE BY SENTENCE, keeping the context of the whole text.
         return final_claims
 
     def analyze_ai_content(self, text):
-        """Analyze text for AI-generation likelihood using the AI Detection skill file."""
+        """Analyze text for AI-generation likelihood using the AI Detection skill file.
+
+        Note on Watermark Provenance:
+        Unlike xAI Grok's transport-layer `x-watermark` HTTP response header (captured in
+        GrokService.search_social), Anthropic Claude and Google SynthID-Text watermarks do not
+        expose an HTTP response header and instead operate via statistical token distribution
+        biasing evaluated at the text analysis layer here.
+        """
         system_instruction = self._load_skill(
             "ai_detection",
             fallback="You are an expert AI text detector."
@@ -311,7 +318,7 @@ Go through the text SENTENCE BY SENTENCE, keeping the context of the whole text.
         is_short_text_flag = word_count < 50
 
         prompt = f"""TASK:
-Analyze the text below and determine if it was written by an AI language model (like ChatGPT, Claude, Gemini) or by a human.
+Analyze the text below and determine if it was written by an AI language model (like ChatGPT, Claude, Gemini, Grok) or by a human.
 
 CONTEXT:
 Today's Date: {current_date_str}

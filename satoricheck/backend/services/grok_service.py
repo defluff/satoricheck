@@ -89,7 +89,7 @@ class GrokService:
     """Service for interacting with xAI Grok API for social context."""
     
     ENDPOINT = "https://api.x.ai/v1/chat/completions"
-    MODEL = "grok-4-latest"
+    MODEL = Config.GROK_MODEL
     
     def __init__(self):
         """Initialize Grok service."""
@@ -157,6 +157,12 @@ If no relevant social content found, return: {"found": false, "context": "reason
             
             # Parse the JSON response from Grok
             result = self._parse_grok_response(content)
+            
+            # Record EU AI Act output watermark provenance from xAI response headers
+            resp_headers = getattr(response, 'headers', None) or {}
+            raw_watermark = resp_headers.get('x-watermark') if hasattr(resp_headers, 'get') else None
+            result['watermarked'] = str(raw_watermark).strip().lower() == 'true'
+            
             return self.sanitize_response(result)
             
         except requests.Timeout:
@@ -207,6 +213,9 @@ If no relevant social content found, return: {"found": false, "context": "reason
         # Validate URL
         if 'url' in response:
             response['url'] = validate_social_url(response.get('url'))
+        
+        if 'watermarked' in response:
+            response['watermarked'] = bool(response['watermarked'])
         
         return response
 

@@ -220,146 +220,39 @@ class GeminiServiceBatch(GeminiServiceUtils):
         return results
 
     def _run_agentic_batch(self, prompt, claims_to_verify, grok, cache_name=None):
-        """Execute the agentic loop for a single batch of claims."""
+        """Execute the master verification loop for a batch of claims."""
         from backend.services.grok_service import should_fire_grok
         needs_social = (
             any(should_fire_grok(c) for c in claims_to_verify)
             or "SOCIAL_VERIFY" in prompt
         )
-        google_search_tool = types.Tool(google_search=types.GoogleSearch())
-        if needs_social:
-            grok_tool = self._build_grok_tool(grok)
-            tools_list = [google_search_tool, grok_tool]
-        else:
-            tools_list = [google_search_tool]
-        tool_cfg = types.ToolConfig(
-            include_server_side_tool_invocations=True
-        )
-        
-        conversation = [
-            types.Content(role="user", parts=[types.Part.from_text(text=prompt)])
-        ]
-        
         system_instruction = self._load_skill(
             "batch_verification",
             fallback="You are an expert fact-checker. Verify claims accurately and minimize API calls."
         )
 
-        # In the Gemini API, a GenerateContentConfig referencing cached_content
-        # cannot also set system_instruction, tools, or tool_config.
-        if cache_name:
-            config = types.GenerateContentConfig(
-                cached_content=cache_name,
-                thinking_config=types.ThinkingConfig(
-                    thinking_level="high",
-                    include_thoughts=True
-                )
-            )
-        else:
-            config = types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                tools=tools_list,
-                tool_config=tool_cfg,
-                thinking_config=types.ThinkingConfig(
-                    thinking_level="high",
-                    include_thoughts=True
-                )
-            )
-            
-        max_turns = 3
-        
-        for turn in range(max_turns):
-            try:
-                logger.info(f"Agentic turn {turn + 1}/{max_turns}...")
-                
-                if self.client:
-                    response, cache_cleared = self._generate_with_cache_fallback(
-                        model=self.MODEL,
-                        contents=conversation,
-                        config=config,
-                        context_label=f"batch turn {turn + 1}",
-                        fallback_system_instruction=system_instruction,
-                        fallback_tools=tools_list,
-                        fallback_tool_config=tool_cfg,
-                    )
-                    if cache_cleared:
-                        cache_name = None
-                else:
-                    raise Exception("Gemini client not initialized")
-                
-                if not response.candidates:
-                    raise ValueError("No candidates in response")
-                    
-                candidate = response.candidates[0]
-                content = candidate.content
-                if not content or not content.parts:
-                    raise ValueError("No content or parts in candidate")
-                
-                # Add model response to conversation to maintain state
-                conversation.append(content)
-                
-                # Check for Function Calls
-                if response.function_calls:
-                    logger.info(f"Executing {len(response.function_calls)} tool calls...")
-                    conversation.extend(
-                        self._execute_tool_calls(response.function_calls, grok)
-                    )
-                    continue  # Next turn
- 
-                # Extract text (skip thoughts)
-                final_text = self._extract_text_from_parts(content.parts)
-                
-                if final_text:
-                    return self._parse_thinking_batch_response(response, len(claims_to_verify))
-                    
-            except Exception as e:
-                logger.error(f"Agentic turn {turn + 1} failed: {e}")
-                if turn == max_turns - 1:
-                    break
-                time.sleep(1)
-        
-        # Closing turn if final turn ended in function response
-        if conversation and conversation[-1].role == "tool":
-            try:
-                logger.info("Agentic closing turn (producing final answer from tool results)...")
-                closing_tool_cfg = types.ToolConfig(
-                    function_calling_config=types.FunctionCallingConfig(
-                        mode=types.FunctionCallingMode.NONE
-                    )
-                )
-                if cache_name:
-                    closing_config = types.GenerateContentConfig(
-                        cached_content=cache_name,
-                        response_mime_type="application/json",
-                        thinking_config=types.ThinkingConfig(
-                            thinking_level="high",
-                            include_thoughts=True
-                        )
-                    )
-                else:
-                    closing_config = types.GenerateContentConfig(
-                        system_instruction=system_instruction,
-                        response_mime_type="application/json",
-                        thinking_config=types.ThinkingConfig(
-                            thinking_level="high",
-                            include_thoughts=True
-                        ),
-                        tool_config=closing_tool_cfg
-                    )
-                    
-                response, _ = self._generate_with_cache_fallback(
-                    model=self.MODEL,
-                    contents=conversation,
-                    config=closing_config,
-                    context_label="batch closing turn",
-                    fallback_system_instruction=system_instruction,
-                    fallback_tool_config=closing_tool_cfg,
-                )
-                if response.candidates:
-                    return self._parse_thinking_batch_response(response, len(claims_to_verify))
-            except Exception as e:
-                logger.error(f"Agentic closing turn failed: {e}")
-        
+        def _batch_parser(final_text, response):
+            if final_text:
+                return self._parse_thinking_batch_response(response, len(claims_to_verify))
+            return None
+
+        parsed = self._run_verification_loop(
+            prompt=prompt,
+            system_instruction=system_instruction,
+            needs_social=needs_social,
+            grok=grok,
+            response_parser=_batch_parser,
+            cache_name=cache_name,
+            max_turns=3,
+            retries_per_turn=1,
+            raise_on_turn_failure=False,
+            enable_closing_turn=True,
+            context_label_prefix="batch",
+            thinking_level="low",
+        )
+        if parsed is not None:
+            return parsed
+
         # Fallback
         logger.error("Agentic sub-batch failed after all turns")
         return [{
@@ -554,11 +447,11 @@ For each claim, select the appropriate strategy from your guidelines, verify it,
 {context_hint}
 
 For each claim, classify:
-- priority: SKIP (opinion/trivial/hyperbole lacking empirical basis), IMMEDIATE (breaking/viral), NORMAL (standard), DEFERRED (low-priority)
-- strategy: KNOWLEDGE_CHECK (well-known fact), SEARCH_VERIFY (needs sources), SOCIAL_VERIFY (viral/social)
-- is_hyperbole: boolean (true if statement is rhetorical exaggeration, subjective superlative, or conversational fluff lacking concrete metrics/dates/sources)
+- priority: SKIP (opinion/trivial/hyperbole/sterile AI boilerplate lacking empirical basis), IMMEDIATE (breaking/viral), NORMAL (standard), DEFERRED (low-priority)
+- strategy: KNOWLEDGE_CHECK (well-known historical/scientific fact ONLY; NEVER use for specific statistics, named studies/DOIs, or attributed quotes), SEARCH_VERIFY (needs live web sources/citations/stats), SOCIAL_VERIFY (viral/social/X quote)
+- is_hyperbole: boolean (true if statement is rhetorical exaggeration, subjective superlative, conversational fluff, or formulaic LLM hedging/boilerplate lacking concrete metrics/dates/sources)
 
-CRITICAL RULE: If a claim is rhetorical hyperbole (is_hyperbole=true) and lacks empirical data (no dates, specific numbers, laws, or attributable quotes), priority MUST be SKIP.
+CRITICAL RULE: If a claim is rhetorical hyperbole or synthetic boilerplate (is_hyperbole=true) and lacks empirical data (no dates, specific numbers, laws, or attributable quotes), priority MUST be SKIP.
 
 Return ONLY a JSON array matching:
 [{{"index": 1, "priority": "NORMAL", "strategy": "SEARCH_VERIFY", "is_hyperbole": false}}, ...]"""

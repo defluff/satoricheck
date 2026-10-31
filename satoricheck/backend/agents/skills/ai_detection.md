@@ -19,12 +19,13 @@ Before analyzing syntax and vocabulary, determine the document's register. Adjus
 ---
 
 ## 2. Statistical & Watermark Provenance Signatures
-*   **Statistical Token Watermarking (e.g., SynthID-Text, Claude)**: Modern models bias next-token selection using a secret pseudo-random key conditioned on preceding n-grams, creating unnatural statistical alignment across token sequences.
+*   **Statistical Token Watermarking (SynthID-Text, Claude, xAI Grok)**: Modern frontier models (`gemini-*` via SynthID-Text, Anthropic `claude-*`, and xAI `grok-4.20` through `grok-4.7`) bias next-token selection during generation using a secret provider key conditioned on preceding token sequences. This shapes token choice statistically across ordinary prose, structured outputs, and tool call arguments without inserting visible characters, markup, or hidden Unicode.
+*   **API Header vs. Text-Level Provenance**: While xAI Grok exposes `x-watermark: true` on direct HTTP API responses to confirm watermarked generation at the transport layer, Anthropic Claude and Google SynthID-Text do not expose an HTTP watermark header; raw pasted text from Claude, Gemini, or Grok must be evaluated through statistical token distribution and stylistic calibration.
 *   **Fragility & Evasion Profile**:
     *   *Resilience*: Survives light copy-editing, superficial synonym swaps, and minor reformatting.
-    *   *Fragility*: Breaks or degrades under heavy human paraphrasing, cross-language translation, aggressive summarization, or extreme brevity (<50 words).
+    *   *Fragility*: Breaks or degrades under heavy human paraphrasing, cross-language translation, aggressive summarization, or extreme brevity (<50 words, where statistical token scoring lacks signal).
     *   *Constrained Contexts*: Produces weaker signals in fact-dense reference lists, code, mathematical equations, or rigid technical syntax where token choice is deterministic.
-*   **Provenance Axiom (Negative Evidence Rule)**: **Absence of a watermark or statistical flag is NOT proof of human authorship (`not_detected` $\neq$ "Human-written")**. Content may originate from unwatermarked models (e.g., standard Gemini/OpenAI API text), predate watermarking deployments, or have had markers stripped through translation/rewriting.
+*   **Provenance Axiom (Negative Evidence Rule)**: **Absence of a watermark or statistical flag is NOT proof of human authorship (`not_detected` / `uncertain` $\neq$ "Human-written")**. Content may originate from unwatermarked models, organizations that opted out per model in console settings (e.g., SpaceXSI/xAI Team Console opt-out), predate watermarking rollouts, or have had markers stripped through translation/rewriting.
 
 ---
 

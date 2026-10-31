@@ -68,115 +68,36 @@ CLAIM TO ANALYZE:
 
 Verify the claim and respond with JSON matching the required schema."""
             
-            conversation_history = [
-                types.Content(role="user", parts=[types.Part.from_text(text=prompt)])
-            ]
-            
-            max_turns = 5 
-            current_turn = 0
-            
             log_prefix = f"AGENTIC (Thinking{' + Cache' if cache_name else ''})"
             logger.info(f"Starting {log_prefix} analysis for: {text[:50]}...")
-            
-            while current_turn < max_turns:
-                current_turn += 1
-                
-                # Configure generation with Thinking Mode, Google Search, and conditional Grok tool
-                google_search_tool = types.Tool(google_search=types.GoogleSearch())
-                if social_hint:
-                    tools_list = [google_search_tool, self._build_grok_tool(grok)]
-                else:
-                    tools_list = [google_search_tool]
-                tool_cfg = types.ToolConfig(
-                    include_server_side_tool_invocations=True
-                )
 
-                # In the Gemini API, a GenerateContentConfig referencing cached_content
-                # cannot also set system_instruction, tools, or tool_config.
-                if cache_name:
-                    config = types.GenerateContentConfig(
-                        cached_content=cache_name,
-                        thinking_config=types.ThinkingConfig(
-                            thinking_level="high",
-                            include_thoughts=True
-                        )
-                    )
-                else:
-                    config = types.GenerateContentConfig(
-                        system_instruction=system_instruction_full,
-                        tools=tools_list,
-                        tool_config=tool_cfg,
-                        thinking_config=types.ThinkingConfig(
-                            thinking_level="high",
-                            include_thoughts=True
-                        )
-                    )
-                
-                turn_response = None
-                turn_exception = None
-                
-                for attempt in range(2):
-                    try:
-                        response, cache_cleared = self._generate_with_cache_fallback(
-                            model=self.MODEL,
-                            contents=conversation_history,
-                            config=config,
-                            context_label=f"agentic turn {current_turn}",
-                            fallback_system_instruction=system_instruction_full,
-                            fallback_tools=tools_list,
-                            fallback_tool_config=tool_cfg,
-                        )
-                        if cache_cleared:
-                            cache_name = None
-                        turn_response = response
-                        break
-                    except Exception as e:
-                        logger.warning(f"Agentic turn {current_turn} failed (attempt {attempt+1}): {e}")
-                        turn_exception = e
-                        time.sleep(1)
-                
-                if not turn_response:
-                    raise turn_exception or Exception("Agentic turn failed after retries")
- 
-                response = turn_response
-                
-                if not response.candidates:
-                    raise ValueError("No candidates in response")
-                    
-                candidate = response.candidates[0]
-                content = candidate.content
-                if not content or not content.parts:
-                    raise ValueError("No content or parts in candidate")
-                
-                # Check for Function Calls
-                if response.function_calls:
-                    # Append the model's reply (containing function call parts) to maintain history
-                    conversation_history.append(content)
-                    
-                    logger.info(f"Agent decided to call {len(response.function_calls)} tools.")
-                    conversation_history.extend(
-                        self._execute_tool_calls(response.function_calls, grok)
-                    )
-                    continue
- 
-                # Parse response text
-                final_json_text = self._extract_text_from_parts(content.parts)
- 
-                # Final Result Extraction
+            def _single_claim_parser(final_json_text, response):
                 if final_json_text and "verdict" in final_json_text:
                     clean_json = self._extract_json(final_json_text)
-                    
                     try:
                         json.loads(clean_json)
-                        # Mock up candidate for parsing method compatibility
                         return self._parse_response(response)
                     except json.JSONDecodeError:
                         logger.warning(f"Agent emitted invalid JSON: {clean_json[:50]}...")
-                
                 logger.warning("Agent stopped without JSON or Tool call. Forcing another turn...")
-                if current_turn >= max_turns:
-                    break
-            
+                return None
+
+            parsed = self._run_verification_loop(
+                prompt=prompt,
+                system_instruction=system_instruction_full,
+                needs_social=social_hint,
+                grok=grok,
+                response_parser=_single_claim_parser,
+                cache_name=cache_name,
+                max_turns=4,
+                retries_per_turn=2,
+                raise_on_turn_failure=True,
+                enable_closing_turn=True,
+                context_label_prefix="agentic",
+            )
+            if parsed is not None:
+                return parsed
+
             raise Exception("Agent exceeded max turns without final answer")
  
         except Exception as e:

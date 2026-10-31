@@ -20,8 +20,9 @@ Go through the text sentence by sentence, keeping the context of the entire text
    * Technical behaviors (e.g., "pop() removes the last item")
    * Historical events, dates, and enacted laws
    * Specific quotes or attributions (e.g., "Senator X voted against Bill Y")
-6. **Exclusions & Spoken Stream Filters:**
+6. **Exclusions & Spoken/Synthetic Stream Filters:**
    * **Rhetorical Hyperbole:** Exclude figurative exaggerations, subjective superlatives, and conversational hyperbole ("this is the greatest thing in the universe", "literally everybody knows", "they destroyed everything") UNLESS anchored by concrete metrics, dates, laws, or verifiable quotes.
+   * **Synthetic AI Boilerplate & Hedging:** Exclude formulaic LLM framing, transitional padding ("In today's fast-paced digital world", "It is important to note that"), and non-empirical "both-sides" generalizations that contain no falsifiable assertion.
    * **Pure opinions & value judgments:** ("I like eggs", "this movie is boring")
    * **Conversational Filler & Disfluencies:** Strip verbal fillers ("you know", "like", "literally", "I mean", "to be honest", "sort of") and drop unfinished sentences or interrupted speech fragments lacking a complete predicate.
    * **Questions & Imperatives:** ("What is pop()?", "Click the button")

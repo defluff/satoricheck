@@ -68,19 +68,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message.type || !ALLOWED_TYPES.includes(message.type)) return false;
 
     if (message.type === 'SIDE_PANEL_READY') {
-        chrome.storage.session.get('pendingSelection').then((stored) => {
-            sendResponse({ text: stored.pendingSelection || null });
-            chrome.storage.session.remove('pendingSelection');
-        });
+        chrome.storage.session.get('pendingSelection')
+            .then((stored) => {
+                sendResponse({ text: stored.pendingSelection || null });
+                chrome.storage.session.remove('pendingSelection');
+            })
+            .catch((err) => {
+                console.error('[Authenix] SIDE_PANEL_READY storage error:', err);
+                sendResponse({ text: null, error: err?.message || String(err) });
+            });
         return true;
     }
 
     if (message.type === 'OPEN_SIDE_PANEL') {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs[0]) {
-                chrome.sidePanel.open({ windowId: tabs[0].windowId });
-            }
-        });
+        try {
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                if (tabs && tabs[0]) {
+                    chrome.sidePanel.open({ windowId: tabs[0].windowId });
+                }
+            });
+            sendResponse({ success: true });
+        } catch (err) {
+            console.error('[Authenix] OPEN_SIDE_PANEL error:', err);
+            sendResponse({ success: false, error: err?.message || String(err) });
+        }
+        return false;
+    }
+
+    if (message.type === 'AUTH_UPDATED') {
         sendResponse({ success: true });
         return false;
     }

@@ -142,6 +142,7 @@ def analyze_claim():
                 'meta_truth_verdict': result.get('meta_truth_verdict', result['verdict']),
                 # Social context (Grok)
                 'social': grok_result,
+                'social_watermarked': result.get('social_watermarked'),
                 # Usage stats
                 'tokens_used': token_cost,
                 'word_count': word_count,
@@ -353,6 +354,7 @@ def analyze_batch_claims():
                         'meta_truth_verdict': res.get('meta_truth_verdict'),
                         # Social context embedded in explanation if agent used search_social
                         'social': res.get('social_context'),
+                        'social_watermarked': res.get('social_watermarked'),
                     }
                 })
                 

@@ -244,4 +244,109 @@ class TestAgenticLoop:
         fn_resp = tool_msg.parts[0].function_response.response
         assert "Do NOT call search_social again" in fn_resp.get("instruction", "")
 
+    @patch('backend.services.gemini.client.genai.Client')
+    @patch('backend.services.grok_service.get_grok_service')
+    def test_single_agentic_loop_synthesizes_on_closing_turn_when_last_turn_calls_tool(self, mock_get_grok, mock_client_class):
+        """
+        When all 4 regular turns emit tool calls, the 5th closing turn should force
+        FunctionCallingMode.NONE and synthesize a JSON verdict from accumulated tool results.
+        """
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
+
+        mock_grok = MagicMock()
+        mock_grok.get_tool_definition.return_value = {"name": "search_social"}
+        mock_grok.search_social.return_value = {"found": True, "text": "Confirmed post", "watermarked": True}
+        mock_get_grok.return_value = mock_grok
+
+        fc = MagicMock()
+        fc.name = "search_social"
+        fc.args = {"query": "multi-step check"}
+
+        part_fc = MagicMock()
+        part_fc.thought = False
+        part_fc.text = None
+        content_tool = MagicMock()
+        content_tool.parts = [part_fc]
+        candidate_tool = MagicMock()
+        candidate_tool.content = content_tool
+        resp_tool = MagicMock()
+        resp_tool.candidates = [candidate_tool]
+        resp_tool.function_calls = [fc]
+
+        part_closing = MagicMock()
+        part_closing.thought = False
+        part_closing.text = '{"verdict": "TRUE", "is_claim": true, "explanation": "Synthesized on closing turn."}'
+        content_closing = MagicMock()
+        content_closing.parts = [part_closing]
+        candidate_closing = MagicMock()
+        candidate_closing.content = content_closing
+        resp_closing = MagicMock()
+        resp_closing.candidates = [candidate_closing]
+        resp_closing.function_calls = []
+
+        # 4 tool turns + 1 closing turn = 5 total calls
+        mock_client.models.generate_content.side_effect = [resp_tool] * 4 + [resp_closing]
+
+        service = GeminiService()
+        with patch.object(service, '_analyze_claim_standard') as mock_standard:
+            result = service._analyze_claim_agentic("Breaking news quote check")
+            mock_standard.assert_not_called()
+
+        assert mock_client.models.generate_content.call_count == 5
+        assert result['verdict'] == "TRUE"
+        assert result['explanation'] == "Synthesized on closing turn."
+        assert result['social_watermarked'] is True
+
+    @patch('backend.services.gemini.client.genai.Client')
+    @patch('backend.services.grok_service.get_grok_service')
+    def test_agentic_loop_propagates_grok_social_watermarked_flag_to_single_and_batch_results(self, mock_get_grok, mock_client_class):
+        """
+        Verify Grok's EU AI Act `watermarked` boolean is deterministically attached
+        as `social_watermarked` on both single-claim and batch verification results.
+        """
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
+
+        mock_grok = MagicMock()
+        mock_grok.get_tool_definition.return_value = {"name": "search_social"}
+        mock_grok.search_social.return_value = {"found": True, "text": "Watermarked X post", "watermarked": True}
+        mock_get_grok.return_value = mock_grok
+
+        fc = MagicMock()
+        fc.name = "search_social"
+        fc.args = {"query": "@handle quote"}
+
+        part_fc = MagicMock()
+        part_fc.thought = False
+        part_fc.text = None
+        content1 = MagicMock()
+        content1.parts = [part_fc]
+        candidate1 = MagicMock()
+        candidate1.content = content1
+        resp1 = MagicMock()
+        resp1.candidates = [candidate1]
+        resp1.function_calls = [fc]
+
+        part_batch = MagicMock()
+        part_batch.thought = False
+        part_batch.text = '{"results": [{"claim_index": 1, "verdict": "FALSE", "explanation": "Debunked", "sources": []}]}'
+        content2 = MagicMock()
+        content2.parts = [part_batch]
+        candidate2 = MagicMock()
+        candidate2.content = content2
+        resp2 = MagicMock()
+        resp2.candidates = [candidate2]
+        resp2.function_calls = []
+
+        mock_client.models.generate_content.side_effect = [resp1, resp2]
+
+        service = GeminiService()
+        batch_res = service.analyze_claims_batch(["@handle just claimed breaking news"], pre_triaged=True)
+
+        assert len(batch_res) == 1
+        assert batch_res[0]['verdict'] == "FALSE"
+        assert batch_res[0]['social_watermarked'] is True
+
+
 

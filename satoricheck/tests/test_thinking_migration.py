@@ -70,8 +70,8 @@ def test_triage_for_stream_uses_low_thinking(gemini_service):
     assert config.thinking_config.thinking_level == types.ThinkingLevel.LOW
 
 
-def test_batch_agentic_uses_high_thinking(gemini_service):
-    """Verify batch verification uses thinking_level='high' and removes temperature=1.0."""
+def test_batch_agentic_uses_low_thinking(gemini_service):
+    """Verify batch verification uses thinking_level='low' for sub-batch latency optimization."""
     gemini_service.client.models.generate_content.return_value = make_mock_response(
         '{"results": [{"claim_index": 1, "verdict": "TRUE", "explanation": "Valid", "sources": []}]}'
     )
@@ -87,7 +87,7 @@ def test_batch_agentic_uses_high_thinking(gemini_service):
     assert config is not None
     _assert_no_deprecated_sampling_params(config)
     assert config.thinking_config is not None
-    assert config.thinking_config.thinking_level == types.ThinkingLevel.HIGH
+    assert config.thinking_config.thinking_level == types.ThinkingLevel.LOW
     assert config.thinking_config.include_thoughts is True
 
 
@@ -131,7 +131,7 @@ def test_unified_model_used_across_thinking_levels(gemini_service):
     gemini_service.analyze_claims_batch(["Water boils at 100C."])
     batch_kwargs = gemini_service.client.models.generate_content.call_args.kwargs
     assert batch_kwargs['model'] == gemini_service.MODEL
-    assert batch_kwargs['config'].thinking_config.thinking_level == types.ThinkingLevel.HIGH
+    assert batch_kwargs['config'].thinking_config.thinking_level == types.ThinkingLevel.LOW
 
 
 def test_grok_tool_gated_by_social_triggers(gemini_service):

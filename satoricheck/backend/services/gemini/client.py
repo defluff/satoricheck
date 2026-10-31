@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import socket
+import time
 import requests
 from enum import Enum
 from urllib.parse import urlparse
@@ -233,6 +234,205 @@ class GeminiServiceClient:
                 types.Content(role="tool", parts=[function_response_part])
             )
         return tool_contents
+
+    @staticmethod
+    def _attach_social_watermark(parsed, conversation):
+        """Propagate EU AI Act watermark provenance from Grok tool calls onto parsed results.
+
+        Why: Transport-layer headers (`x-watermark: true`) are deterministic metadata from xAI.
+        Attaching `social_watermarked` directly from tool outputs in Python avoids asking the
+        LLM to copy a boolean into its JSON output (saving tokens and preventing hallucination).
+        """
+        if parsed is None or not conversation:
+            return parsed
+
+        watermark_flags = []
+        for msg in conversation:
+            if getattr(msg, "role", None) != "tool":
+                continue
+            for part in getattr(msg, "parts", None) or []:
+                fn_resp = getattr(part, "function_response", None)
+                if fn_resp and getattr(fn_resp, "name", None) == "search_social":
+                    resp_data = getattr(fn_resp, "response", None)
+                    if isinstance(resp_data, dict) and "watermarked" in resp_data:
+                        watermark_flags.append(bool(resp_data["watermarked"]))
+
+        if not watermark_flags:
+            return parsed
+
+        social_watermarked = any(watermark_flags)
+        if isinstance(parsed, dict):
+            parsed["social_watermarked"] = social_watermarked
+        elif isinstance(parsed, list):
+            for item in parsed:
+                if isinstance(item, dict):
+                    item["social_watermarked"] = social_watermarked
+        return parsed
+
+    def _run_verification_loop(
+        self,
+        prompt: str,
+        system_instruction: str,
+        needs_social: bool,
+        grok,
+        response_parser,
+        cache_name: str | None = None,
+        max_turns: int = 3,
+        retries_per_turn: int = 1,
+        raise_on_turn_failure: bool = False,
+        enable_closing_turn: bool = False,
+        context_label_prefix: str = "agentic",
+        thinking_level: str = "high",
+    ):
+        """Master agentic verification loop shared across single-claim, batch, pitchdeck, and media flows.
+
+        Why: Consolidating the multi-turn high-thinking loop into a single method ensures
+        consistent Google Search grounding, conditional xAI Grok tool attachment, context-cache
+        fallback recovery, and tool-response synthesis across every verification module.
+        """
+        google_search_tool = types.Tool(google_search=types.GoogleSearch())
+        if needs_social:
+            tools_list = [google_search_tool, self._build_grok_tool(grok)]
+        else:
+            tools_list = [google_search_tool]
+        tool_cfg = types.ToolConfig(
+            include_server_side_tool_invocations=True
+        )
+
+        conversation = [
+            types.Content(role="user", parts=[types.Part.from_text(text=prompt)])
+        ]
+
+        # In the Gemini API, a GenerateContentConfig referencing cached_content
+        # cannot also set system_instruction, tools, or tool_config.
+        if cache_name:
+            config = types.GenerateContentConfig(
+                cached_content=cache_name,
+                thinking_config=types.ThinkingConfig(
+                    thinking_level=thinking_level,
+                    include_thoughts=True,
+                ),
+            )
+        else:
+            config = types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                tools=tools_list,
+                tool_config=tool_cfg,
+                thinking_config=types.ThinkingConfig(
+                    thinking_level=thinking_level,
+                    include_thoughts=True,
+                ),
+            )
+
+        for turn in range(1, max_turns + 1):
+            turn_response = None
+            turn_exception = None
+
+            for attempt in range(retries_per_turn):
+                try:
+                    logger.info(f"Agentic turn {turn}/{max_turns}...")
+                    response, cache_cleared = self._generate_with_cache_fallback(
+                        model=self.MODEL,
+                        contents=conversation,
+                        config=config,
+                        context_label=f"{context_label_prefix} turn {turn}",
+                        fallback_system_instruction=system_instruction,
+                        fallback_tools=tools_list,
+                        fallback_tool_config=tool_cfg,
+                    )
+                    if cache_cleared:
+                        cache_name = None
+                    turn_response = response
+                    break
+                except Exception as e:
+                    turn_exception = e
+                    if retries_per_turn > 1:
+                        logger.warning(f"Agentic turn {turn} failed (attempt {attempt + 1}): {e}")
+                        time.sleep(1)
+
+            if not turn_response:
+                if raise_on_turn_failure:
+                    raise turn_exception or Exception("Agentic turn failed after retries")
+                logger.error(f"Agentic turn {turn} failed: {turn_exception}")
+                if turn == max_turns:
+                    break
+                time.sleep(1)
+                continue
+
+            try:
+                if not turn_response.candidates:
+                    raise ValueError("No candidates in response")
+                candidate = turn_response.candidates[0]
+                content = candidate.content
+                if not content or not content.parts:
+                    raise ValueError("No content or parts in candidate")
+
+                if turn_response.function_calls:
+                    conversation.append(content)
+                    logger.info(f"Executing {len(turn_response.function_calls)} tool calls...")
+                    conversation.extend(
+                        self._execute_tool_calls(turn_response.function_calls, grok)
+                    )
+                    continue
+
+                final_text = self._extract_text_from_parts(content.parts)
+                parsed = response_parser(final_text, turn_response)
+                if parsed is not None:
+                    return self._attach_social_watermark(parsed, conversation)
+                conversation.append(content)
+            except Exception as e:
+                if raise_on_turn_failure:
+                    raise
+                logger.error(f"Agentic turn {turn} response processing failed: {e}")
+                if turn == max_turns:
+                    break
+                time.sleep(1)
+
+        if enable_closing_turn and conversation and conversation[-1].role == "tool":
+            try:
+                logger.info("Agentic closing turn (producing final answer from tool results)...")
+                closing_tool_cfg = types.ToolConfig(
+                    function_calling_config=types.FunctionCallingConfig(
+                        mode=types.FunctionCallingConfigMode.NONE
+                    )
+                )
+                if cache_name:
+                    closing_config = types.GenerateContentConfig(
+                        cached_content=cache_name,
+                        response_mime_type="application/json",
+                        thinking_config=types.ThinkingConfig(
+                            thinking_level=thinking_level,
+                            include_thoughts=True,
+                        ),
+                    )
+                else:
+                    closing_config = types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json",
+                        thinking_config=types.ThinkingConfig(
+                            thinking_level=thinking_level,
+                            include_thoughts=True,
+                        ),
+                        tool_config=closing_tool_cfg,
+                    )
+
+                response, _ = self._generate_with_cache_fallback(
+                    model=self.MODEL,
+                    contents=conversation,
+                    config=closing_config,
+                    context_label=f"{context_label_prefix} closing turn",
+                    fallback_system_instruction=system_instruction,
+                    fallback_tool_config=closing_tool_cfg,
+                )
+                if response.candidates:
+                    closing_text = self._extract_text_from_parts(response.candidates[0].content.parts)
+                    parsed = response_parser(closing_text, response)
+                    if parsed is not None:
+                        return self._attach_social_watermark(parsed, conversation)
+            except Exception as e:
+                logger.error(f"Agentic closing turn failed: {e}")
+
+        return None
 
     @staticmethod
     def _is_private_ip(ip_str: str) -> bool:

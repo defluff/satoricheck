@@ -189,4 +189,49 @@ class TestSkillOptimizations:
             cfg = mock_client.models.generate_content.call_args.kwargs['config']
             assert cfg.response_mime_type == "application/json"
 
+    def test_ai_detection_and_triage_skills_include_grok_and_claude_watermark_calibration(self, app):
+        """Verify ai_detection.md and stream_triage.md integrate Grok + Claude watermark provenance and triage rules."""
+        from backend.services.gemini.batch import GeminiServiceBatch
+        from backend.services.gemini.client import _read_skill_file
+        _read_skill_file.cache_clear()
+
+        batch_svc = GeminiServiceBatch()
+        ai_skill = batch_svc._load_skill("ai_detection")
+        triage_skill = batch_svc._load_skill("stream_triage")
+
+        # AI detection skill covers SynthID-Text, Claude, and xAI Grok watermarks + Negative Evidence Rule
+        assert "SynthID-Text" in ai_skill
+        assert "Claude" in ai_skill
+        assert "Grok" in ai_skill
+        assert "x-watermark" in ai_skill
+        assert "Negative Evidence Rule" in ai_skill
+
+        # Stream triage skill guards against LLM citation hallucinations and drops synthetic boilerplate
+        assert "Claude and Grok" in triage_skill
+        assert "Never use `KNOWLEDGE_CHECK` for specific statistics, named studies/DOIs" in triage_skill
+        assert "boilerplate" in triage_skill
+
+    def test_single_and_batch_claims_share_master_verification_loop(self, app):
+        """Verify both single-claim and batch verification delegate to _run_verification_loop."""
+        from backend.services.gemini_service import GeminiService
+        svc = GeminiService()
+
+        with patch.object(svc, '_run_verification_loop') as mock_master_loop, \
+             patch('backend.services.grok_service.get_grok_service') as mock_get_grok:
+            mock_get_grok.return_value = MagicMock()
+
+            mock_master_loop.return_value = {"is_claim": True, "verdict": "TRUE", "explanation": "OK", "sources": []}
+            single_res = svc.analyze_claim("The Earth orbits the Sun.", smart_agent=True)
+            assert single_res["verdict"] == "TRUE"
+            assert mock_master_loop.call_count == 1
+            assert mock_master_loop.call_args.kwargs["context_label_prefix"] == "agentic"
+
+            mock_master_loop.reset_mock()
+            mock_master_loop.return_value = [{"is_claim": True, "verdict": "FALSE", "explanation": "No", "sources": []}]
+            batch_res = svc.analyze_claims_batch(["The Moon is made of cheese."], pre_triaged=True)
+            assert len(batch_res) == 1
+            assert batch_res[0]["verdict"] == "FALSE"
+            assert mock_master_loop.call_count == 1
+            assert mock_master_loop.call_args.kwargs["context_label_prefix"] == "batch"
+
 

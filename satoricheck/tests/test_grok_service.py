@@ -147,3 +147,47 @@ class TestGrokService:
             
         assert result['found'] == True
         assert result['source'] == '@test'
+        assert result['watermarked'] is False
+
+    @patch('backend.services.grok_service.requests.post')
+    def test_search_social_records_x_watermark_header(self, mock_post):
+        """Should record watermarked=True when xAI returns x-watermark: true header."""
+        from backend.services.grok_service import GrokService
+
+        mock_response = MagicMock()
+        mock_response.headers = {'x-watermark': 'true', 'content-type': 'application/json'}
+        mock_response.json.return_value = {
+            'choices': [{
+                'message': {
+                    'content': '{"found": true, "source": "@xai", "text": "Watermarked output"}'
+                }
+            }]
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_post.return_value = mock_response
+
+        with patch('backend.services.grok_service.Config') as mock_config:
+            mock_config.GROK_API_KEY = 'test-key'
+            mock_config.GROK_TIMEOUT = 10
+            service = GrokService()
+            result = service.search_social("test watermark claim")
+
+        assert result['found'] is True
+        assert result['watermarked'] is True
+        sent_json = mock_post.call_args.kwargs['json']
+        assert sent_json['model'] == 'grok-4.7'
+
+    def test_grok_default_model_is_pinned_not_latest_alias(self):
+        """Config.GROK_MODEL and GrokService.MODEL must use explicit grok-4.7 ID, never -latest."""
+        from backend.config import Config
+        from backend.services.grok_service import GrokService
+
+        assert not Config.GROK_MODEL.endswith('-latest')
+        assert Config.GROK_MODEL == 'grok-4.7'
+        assert GrokService.MODEL == Config.GROK_MODEL
+
+    def test_grok_default_timeout_is_tightened_to_10_seconds(self):
+        """Config.GROK_TIMEOUT should default to 10s so agentic loops do not stall workers."""
+        from backend.config import Config
+
+        assert Config.GROK_TIMEOUT == 10

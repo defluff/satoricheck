@@ -99,12 +99,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // 3. Fallback Handshake message listener
-    chrome.runtime.onMessage.addListener((message) => {
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         if (message.type === 'FACTCHECK_SELECTION' && message.text) {
             inputText.value = message.text;
             updateInputState();
             handleVerify();
+            if (typeof sendResponse === 'function') {
+                sendResponse({ received: true });
+            }
         }
+        return false;
     });
 });
 

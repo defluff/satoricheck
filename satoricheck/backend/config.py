@@ -69,9 +69,12 @@ class Config:
     HOST = os.getenv('HOST', '127.0.0.1')
     
     # xAI Grok API (for Social Context in Smart Mode)
+    # Pinned to an explicit watermarked model ID (not a "-latest" alias) so behavior
+    # only changes on deploy and responses include the EU AI Act x-watermark header.
     GROK_API_KEY = os.getenv('GROK_API_KEY')
+    GROK_MODEL = os.getenv('GROK_MODEL', 'grok-4.7')
     GROK_ENABLED = os.getenv('GROK_ENABLED', 'true').lower() == 'true'
-    GROK_TIMEOUT = int(os.getenv('GROK_TIMEOUT', '30'))  # seconds (API can be slow)
+    GROK_TIMEOUT = int(os.getenv('GROK_TIMEOUT', '10'))  # seconds (tightened to guard worker threads in agentic loops)
     GROK_MAX_CALLS_PER_DAY = 1000
     
     # Token pricing (batteries) - NEW: Reduced by 5x for Live Pro margins
