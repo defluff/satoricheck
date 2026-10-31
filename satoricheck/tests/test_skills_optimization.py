@@ -115,17 +115,13 @@ class TestSkillOptimizations:
         assert "Rhetorical Hyperbole" in skill_text
         assert "Conversational Filler & Disfluencies" in skill_text
 
-    def test_audio_stream_ingestion_and_stream_triage_skills_loaded(self, app):
-        """Verify dedicated skill files for audio_stream_ingestion and stream_triage load properly."""
+    def test_stream_triage_skill_loaded(self, app):
+        """Verify dedicated skill file for stream_triage loads properly."""
         from backend.services.gemini.batch import GeminiServiceBatch
-        media_svc = GeminiServiceMedia()
         batch_svc = GeminiServiceBatch()
 
-        audio_skill = media_svc._load_skill("audio_stream_ingestion")
         triage_skill = batch_svc._load_skill("stream_triage")
 
-        assert "Audio Stream Ingestion" in audio_skill
-        assert "Falsifiability Standard" in audio_skill
         assert "Stream Claim Triage" in triage_skill
         assert "is_hyperbole" in triage_skill
 
@@ -190,14 +186,6 @@ class TestSkillOptimizations:
         with patch.object(batch_svc, 'client') as mock_client:
             mock_client.models.generate_content.return_value = mock_triage_resp
             batch_svc.triage_for_stream(["Claim 1"])
-            cfg = mock_client.models.generate_content.call_args.kwargs['config']
-            assert cfg.response_mime_type == "application/json"
-
-        mock_audio_resp = MagicMock()
-        mock_audio_resp.text = '{"transcript": "Hello world", "claims": []}'
-        with patch.object(media_svc, 'client') as mock_client:
-            mock_client.models.generate_content.return_value = mock_audio_resp
-            media_svc.transcribe_and_extract_claims_from_audio(b"audio_bytes")
             cfg = mock_client.models.generate_content.call_args.kwargs['config']
             assert cfg.response_mime_type == "application/json"
 

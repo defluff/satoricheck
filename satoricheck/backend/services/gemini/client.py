@@ -49,8 +49,7 @@ def _read_skill_file(skill_name: str) -> str | None:
 
 class GeminiServiceClient:
     """Base client for Gemini Service utilizing the modern google-genai SDK."""
-    MODEL_PRO = Config.GEMINI_MODEL_PRO
-    MODEL_FAST = Config.GEMINI_MODEL_FLASH
+    MODEL = Config.GEMINI_MODEL
     MODEL_EMBEDDING = "gemini-embedding-2-preview"
     
     TIMEOUT_PRO = 30
@@ -156,7 +155,7 @@ class GeminiServiceClient:
         tools, and tool_config before retrying.
 
         Args:
-            model:                       Model identifier (e.g. self.MODEL_PRO).
+            model:                       Model identifier (e.g. self.MODEL).
             contents:                    Prompt or conversation history.
             config:                      GenerateContentConfig (may include cached_content).
             context_label:               Descriptive label for log messages.

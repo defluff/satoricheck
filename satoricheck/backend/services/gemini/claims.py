@@ -31,8 +31,6 @@ class GeminiServiceClaims(GeminiServiceBatch):
             from backend.services.grok_service import get_grok_service, should_fire_grok
             grok = get_grok_service()
             
-            grok_tool = self._build_grok_tool(grok)
-            
             social_hint = should_fire_grok(text)
             if social_hint:
                 logger.info(f"Social trigger detected for: {text[:50]}...")
@@ -42,22 +40,22 @@ class GeminiServiceClaims(GeminiServiceBatch):
                 fallback="You are an elite, impartial fact-checker specializing in detecting misinformation and state propaganda."
             )
             
-            tool_block = """
+            if social_hint:
+                tool_block = """
 
 AVAILABLE TOOLS:
 - search_social(query): Search X/Twitter for real-time social context.
   USE when: quote claims ("X said", "according to X"), @handles, #hashtags,
   breaking/viral news, temporal keywords (today, just, now, breaking),
   or when you cannot verify attribution from your knowledge alone.
-  DO NOT USE for: well-established historical facts, science, geography."""
-            if social_hint:
-                tool_block += """
+  DO NOT USE for: well-established historical facts, science, geography.
 
 ⚠️ SOCIAL CONTEXT RECOMMENDED: This claim matches social triggers (quote attribution,
 breaking news, or social reference). You SHOULD call search_social to verify attribution
 before rendering your verdict."""
-
-            system_instruction_full = f"{system_instruction}\n\n{tool_block}"
+                system_instruction_full = f"{system_instruction}\n\n{tool_block}"
+            else:
+                system_instruction_full = system_instruction
             
             from datetime import datetime, UTC
             current_date_str = datetime.now(UTC).strftime('%B %d, %Y')
@@ -83,9 +81,12 @@ Verify the claim and respond with JSON matching the required schema."""
             while current_turn < max_turns:
                 current_turn += 1
                 
-                # Configure generation with Thinking Mode, Google Search, and Grok tool
+                # Configure generation with Thinking Mode, Google Search, and conditional Grok tool
                 google_search_tool = types.Tool(google_search=types.GoogleSearch())
-                tools_list = [google_search_tool, grok_tool]
+                if social_hint:
+                    tools_list = [google_search_tool, self._build_grok_tool(grok)]
+                else:
+                    tools_list = [google_search_tool]
                 tool_cfg = types.ToolConfig(
                     include_server_side_tool_invocations=True
                 )
@@ -117,7 +118,7 @@ Verify the claim and respond with JSON matching the required schema."""
                 for attempt in range(2):
                     try:
                         response, cache_cleared = self._generate_with_cache_fallback(
-                            model=self.MODEL_PRO,
+                            model=self.MODEL,
                             contents=conversation_history,
                             config=config,
                             context_label=f"agentic turn {current_turn}",
@@ -221,7 +222,10 @@ Verify the claim and respond with JSON matching the required schema."""
                 
                 config = types.GenerateContentConfig(
                     system_instruction=system_instruction,
-                    tools=[types.Tool(google_search=types.GoogleSearch())]
+                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                    thinking_config=types.ThinkingConfig(
+                        thinking_level="high"
+                    )
                 )
                 
                 from datetime import datetime, UTC
@@ -239,7 +243,7 @@ Verify the claim and respond with JSON matching the required schema."""
                 
                 if self.client:
                     response = self.client.models.generate_content(
-                        model=self.MODEL_PRO,
+                        model=self.MODEL,
                         contents=prompt,
                         config=config
                     )

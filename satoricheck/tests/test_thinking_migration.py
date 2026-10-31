@@ -3,9 +3,10 @@ Tests verifying migration from deprecated sampling/thinking parameters to thinki
 
 Ensures:
 1. No deprecated parameters (temperature, top_p, top_k, thinking_budget) are sent in Gemini configs.
-2. Fast stream triage uses thinking_level="minimal" to preserve low-latency SLAs.
-3. Audio chunk extraction uses thinking_level="minimal".
-4. Agentic verification (single claim and batch) uses thinking_level="high" for deep reasoning.
+2. Fast paths (triage, claim extraction) use thinking_level="low" — the lowest level
+   supported by current Gemini models ("minimal" is rejected by gemini-3.8-flash / gemini-4-argon).
+3. Agentic verification (single claim and batch) uses thinking_level="high" for deep reasoning.
+4. All calls route through the single configured GeminiService.MODEL.
 """
 import pytest
 from unittest.mock import MagicMock, patch
@@ -50,8 +51,8 @@ def _assert_no_deprecated_sampling_params(config: types.GenerateContentConfig):
         assert getattr(config.thinking_config, 'thinking_budget', None) is None, "thinking_budget must not be set"
 
 
-def test_triage_for_stream_uses_minimal_thinking(gemini_service):
-    """Verify stream triage enforces thinking_level='minimal' and zero sampling params."""
+def test_triage_for_stream_uses_low_thinking(gemini_service):
+    """Verify stream triage enforces thinking_level='low' and zero sampling params."""
     gemini_service.client.models.generate_content.return_value = make_mock_response(
         '[{"index": 1, "priority": "NORMAL", "strategy": "SEARCH_VERIFY", "is_hyperbole": false}]'
     )
@@ -66,7 +67,7 @@ def test_triage_for_stream_uses_minimal_thinking(gemini_service):
     assert config is not None
     _assert_no_deprecated_sampling_params(config)
     assert config.thinking_config is not None
-    assert config.thinking_config.thinking_level == types.ThinkingLevel.MINIMAL
+    assert config.thinking_config.thinking_level == types.ThinkingLevel.LOW
 
 
 def test_batch_agentic_uses_high_thinking(gemini_service):
@@ -114,22 +115,42 @@ def test_single_agentic_claim_uses_high_thinking(gemini_service):
     assert config.thinking_config.include_thoughts is True
 
 
-def test_transcribe_audio_uses_minimal_thinking(gemini_service):
-    """Verify audio claim extraction uses thinking_level='minimal' and zero sampling params."""
+def test_unified_model_used_across_thinking_levels(gemini_service):
+    """Verify extraction, AI detection, and verification all use unified GeminiService.MODEL."""
     gemini_service.client.models.generate_content.return_value = make_mock_response(
-        '{"transcript": "Hello world", "claims": []}'
+        '{"claims": ["Water boils at 100C"]}'
+    )
+    gemini_service.identify_claims("Water boils at 100C.")
+    identify_kwargs = gemini_service.client.models.generate_content.call_args.kwargs
+    assert identify_kwargs['model'] == gemini_service.MODEL
+    assert identify_kwargs['config'].thinking_config.thinking_level == types.ThinkingLevel.LOW
+
+    gemini_service.client.models.generate_content.return_value = make_mock_response(
+        '{"results": [{"claim_index": 1, "verdict": "TRUE", "explanation": "Valid", "sources": []}]}'
+    )
+    gemini_service.analyze_claims_batch(["Water boils at 100C."])
+    batch_kwargs = gemini_service.client.models.generate_content.call_args.kwargs
+    assert batch_kwargs['model'] == gemini_service.MODEL
+    assert batch_kwargs['config'].thinking_config.thinking_level == types.ThinkingLevel.HIGH
+
+
+def test_grok_tool_gated_by_social_triggers(gemini_service):
+    """Verify Grok tool is omitted on standard factual claims and attached on social triggers."""
+    gemini_service.client.models.generate_content.return_value = make_mock_response(
+        '{"results": [{"claim_index": 1, "verdict": "TRUE", "explanation": "Valid", "sources": []}]}'
     )
 
-    gemini_service.transcribe_and_extract_claims_from_audio(
-        audio_bytes=b"fake-audio-bytes",
-        mime_type="audio/webm"
-    )
+    with patch.object(gemini_service, '_build_grok_tool', return_value=MagicMock()) as mock_build_grok:
+        # Non-social historical/scientific claim -> only GoogleSearch tool attached
+        gemini_service.analyze_claims_batch(["Water boils at 100 degrees Celsius."])
+        non_social_cfg = gemini_service.client.models.generate_content.call_args.kwargs['config']
+        assert len(non_social_cfg.tools) == 1
+        mock_build_grok.assert_not_called()
 
-    assert gemini_service.client.models.generate_content.call_count == 1
-    call_kwargs = gemini_service.client.models.generate_content.call_args.kwargs
-    config = call_kwargs.get('config')
+        # Social trigger claim (@handle / breaking news) -> GoogleSearch + Grok tool attached
+        gemini_service.analyze_claims_batch(["@elonmusk just tweeted breaking news today"])
+        social_cfg = gemini_service.client.models.generate_content.call_args.kwargs['config']
+        assert len(social_cfg.tools) == 2
+        mock_build_grok.assert_called_once()
 
-    assert config is not None
-    _assert_no_deprecated_sampling_params(config)
-    assert config.thinking_config is not None
-    assert config.thinking_config.thinking_level == types.ThinkingLevel.MINIMAL
+

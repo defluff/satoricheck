@@ -156,7 +156,10 @@ class GeminiServiceMedia(GeminiServiceClaims):
             
             config = types.GenerateContentConfig(
                 system_instruction=system_instruction,
-                response_mime_type="application/json"
+                response_mime_type="application/json",
+                thinking_config=types.ThinkingConfig(
+                    thinking_level="high"
+                )
             )
             
             is_video = 'video' in mime_type
@@ -193,7 +196,7 @@ class GeminiServiceMedia(GeminiServiceClaims):
             if self.client:
                 # Use modern Client SDK
                 response = self.client.models.generate_content(
-                    model=self.MODEL_PRO,
+                    model=self.MODEL,
                     contents=[part, prompt],
                     config=config
                 )
@@ -217,78 +220,4 @@ class GeminiServiceMedia(GeminiServiceClaims):
                 except Exception as cleanup_err:
                     logger.warning(f"Failed to delete Gemini file: {cleanup_err}")
 
-    def transcribe_and_extract_claims_from_audio(
-        self,
-        audio_bytes: bytes,
-        mime_type: str = 'audio/webm',
-        context: str | None = None
-    ) -> dict:
-        """Single-pass multimodal audio transcription and falsifiable claim extraction.
-
-        Uses Gemini Flash to transcribe the audio chunk and extract falsifiable
-        claims with timestamps and quotes in a single pass.
-        """
-        try:
-            part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
-
-            system_instruction = self._load_skill(
-                "audio_stream_ingestion",
-                fallback=(
-                    "You are an expert live audio transcriber and real-time fact-checking triage assistant. "
-                    "Your objective is twofold:\n"
-                    "1. Accurately transcribe the spoken audio dialogue.\n"
-                    "2. Extract distinct, falsifiable factual claims from the dialogue that meet the Falsifiability Standard "
-                    "(can be confirmed or refuted by empirical data, statistics, public records, legislation, or official statements). "
-                    "Exclude conversational banter, verbal fillers ('you know', 'like', 'literally'), pure opinions, "
-                    "rhetorical hyperbole lacking empirical anchors, and unfinished speech fragments.\n"
-                    "Respond ONLY with a JSON object."
-                )
-            )
-
-            context_hint = f"\nSTREAM CONTEXT: {context[:300]}" if context else ""
-            prompt = (
-                f"Transcribe this audio slice and extract all verifiable claims.{context_hint}\n"
-                "Return a JSON object with this exact structure:\n"
-                "{\n"
-                '  "transcript": "Verbatim transcript of spoken dialogue in this audio slice...",\n'
-                '  "claims": [\n'
-                '    {\n'
-                '      "claim": "Standalone verifiable factual claim with resolved pronouns",\n'
-                '      "timestamp": "00:12",\n'
-                '      "quote": "Direct quote from transcript"\n'
-                '    }\n'
-                '  ]\n'
-                "}\n"
-                "If no speech or verifiable claims are detected, return empty transcript and empty claims list."
-            )
-
-            config = types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                response_mime_type="application/json",
-                thinking_config=types.ThinkingConfig(
-                    thinking_level="minimal"
-                )
-            )
-
-            if self.client:
-                response = self.client.models.generate_content(
-                    model=self.MODEL_FAST,
-                    contents=[part, prompt],
-                    config=config
-                )
-                text = response.text or "{}"
-                parsed = json.loads(self._extract_json(text))
-                transcript = parsed.get("transcript", "").strip()
-                claims = parsed.get("claims", [])
-                word_count = len(transcript.split()) if transcript else 0
-                return {
-                    "transcript": transcript,
-                    "claims": claims if isinstance(claims, list) else [],
-                    "word_count": word_count
-                }
-            else:
-                raise Exception("Gemini client not initialized")
-        except Exception as e:
-            logger.error(f"Audio transcription/extraction failed: {e}")
-            raise
 

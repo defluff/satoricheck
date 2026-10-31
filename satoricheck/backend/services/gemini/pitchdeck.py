@@ -2,8 +2,8 @@
 Multimodal Pitch Deck Analysis Module.
 
 Integrates pitch deck extraction into the GeminiService hierarchy.
-Uses google-genai SDK with dynamic MODEL_FAST (Config.GEMINI_MODEL_FLASH)
-for high-speed single-pass investor intelligence extraction.
+Uses google-genai SDK with the shared MODEL (Config.GEMINI_MODEL) at low
+thinking level for high-speed single-pass investor intelligence extraction.
 """
 import base64
 import html
@@ -13,7 +13,6 @@ import re
 from typing import Optional
 from google.genai import types
 
-from backend.config import Config
 from backend.services.gemini.media import GeminiServiceMedia
 
 logger = logging.getLogger(__name__)
@@ -21,10 +20,6 @@ logger = logging.getLogger(__name__)
 
 class GeminiServicePitchdeck(GeminiServiceMedia):
     """Multimodal Pitch Deck Analyst extending GeminiService hierarchy."""
-
-    # Models — strictly dynamic configuration from Config
-    MODEL_PRO = Config.GEMINI_MODEL_PRO
-    MODEL_FAST = Config.GEMINI_MODEL_FLASH
 
     # Hard limits
     MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
@@ -141,14 +136,17 @@ class GeminiServicePitchdeck(GeminiServiceMedia):
             user_prompt = system_instruction
             system_instruction = None
 
-        target_model = model or self.MODEL_PRO
+        target_model = model or self.MODEL
 
         # Prefer modern Client SDK with dynamic model
         if self.client:
             try:
                 pdf_part = types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
                 config = types.GenerateContentConfig(
-                    response_mime_type="application/json"
+                    response_mime_type="application/json",
+                    thinking_config=types.ThinkingConfig(
+                        thinking_level="low"
+                    )
                 )
                 if system_instruction:
                     config.system_instruction = system_instruction
@@ -240,7 +238,7 @@ class GeminiServicePitchdeck(GeminiServiceMedia):
         for attempt in range(max_retries):
             try:
                 logger.info(f"[Pitchdeck] Multimodal analysis attempt {attempt + 1}/{max_retries} (pages: ~{page_count})")
-                raw_result = self._call_gemini_vision(pdf_bytes, system_instruction, user_prompt, model=self.MODEL_FAST)
+                raw_result = self._call_gemini_vision(pdf_bytes, system_instruction, user_prompt, model=self.MODEL)
                 break
             except requests.exceptions.Timeout:
                 logger.warning(f"[Pitchdeck] Timeout on attempt {attempt + 1}")

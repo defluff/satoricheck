@@ -346,9 +346,10 @@ class FactCheckManager {
                     this.checkedTexts.add(text);
                 }
             } else {
-                // No claims found, check as single block
-                ui.showToast('No distinct claims found, checking as whole', 'info');
-                await this.checkText(text, null);
+                // No verifiable claims found (opinion, banter, or non-factual statement).
+                // Stop here rather than escalating to a full single-block API check.
+                ui.showToast('No verifiable claims detected', 'info');
+                this.checkedTexts.add(text);
             }
 
         } finally {

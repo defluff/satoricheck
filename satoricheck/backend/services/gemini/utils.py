@@ -190,8 +190,13 @@ Respond with ONLY the summary, no JSON."""
         try:
             if self.client:
                 response = self.client.models.generate_content(
-                    model=self.MODEL_FAST,
-                    contents=prompt
+                    model=self.MODEL,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        thinking_config=types.ThinkingConfig(
+                            thinking_level="low"
+                        )
+                    )
                 )
                 summary = response.text.strip()
                 logger.info(f"Generated context summary: {summary[:80]}...")
@@ -245,7 +250,10 @@ mentions "Biden" and this chunk says "He", replace "He" with "Biden".
                 
             config = types.GenerateContentConfig(
                 system_instruction=system_instruction,
-                response_mime_type="application/json"
+                response_mime_type="application/json",
+                thinking_config=types.ThinkingConfig(
+                    thinking_level="low"
+                )
             )
             
             prompt = f"""{preamble}TEXT TO ANALYZE (Part {i+1}/{len(chunks)}):
@@ -260,7 +268,7 @@ Go through the text SENTENCE BY SENTENCE, keeping the context of the whole text.
             try:
                 if self.client:
                     response = self.client.models.generate_content(
-                        model=self.MODEL_FAST,
+                        model=self.MODEL,
                         contents=prompt,
                         config=config
                     )
@@ -292,7 +300,12 @@ Go through the text SENTENCE BY SENTENCE, keeping the context of the whole text.
             fallback="You are an expert AI text detector."
         )
             
-        config = types.GenerateContentConfig(system_instruction=system_instruction)
+        config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            thinking_config=types.ThinkingConfig(
+                thinking_level="low"
+            )
+        )
         current_date_str = datetime.now(UTC).strftime('%B %d, %Y')
         word_count = len(text.split())
         is_short_text_flag = word_count < 50
@@ -329,7 +342,7 @@ RESPOND WITH JSON ONLY:
         try:
             if self.client:
                 response = self.client.models.generate_content(
-                    model=self.MODEL_FAST,
+                    model=self.MODEL,
                     contents=prompt,
                     config=config
                 )

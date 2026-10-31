@@ -37,12 +37,12 @@ class Config:
     SECRET_KEY = os.getenv('FLASK_SECRET_KEY')
     ENV = os.getenv('FLASK_ENV', 'production')
     
-    # Google Gemini
+    # Google Gemini — one model for all calls; workload depth is set per call via
+    # thinking_level ("low" for extraction/triage, "high" for verification/forensics).
+    # Pinned to an explicit stable ID (not a "-latest" alias) so verdict behavior only
+    # changes on deploy. Upgrade by setting GEMINI_MODEL in the environment.
     GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-    GEMINI_MODEL_PRO = os.getenv('GEMINI_MODEL_PRO', 'gemini-3.1-pro-preview')
-    GEMINI_MODEL_FLASH = os.getenv('GEMINI_MODEL_FLASH', 'gemini-3-flash-preview')
-    # Model used for the Gemini Live real-time transcription (Live Pro feature)
-    GEMINI_LIVE_MODEL = os.getenv('GEMINI_LIVE_MODEL', 'gemini-2.0-flash-live-001')
+    GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-3.8-flash')
 
     # Google OAuth
     GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')

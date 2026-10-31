@@ -76,7 +76,7 @@ class GeminiServiceBatch(GeminiServiceUtils):
                 cache_config.tool_config = tool_config
 
             cache = self.client.caches.create(
-                model=self.MODEL_PRO,
+                model=self.MODEL,
                 config=cache_config
             )
             logger.info(f"Created Gemini Context Cache: {cache.name} at {datetime.now(UTC)} (TTL: {ttl_minutes}m)")
@@ -110,7 +110,7 @@ class GeminiServiceBatch(GeminiServiceUtils):
             config.tools = None
             config.tool_config = None
             response = self.client.models.generate_content(
-                model=self.MODEL_PRO,
+                model=self.MODEL,
                 contents=prompt,
                 config=config
             )
@@ -221,9 +221,17 @@ class GeminiServiceBatch(GeminiServiceUtils):
 
     def _run_agentic_batch(self, prompt, claims_to_verify, grok, cache_name=None):
         """Execute the agentic loop for a single batch of claims."""
-        grok_tool = self._build_grok_tool(grok)
+        from backend.services.grok_service import should_fire_grok
+        needs_social = (
+            any(should_fire_grok(c) for c in claims_to_verify)
+            or "SOCIAL_VERIFY" in prompt
+        )
         google_search_tool = types.Tool(google_search=types.GoogleSearch())
-        tools_list = [google_search_tool, grok_tool]
+        if needs_social:
+            grok_tool = self._build_grok_tool(grok)
+            tools_list = [google_search_tool, grok_tool]
+        else:
+            tools_list = [google_search_tool]
         tool_cfg = types.ToolConfig(
             include_server_side_tool_invocations=True
         )
@@ -266,7 +274,7 @@ class GeminiServiceBatch(GeminiServiceUtils):
                 
                 if self.client:
                     response, cache_cleared = self._generate_with_cache_fallback(
-                        model=self.MODEL_PRO,
+                        model=self.MODEL,
                         contents=conversation,
                         config=config,
                         context_label=f"batch turn {turn + 1}",
@@ -340,7 +348,7 @@ class GeminiServiceBatch(GeminiServiceUtils):
                     )
                     
                 response, _ = self._generate_with_cache_fallback(
-                    model=self.MODEL_PRO,
+                    model=self.MODEL,
                     contents=conversation,
                     config=closing_config,
                     context_label="batch closing turn",
@@ -538,7 +546,7 @@ For each claim, select the appropriate strategy from your guidelines, verify it,
             system_instruction=system_instruction,
             response_mime_type="application/json",
             thinking_config=types.ThinkingConfig(
-                thinking_level="minimal"
+                thinking_level="low"
             )
         )
         prompt = f"""CLAIMS TO CATEGORIZE:
@@ -558,7 +566,7 @@ Return ONLY a JSON array matching:
         try:
             if self.client:
                 response = self.client.models.generate_content(
-                    model=self.MODEL_FAST,
+                    model=self.MODEL,
                     contents=prompt,
                     config=config
                 )
