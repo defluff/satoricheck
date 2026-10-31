@@ -130,9 +130,10 @@ def create_checkout_session():
         # Determine if this is a subscription or one-time payment
         try:
             # Use pre-created Stripe Price IDs for better promo code compatibility
+            # Note: Do not pass `payment_method_types` — Stripe manages enabled payment
+            # methods dynamically via Dashboard settings (passing it triggers InvalidRequestError).
             checkout_session = stripe.checkout.Session.create(
                 customer=stripe_customer_id,
-                payment_method_types=['card'],
                 line_items=[{
                     'price': package['stripe_price_id'],
                     'quantity': 1
