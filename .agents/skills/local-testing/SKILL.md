@@ -1,5 +1,6 @@
 ---
-description: Start local server and extension for manual and automated testing
+name: local-testing
+description: Start local server, run unit/integration/E2E test suites, test Chrome extension, or manage test user tokens in TEST_MODE. Use when the user asks to start local testing, run local tests, or test locally.
 ---
 
 # Local Testing & Development Guide
@@ -84,3 +85,4 @@ From the `satoricheck/` directory:
 | `e2e-test@example.com` | Playwright E2E browser runs | `@example.com` ([RFC 2606](https://www.rfc-editor.org/rfc/rfc2606) reserved) |
 
 > ⚠️ **Never use `@test.com`, `@fake.com`, or unreserved domains in tests.**
+

@@ -30,11 +30,6 @@
     gap: var(--spacing-sm);
 }
 
-.logo-icon {
-    font-size: 1.75rem;
-    -webkit-text-fill-color: initial;
-}
-
 .logo-img {
     height: 80px;
     width: auto;

@@ -1,5 +1,6 @@
 ---
-description: Automated security and stability gate before production deployment
+name: pre-release-security
+description: Automated security and stability gate before production deployment. Use when preparing a release, merging to main, deploying to Cloud Run, or running pre-release security verification (secret scans, CVE audits, security tests, Docker hardening).
 ---
 
 # Pre-Release Security & Stability Gate
@@ -13,8 +14,6 @@ add a test instead.
 ---
 
 ## 1. Secret Scan
-
-// turbo
 
 ```bash
 cd satoricheck
@@ -41,8 +40,6 @@ git ls-files | grep -E "(^|/)\.env$" && { echo "❌ .env is tracked in git"; exi
 
 ## 2. Dependency Vulnerability Check
 
-// turbo
-
 ```bash
 cd satoricheck
 ../.venv/bin/python -m pip_audit -r requirements.txt
@@ -56,8 +53,6 @@ Covers, with real assertions: route authorization (fail-closed), emitted securit
 SRI / no runtime CDN loads / vendored-file hashes, scheduler-secret auth + production startup
 guard, TEST_MODE production guard, IDOR/SSRF fixes, Stripe redirect-only fulfilment, extension
 token handling.
-
-// turbo
 
 ```bash
 cd satoricheck
@@ -74,8 +69,6 @@ cd satoricheck
 
 ## 4. Frontend Anti-Patterns
 
-// turbo
-
 ```bash
 cd satoricheck
 grep -rn "eval(\|new Function(\|document\.write" frontend/js/ && { echo "❌ Dangerous JS sink found"; exit 1; } || echo "✓ No eval/new Function/document.write"
@@ -88,8 +81,6 @@ Review every line printed by the `innerHTML` check by hand; the grep cannot prov
 ---
 
 ## 5. Dockerfile Hardening
-
-// turbo
 
 ```bash
 echo "--- Base image (pin by @sha256 digest when feasible) ---"
@@ -125,8 +116,6 @@ Expected: state `ENABLED`, no error `status.code`. Job definitions and creation 
 
 ## 7. Full Regression Suite
 
-// turbo
-
 ```bash
 cd satoricheck
 ../.venv/bin/pytest tests/ --ignore=tests/e2e
@@ -139,3 +128,4 @@ cd satoricheck
 - **Pass (✓):** every automated step passes, step 6 confirms prerequisites, zero test failures.
 - **Fail (❌):** any secret finding, CVE, failing security test, missing cron job/secret, or
   unsanitised `innerHTML` **blocks deployment**.
+

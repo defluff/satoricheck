@@ -65,33 +65,6 @@
     gap: var(--spacing-sm);
 }
 
-.milestone-item {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-md);
-    padding: var(--spacing-sm);
-    border-radius: var(--radius-md);
-}
-
-.milestone-item.active {
-    background: var(--bg-primary-hover);
-}
-
-.milestone-number {
-    font-weight: 700;
-    color: var(--color-text-secondary);
-    min-width: 40px;
-}
-
-.milestone-name {
-    flex: 1;
-    color: var(--color-text);
-}
-
-.milestone-icon {
-    font-size: 1.25rem;
-}
-
 /* Streak Grid (Energy Theme) */
 .streak-grid {
     display: grid;

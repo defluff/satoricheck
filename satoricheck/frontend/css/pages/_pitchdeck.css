@@ -992,13 +992,6 @@
    Feature C: Zero-File Archive, Boomerang Alert & Investor Decision Bar
    ========================================================================== */
 
-.pd-thesis-header-actions {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-xs);
-    flex-wrap: wrap;
-}
-
 .pd-archive-drawer {
     border-top: 1px solid var(--color-border);
     padding: var(--spacing-md) var(--spacing-lg);
@@ -1016,19 +1009,6 @@
     justify-content: space-between;
     gap: var(--spacing-sm);
     flex-wrap: wrap;
-}
-
-.pd-archive-drawer-title {
-    font-size: 0.78rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--color-text-secondary);
-}
-
-.pd-archive-drawer-subtitle {
-    font-size: 0.74rem;
-    color: var(--color-text-muted);
 }
 
 .pd-archive-list {
@@ -1120,12 +1100,6 @@
     border-bottom: 1px solid rgba(245, 158, 11, 0.35);
     font-size: 0.82rem;
     color: var(--color-text);
-}
-
-.pd-boomerang-content {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-xs);
 }
 
 .pd-deal-header-controls {

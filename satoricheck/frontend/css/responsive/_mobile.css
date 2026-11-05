@@ -99,10 +99,6 @@
         padding: var(--spacing-lg) var(--spacing-md);
     }
 
-    .pd-skeleton-grid {
-        grid-template-columns: 1fr;
-    }
-
     .module-nav-container,
     .module-nav-toggle {
         order: -1;
@@ -123,10 +119,6 @@
 
     .logo-img {
         height: 52px;
-    }
-
-    .logo-icon {
-        font-size: 1.4rem;
     }
 
     .header-actions {
@@ -173,9 +165,5 @@
     .module-nav-btn {
         font-size: 0.7rem;
         padding: var(--spacing-xs) var(--spacing-sm);
-    }
-
-    .pd-privacy-text {
-        font-size: 0.75rem;
     }
 }

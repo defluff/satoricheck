@@ -265,10 +265,6 @@
     box-shadow: var(--shadow-lg);
 }
 
-.package-popular {
-    border-color: var(--color-primary);
-}
-
 .package-premium {
     border-color: var(--color-warning);
 }

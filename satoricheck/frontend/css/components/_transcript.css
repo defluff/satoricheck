@@ -47,25 +47,3 @@
     color: var(--color-text-secondary);
     font-style: italic;
 }
-
-.processed-text {
-    position: relative;
-    display: inline;
-}
-
-.processed-text.success {
-    background: var(--bg-success-hover);
-    border-bottom: 2px solid var(--color-success);
-}
-
-.processed-text.error {
-    background: var(--bg-error-subtle);
-    border-bottom: 2px solid var(--color-error);
-}
-
-.checkmark {
-    display: inline-block;
-    margin-left: var(--spacing-xs);
-    color: var(--color-success);
-    font-weight: 700;
-}

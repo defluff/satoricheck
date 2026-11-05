@@ -74,15 +74,3 @@
     color: var(--color-text);
 }
 
-.modal-footer {
-    margin-top: var(--spacing-lg);
-    text-align: center;
-}
-
-.modal-actions {
-    display: flex;
-    gap: var(--spacing-md);
-    justify-content: center;
-    margin-top: var(--spacing-lg);
-}
-

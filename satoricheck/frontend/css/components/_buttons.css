@@ -2,8 +2,7 @@
 
 .btn-primary,
 .btn-secondary,
-.btn-icon,
-.btn-link {
+.btn-icon {
     border: none;
     cursor: pointer;
     font-family: inherit;
@@ -74,16 +73,6 @@
 .btn-icon.active {
     background: var(--color-primary);
     color: white;
-}
-
-.btn-link {
-    background: transparent;
-    color: var(--color-primary);
-    padding: 0;
-}
-
-.btn-link:hover {
-    text-decoration: underline;
 }
 
 /* Tab button for segment switchers (reused across pitchdeck, media, etc.) */
