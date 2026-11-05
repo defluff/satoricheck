@@ -9,8 +9,8 @@ Usage:
 
 Examples:
     python manage.py list-users
-    python manage.py set-balance andy@kiniroo.com 5000
-    python manage.py add-tokens andy@kiniroo.com 100
+    python manage.py set-balance andy@hirschtalventures.com 5000
+    python manage.py add-tokens andy@hirschtalventures.com 100
 """
 import sys
 import argparse
