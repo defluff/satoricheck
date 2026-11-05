@@ -1,5 +1,4 @@
 import logging
-import json
 from datetime import datetime, UTC
 
 from flask import Blueprint, request, jsonify

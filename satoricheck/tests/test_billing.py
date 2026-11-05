@@ -3,7 +3,6 @@ Billing & Stripe Integration Tests.
 Tests Payment Flow, Checkout Session Creation, Webhook Handling, Idempotency, and Portal.
 """
 import pytest
-import json
 from unittest.mock import patch, MagicMock
 import stripe
 from backend.config import Config

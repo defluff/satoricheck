@@ -2,7 +2,6 @@
 Share Analytics Endpoint Tests.
 Tests POST /api/analytics/share for platform tracking.
 """
-import pytest
 
 
 class TestShareAnalytics:

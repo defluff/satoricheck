@@ -2,8 +2,6 @@
 Fact-Check Integration Tests.
 Tests API usage, token deduction, and rate limiting.
 """
-import pytest
-from unittest.mock import patch
 
 
 class TestFactCheck:

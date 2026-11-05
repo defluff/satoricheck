@@ -8,9 +8,6 @@ Simulates realistic, multi-step end-to-end user journeys across all Authenix cap
 5. Agent Vance — The Digital Forensics Investigator (Multimodal image, video temporal & audio deepfake forensics)
 """
 import io
-import json
-import pytest
-from unittest.mock import patch, MagicMock
 
 
 class TestPersonaUserJourneys:

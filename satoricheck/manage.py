@@ -12,7 +12,6 @@ Examples:
     python manage.py set-balance andy@hirschtalventures.com 5000
     python manage.py add-tokens andy@hirschtalventures.com 100
 """
-import sys
 import argparse
 from backend.server import app
 from backend.database import db_session

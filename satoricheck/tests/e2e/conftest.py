@@ -3,7 +3,7 @@ Playwright E2E Test Configuration.
 Provides fixtures for browser contexts, authentication, and test utilities.
 """
 import pytest
-from playwright.sync_api import Page, BrowserContext, expect
+from playwright.sync_api import Page, BrowserContext
 import os
 import sys
 

@@ -2,7 +2,6 @@
 E2E Tests: Billing & Checkout Flow
 Tests the revenue-critical path: Buy Tokens -> Stripe Checkout.
 """
-import pytest
 from playwright.sync_api import Page, expect
 import re
 

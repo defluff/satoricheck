@@ -1,7 +1,6 @@
 """
 Tests for Skill Optimizations, Register Calibration, Audio/Video Forensics, and Batch Verification.
 """
-import pytest
 from unittest.mock import patch, MagicMock
 from backend.services.gemini.utils import GeminiServiceUtils
 from backend.services.gemini.media import GeminiServiceMedia

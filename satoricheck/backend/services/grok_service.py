@@ -1,4 +1,4 @@
-from typing import Union, Optional, List, Dict, Any
+from typing import Optional
 """
 xAI Grok API service for social context in Smart Mode.
 Searches X/Twitter for quote sources and recent events.

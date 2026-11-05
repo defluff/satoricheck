@@ -2,7 +2,6 @@
 Grok Service Unit Tests.
 Tests trigger detection, sanitization, and API response parsing.
 """
-import pytest
 from unittest.mock import patch, MagicMock
 
 

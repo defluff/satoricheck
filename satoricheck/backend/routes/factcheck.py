@@ -14,7 +14,6 @@ from backend.routes.auth import login_required, scheduler_secret_required
 from backend.routes.tokens import reserve_word_tokens, refund_word_tokens
 from backend.error_handlers import APIError
 from backend.services import get_gemini_service
-from backend.config import Config
 from backend.extensions import limiter
 
 logger = logging.getLogger(__name__)

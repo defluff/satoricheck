@@ -2,7 +2,6 @@
 Test Agentic Loop Logic in GeminiService.
 Simulates multi-turn conversations and tool usage.
 """
-import pytest
 from unittest.mock import patch, MagicMock
 from backend.services.gemini_service import GeminiService
 

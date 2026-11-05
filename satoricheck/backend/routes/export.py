@@ -2,7 +2,7 @@
 Export routes.
 Handles data export functionality.
 """
-from flask import Blueprint, request, jsonify, make_response
+from flask import Blueprint, request, make_response
 import csv
 import io
 import json

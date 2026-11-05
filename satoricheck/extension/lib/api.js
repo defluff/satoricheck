@@ -7,7 +7,7 @@
  * @module api
  */
 
-import { getToken, saveToken, saveUserEmail, clearAuth } from './storage.js';
+import { getToken, saveToken, saveUserEmail } from './storage.js';
 import { fetchWithRetry } from './retry.js';
 
 /** Candidate backend origins (production, Cloud Run). */

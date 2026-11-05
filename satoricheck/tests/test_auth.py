@@ -2,8 +2,6 @@
 Authentication Integration Tests.
 Tests Signup, Login, Deleted User Prevention, and Token Security.
 """
-import pytest
-from unittest.mock import patch
 
 
 class TestSignup:

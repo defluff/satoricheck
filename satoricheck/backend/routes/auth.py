@@ -11,7 +11,6 @@ import logging
 from datetime import datetime, UTC
 import secrets
 import hashlib
-import json
 import re
 
 from backend.database import db_session
@@ -22,7 +21,7 @@ from backend.services.streak import handle_login_streak
 from backend.extensions import oauth, limiter
 from backend.jwt_utils import (
     create_token, verify_token, refresh_token_if_needed, set_jwt_cookie,
-    JWT_COOKIE_NAME, JWT_COOKIE_SECURE, JWT_COOKIE_HTTPONLY, JWT_COOKIE_SAMESITE
+    JWT_COOKIE_NAME
 )
 
 logger = logging.getLogger(__name__)

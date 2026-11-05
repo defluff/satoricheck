@@ -5,10 +5,7 @@ from datetime import datetime, UTC
 import json
 from flask import Response
 from backend.models import FactCheck, Transaction
-from backend.jwt_utils import (
-    set_jwt_cookie, JWT_COOKIE_NAME, JWT_COOKIE_HTTPONLY,
-    JWT_COOKIE_SECURE, JWT_COOKIE_SAMESITE
-)
+from backend.jwt_utils import set_jwt_cookie, JWT_COOKIE_NAME, JWT_COOKIE_SAMESITE
 
 
 class TestModelToDict:

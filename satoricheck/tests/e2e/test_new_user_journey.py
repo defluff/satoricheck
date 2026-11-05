@@ -2,7 +2,6 @@
 E2E Tests: New User Journey (Signup -> First Fact Check)
 Tests the critical path for user acquisition and first "Aha!" moment.
 """
-import pytest
 from playwright.sync_api import Page, expect
 import re
 

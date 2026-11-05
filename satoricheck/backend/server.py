@@ -2,13 +2,11 @@
 Authenix - Live Fact Checker Backend Server
 Clean, modular Flask application with robust error handling.
 """
-import os
 from flask import Flask, jsonify, send_from_directory, request, redirect
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 import logging
 import sys
-from datetime import datetime, UTC
 from sqlalchemy import text # For DB health check
 
 from backend.config import Config

@@ -13,8 +13,7 @@ import {
 import {
     getCurrentUser,
     syncWebAuthSession,
-    initiateGoogleLogin,
-    createCheckout
+    initiateGoogleLogin
 } from '../lib/api.js';
 
 // --- DOM Elements ---

@@ -4,7 +4,6 @@ Media authenticity analysis routes.
 from flask import Blueprint, request, jsonify
 import logging
 import time
-from datetime import datetime, UTC
 import json
 import re
 import mimetypes
@@ -14,7 +13,7 @@ from werkzeug.utils import secure_filename
 import tempfile
 
 from backend.database import db_session
-from backend.models import MediaCheck, TokenBalance
+from backend.models import MediaCheck
 from backend.routes.auth import login_required
 from backend.routes.tokens import reserve_flat_tokens, refund_flat_tokens
 from backend.error_handlers import APIError
