@@ -4,7 +4,7 @@
  * Responsibilities:
  *   - Register context menu item ("Verify with Authenix")
  *   - Route context menu selections to the side panel
- *   - Handle messages from popup, side panel, and content script
+ *   - Handle messages from popup and side panel
  *   - Restrict storage access to trusted contexts
  */
 
