@@ -14,8 +14,8 @@ Examples:
 """
 import argparse
 from backend.server import app
-from backend.database import db_session
-from backend.models import User, TokenBalance, Transaction
+from backend.database import db_session, cleanup_db
+from backend.models import User, TokenBalance, Transaction, Streak, FactCheck, MediaCheck
 
 def list_users():
     """List all users and their balances."""
@@ -97,14 +97,18 @@ def cleanup_users(keep_email):
             print(f"❌ User to keep not found: {keep_email}")
             return
             
-        # Delete others
-        deleted_count = db_session.query(User).filter(User.email != keep_email).delete()
-        
-        # Reset keeper's stats if needed, or just ensure they are clean. 
-        # For now, just deleting others.
+        # Delete dependent child rows for all other users to maintain referential integrity
+        users_to_delete = db_session.query(User).filter(User.email != keep_email).all()
+        for u in users_to_delete:
+            db_session.query(TokenBalance).filter_by(user_id=u.id).delete()
+            db_session.query(Streak).filter_by(user_id=u.id).delete()
+            db_session.query(Transaction).filter_by(user_id=u.id).delete()
+            db_session.query(FactCheck).filter_by(user_id=u.id).delete()
+            db_session.query(MediaCheck).filter_by(user_id=u.id).delete()
+            db_session.delete(u)
         
         db_session.commit()
-        print(f"✅ Deleted {deleted_count} users. Kept: {keep_email}")
+        print(f"✅ Deleted {len(users_to_delete)} users. Kept: {keep_email}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Authenix Admin CLI")
@@ -129,14 +133,17 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.command == 'list-users':
-        list_users()
-    elif args.command == 'set-balance':
-        set_balance(args.email, args.amount)
-    elif args.command == 'add-tokens':
-        add_tokens(args.email, args.amount)
-    elif args.command == 'cleanup-users':
-        cleanup_users(args.keep_email)
-    else:
-        parser.print_help()
+    try:
+        if args.command == 'list-users':
+            list_users()
+        elif args.command == 'set-balance':
+            set_balance(args.email, args.amount)
+        elif args.command == 'add-tokens':
+            add_tokens(args.email, args.amount)
+        elif args.command == 'cleanup-users':
+            cleanup_users(args.keep_email)
+        else:
+            parser.print_help()
+    finally:
+        cleanup_db()
 
