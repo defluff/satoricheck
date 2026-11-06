@@ -9,16 +9,6 @@ logger = logging.getLogger(__name__)
 class GeminiServiceClaims(GeminiServiceBatch):
     """Claim verification methods for GeminiService (Standard & Agentic loops)."""
 
-    def _analyze_claim_safe(self, text, smart_agent=False, cache_name=None):
-        """Thread-safe wrapper for analyze_claim.
-        Ensures database session is removed after execution.
-        """
-        try:
-            return self.analyze_claim(text, smart_agent, cache_name)
-        finally:
-            from backend.database import db_session
-            db_session.remove()
-
     def analyze_claim(self, text, smart_agent=False, cache_name=None):
         """Public entry point for claim analysis."""
         if smart_agent:

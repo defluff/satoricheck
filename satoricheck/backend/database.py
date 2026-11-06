@@ -142,15 +142,6 @@ def init_db():
     logger.info("✓ Database initialized")
 
 
-def get_db():
-    """Get database session for dependency injection."""
-    db = db_session()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
 def cleanup_db():
     """Clean up database connections."""
     db_session.remove()
