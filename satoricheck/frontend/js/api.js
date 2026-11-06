@@ -65,20 +65,6 @@ class APIClient {
 
     // --- AUTH ENDPOINTS ---
 
-    async signup(email, password) {
-        return this.request('/auth/signup', {
-            method: 'POST',
-            body: JSON.stringify({ email, password })
-        });
-    }
-
-    async login(email, password) {
-        return this.request('/auth/login', {
-            method: 'POST',
-            body: JSON.stringify({ email, password })
-        });
-    }
-
     async logout() {
         return this.request('/auth/logout', {
             method: 'POST'
@@ -89,24 +75,10 @@ class APIClient {
         return this.request('/auth/me');
     }
 
-    async changePassword(currentPassword, newPassword) {
-        return this.request('/auth/change-password', {
-            method: 'POST',
-            body: JSON.stringify({
-                current_password: currentPassword,
-                new_password: newPassword
-            })
-        });
-    }
-
     async deleteAccount() {
         return this.request('/auth/delete-account', {
             method: 'POST'
         });
-    }
-
-    async getExtensionToken() {
-        return this.request('/auth/extension-token');
     }
 
     // --- TOKEN & BILLING ENDPOINTS ---
@@ -124,12 +96,6 @@ class APIClient {
         return this.request('/billing/checkout', {
             method: 'POST',
             body: JSON.stringify({ package_type: packageType })
-        });
-    }
-
-    async createPortalSession() {
-        return this.request('/billing/portal', {
-            method: 'POST'
         });
     }
 
@@ -193,10 +159,6 @@ class APIClient {
             method: 'POST',
             body: JSON.stringify({ text })
         });
-    }
-
-    async getFactCheckHistory(limit = 50) {
-        return this.request(`/factcheck/history?limit=${limit}`);
     }
 
     // --- AI DETECTION ENDPOINTS ---

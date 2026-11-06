@@ -342,10 +342,6 @@ class App {
         console.log(`[App] Switched to ${view} view`);
     }
 
-    setupMediaView() {
-        // Delegated to media module (media.js)
-    }
-
     async handlePurchase(packageType) {
         try {
             ui.showToast('Redirecting to checkout...', 'info');

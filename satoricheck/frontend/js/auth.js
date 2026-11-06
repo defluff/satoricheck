@@ -9,7 +9,6 @@ import ui from './ui.js';
 class AuthManager {
     constructor() {
         this.currentUser = null;
-        this.isLogin = true;
     }
 
     /**
@@ -117,28 +116,6 @@ class AuthManager {
             deleteAccountBtn.addEventListener('click', async () => {
                 await this.handleDeleteAccount();
             });
-        }
-    }
-
-    async handleAuth() {
-        const email = document.getElementById('auth-email').value;
-        const password = document.getElementById('auth-password').value;
-
-        try {
-            let response;
-            if (this.isLogin) {
-                response = await api.login(email, password);
-            } else {
-                response = await api.signup(email, password);
-            }
-
-            this.currentUser = response.user;
-            ui.hideModal('auth-modal');
-            ui.showToast(response.message, 'success');
-
-            this.onAuthSuccess();
-        } catch (error) {
-            ui.showToast(error.message, 'error');
         }
     }
 

@@ -73,10 +73,6 @@ class UIManager {
         this.modal.hideModal(modalId);
     }
 
-    setAuthMode(isLogin) {
-        this.modal.setAuthMode(isLogin);
-    }
-
     showTestModeBanner() {
         this.modal.showTestModeBanner();
     }
