@@ -152,63 +152,6 @@ def get_balance():
     })
 
 
-@tokens_bp.route('/deduct', methods=['POST'])
-@login_required
-@limiter.limit("20 per minute")
-def deduct_tokens():
-    """Deduct tokens from user balance."""
-    user = request.current_user
-    logger.info(f"Token deduction request from user {user.email}")
-    try:
-        data = request.get_json()
-        
-        if not data:
-            raise APIError('No data provided')
-        
-        amount = data.get('amount')
-        description = data.get('description', 'Fact check')
-        
-        if not amount or amount <= 0:
-            raise APIError('Invalid amount')
-        
-        user = request.current_user
-        
-        # Get token balance
-        token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
-        if not token_balance or token_balance.balance < amount:
-            raise APIError('Insufficient token balance', status_code=403)
-        
-        # Deduct tokens
-        token_balance.balance -= amount
-        token_balance.last_updated = datetime.now(UTC)
-        
-        # Record transaction
-        transaction = Transaction(
-            user_id=user.id,
-            type='deduction',
-            amount=-amount,
-            description=description,
-            timestamp=datetime.now(UTC)
-        )
-        db_session.add(transaction)
-        
-        db_session.commit()
-        
-        logger.info(f"Deducted {amount} CP from user {user.email}. New balance: {token_balance.balance}")
-        
-        return jsonify({
-            'success': True,
-            'new_balance': token_balance.balance,
-            'amount_deducted': amount
-        })
-        
-    except APIError:
-        raise
-    except Exception as e:
-        logger.error(f"Token deduction error: {e}", exc_info=True)
-        raise APIError('Failed to deduct tokens')
-
-
 @tokens_bp.route('/history', methods=['GET'])
 @login_required
 def get_transaction_history():
