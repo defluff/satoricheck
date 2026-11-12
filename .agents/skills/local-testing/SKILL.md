@@ -86,3 +86,16 @@ From the `satoricheck/` directory:
 
 > ⚠️ **Never use `@test.com`, `@fake.com`, or unreserved domains in tests.**
 
+---
+
+## 7. Test Integrity & Wire-Only Mocking Patterns
+
+All unit/integration tests run under two mechanical gates in `satoricheck/tests/`:
+- `block_external_network` (`conftest.py`): Autouse socket guard that fails any test attempting non-loopback DNS or TCP connections.
+- `test_suite_integrity.py`: AST gate rejecting `assert True`, permissive `assert a or b`, `status_code in [...]`, assertion-free `test_*` functions, and mocks of local validators (`stripe.Webhook.construct_event`, `_is_private_ip`).
+
+### Standard Fixture Recipes (`conftest.py`)
+- **Gemini SDK Wire Mock (`mock_gemini`)**: Patches `get_gemini_service().client.models.generate_content` with a real `google.genai.types.GenerateContentResponse` so internal parsing, schema validation, and `_is_private_ip` SSRF checks execute unmocked.
+- **Real HMAC Stripe Webhooks (`mock_stripe_webhook_payload`)**: Returns `(body_bytes, sig_header)` signed with `whsec_test_fake` so `/api/billing/webhook` executes real `stripe.Webhook.construct_event` verification and `StripeObject` parsing.
+
+

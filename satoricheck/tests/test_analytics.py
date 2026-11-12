@@ -89,23 +89,16 @@ class TestShareAnalyticsEdgeCases:
         assert response_upper.status_code == 200  # Accept uppercase
     
     def test_share_no_content_stored(self, auth_client, db_session_fixture):
-        """Verify no content is stored, only platform."""
-        # NOTE: We check existing records since rate limit may be hit
-        # The previous tests already created records
+        """Verify no content or user_id is stored on ShareStats, only platform and timestamp."""
         from backend.models import ShareStats
         
-        # Get any existing record
-        record = db_session_fixture.query(ShareStats).first()
+        response = auth_client.post('/api/analytics/share', json={'platform': 'X'})
+        assert response.status_code == 200
         
-        if record:
-            # Verify no user_id or content fields exist on model
-            assert hasattr(record, 'platform')
-            assert hasattr(record, 'created_at')
-            # These fields should NOT exist (privacy-first design)
-            assert not hasattr(record, 'user_id') or getattr(record, 'user_id', None) is None
-            assert not hasattr(record, 'claim')
-            assert not hasattr(record, 'verdict')
-            assert not hasattr(record, 'content')
-        else:
-            # If no records, previous tests didn't run - that's ok for this check
-            pass
+        record = db_session_fixture.query(ShareStats).one()
+        assert record.platform == 'X'
+        assert record.created_at is not None
+        assert not hasattr(record, 'user_id')
+        assert not hasattr(record, 'claim')
+        assert not hasattr(record, 'verdict')
+        assert not hasattr(record, 'content')

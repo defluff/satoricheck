@@ -48,7 +48,7 @@ class TestStripeWebhook:
     """Test Stripe webhook fulfillment."""
     
     def test_webhook_fulfills_order(self, client, test_user, db_session_fixture, mock_stripe_webhook_payload):
-        """Stripe webhook should add tokens to user balance."""
+        """Stripe webhook should verify real HMAC signature and add tokens to user balance."""
         from backend.models import TokenBalance, Transaction
         
         # Get initial balance
@@ -56,24 +56,18 @@ class TestStripeWebhook:
             user_id=test_user.id
         ).first().balance
         
-        # Mock Stripe signature verification
-        with patch('stripe.Webhook.construct_event') as mock_construct:
-            event = mock_stripe_webhook_payload(
-                user_id=test_user.id,
-                package_type='battery_small',
-                tokens=86,
-                session_id='cs_test_unique_123'
-            )
-            mock_construct.return_value = event
-            
-            # The raw body is irrelevant — construct_event is mocked.
-            # Pass a stub so json.dumps doesn't need to serialize StripeObjects.
-            response = client.post(
-                '/api/billing/webhook',
-                data=b'{"stub": true}',
-                content_type='application/json',
-                headers={'Stripe-Signature': 'test_sig'}
-            )
+        body, sig_header = mock_stripe_webhook_payload(
+            user_id=test_user.id,
+            package_type='battery_small',
+            tokens=86,
+            session_id='cs_test_unique_123'
+        )
+        response = client.post(
+            '/api/billing/webhook',
+            data=body,
+            content_type='application/json',
+            headers={'Stripe-Signature': sig_header}
+        )
         
         assert response.status_code == 200
         
@@ -94,27 +88,26 @@ class TestStripeWebhook:
         assert transaction.user_id == test_user.id
     
     def test_webhook_idempotency(self, client, test_user, db_session_fixture, mock_stripe_webhook_payload):
-        """Same webhook sent twice should only credit once."""
+        """Same signed webhook sent twice should only credit once."""
         from backend.models import TokenBalance
         
         initial_balance = db_session_fixture.query(TokenBalance).filter_by(
             user_id=test_user.id
         ).first().balance
         
-        event = mock_stripe_webhook_payload(
+        body, sig_header = mock_stripe_webhook_payload(
             user_id=test_user.id,
             tokens=100,
             session_id='cs_test_duplicate_456'
         )
         
-        # Raw body is irrelevant — construct_event is mocked.
-        stub_body = b'{"stub": true}'
-        with patch('stripe.Webhook.construct_event', return_value=event):
-            # Send webhook twice
-            client.post('/api/billing/webhook', data=stub_body,
-                       content_type='application/json', headers={'Stripe-Signature': 'sig'})
-            client.post('/api/billing/webhook', data=stub_body,
-                       content_type='application/json', headers={'Stripe-Signature': 'sig'})
+        # Send identical signed webhook twice
+        resp1 = client.post('/api/billing/webhook', data=body,
+                            content_type='application/json', headers={'Stripe-Signature': sig_header})
+        resp2 = client.post('/api/billing/webhook', data=body,
+                            content_type='application/json', headers={'Stripe-Signature': sig_header})
+        assert resp1.status_code == 200
+        assert resp2.status_code == 200
         
         # Should only add 100 once, not 200
         final_balance = db_session_fixture.query(TokenBalance).filter_by(

@@ -163,7 +163,7 @@ def test_user(app, db_session_fixture):
     import bcrypt
     import secrets
     
-    password_hash = bcrypt.hashpw(b'testpass123', bcrypt.gensalt())
+    password_hash = bcrypt.hashpw(b'testpass123', bcrypt.gensalt(rounds=4))
     
     user = User(
         email='test@example.com',
@@ -200,44 +200,87 @@ def auth_client(client, test_user):
 
 @pytest.fixture
 def mock_gemini(mocker):
-    """Mock Gemini API responses."""
-    mock_response = {
+    """Mock Gemini SDK wire boundary (`models.generate_content`) with typed SDK response."""
+    import json
+    from unittest.mock import MagicMock
+    from google.genai import types
+    from backend.services import get_gemini_service
+
+    mock_payload = {
         'is_claim': True,
         'verdict': 'TRUE',
         'explanation': 'Test explanation',
         'fallacy': None,
         'sources': ['https://example.com'],
-        'source_reliability': 'HIGH'
+        'source_reliability': 'HIGH',
     }
-    
-    mocker.patch(
-        'backend.services.gemini_service.GeminiService.analyze_claim',
-        return_value=mock_response
+    sdk_response = types.GenerateContentResponse(
+        candidates=[
+            types.Candidate(
+                content=types.Content(
+                    role='model',
+                    parts=[types.Part.from_text(text=json.dumps(mock_payload))],
+                )
+            )
+        ]
     )
-    return mock_response
+
+    svc = get_gemini_service()
+    mocker.patch.object(svc.client.models, 'generate_content', return_value=sdk_response)
+
+    # Wire-level DNS + HEAD mocks for source reachability check so _validate_url
+    # and _is_private_ip execute their real SSRF validation in memory.
+    prev_getaddrinfo = socket.getaddrinfo
+
+    def _resolve_example_com(host, port, *args, **kwargs):
+        if host == 'example.com':
+            return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('93.184.216.34', port or 443))]
+        return prev_getaddrinfo(host, port, *args, **kwargs)
+
+    mocker.patch.object(socket, 'getaddrinfo', side_effect=_resolve_example_com)
+    mocker.patch(
+        'backend.services.gemini.client.requests.head',
+        return_value=MagicMock(status_code=200, headers={}),
+    )
+    return mock_payload
 
 
 @pytest.fixture
 def mock_stripe_webhook_payload():
-    """Generate mock Stripe webhook payload simulating stripe-python v15+."""
-    from types import SimpleNamespace
+    """Build a raw Stripe webhook JSON payload and real HMAC-SHA256 Stripe-Signature header."""
+    import hashlib
+    import hmac
+    import json
+    import time
 
-    def _generate(user_id, package_type='battery_small', tokens=86, session_id='cs_test_123'):
-        # The 'object' is now a SimpleNamespace for dot-notation access
-        obj = SimpleNamespace(
-            id=session_id,
-            customer='cus_test_123',
-            metadata={
-                'user_id': str(user_id),
-                'package_type': package_type,
-                'tokens': str(tokens)
-            }
-        )
-        # Top level is still a dict
-        return {
+    def _generate(
+        user_id,
+        package_type='battery_small',
+        tokens=86,
+        session_id='cs_test_123',
+        secret='whsec_test_fake',
+        timestamp=None,
+    ) -> tuple[bytes, str]:
+        payload_str = json.dumps({
+            'id': f'evt_{session_id}',
+            'object': 'event',
             'type': 'checkout.session.completed',
             'data': {
-                'object': obj
-            }
-        }
+                'object': {
+                    'id': session_id,
+                    'object': 'checkout.session',
+                    'customer': 'cus_test_123',
+                    'metadata': {
+                        'user_id': str(user_id),
+                        'package_type': package_type,
+                        'tokens': str(tokens),
+                    },
+                }
+            },
+        })
+        ts = timestamp if timestamp is not None else int(time.time())
+        signed_payload = f'{ts}.{payload_str}'.encode('utf-8')
+        signature = hmac.new(secret.encode('utf-8'), signed_payload, hashlib.sha256).hexdigest()
+        return payload_str.encode('utf-8'), f't={ts},v1={signature}'
+
     return _generate

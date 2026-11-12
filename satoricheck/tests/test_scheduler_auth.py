@@ -58,7 +58,7 @@ class TestSchedulerSecretProductionGuard:
                 patch.object(Config, 'SECRET_KEY', 'x'), \
                 patch.object(Config, 'GEMINI_API_KEY', 'x'), \
                 patch.object(Config, 'STRIPE_SECRET_KEY', 'x'):
-            Config.validate()
+            return Config.validate()
 
     def test_production_without_scheduler_secret_fails_startup(self):
         with patch.dict(os.environ):
@@ -67,7 +67,7 @@ class TestSchedulerSecretProductionGuard:
                 self._validate_in_production({})
 
     def test_production_with_scheduler_secret_passes(self):
-        self._validate_in_production({'SCHEDULER_SECRET': 'configured'})
+        assert self._validate_in_production({'SCHEDULER_SECRET': 'configured'}) is None
 
     def test_non_production_does_not_require_scheduler_secret(self):
         with patch.dict(os.environ):
@@ -77,4 +77,4 @@ class TestSchedulerSecretProductionGuard:
                     patch.object(Config, 'SECRET_KEY', 'x'), \
                     patch.object(Config, 'GEMINI_API_KEY', 'x'), \
                     patch.object(Config, 'STRIPE_SECRET_KEY', 'x'):
-                Config.validate()
+                assert Config.validate() is None

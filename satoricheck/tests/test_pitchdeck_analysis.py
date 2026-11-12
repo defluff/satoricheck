@@ -136,7 +136,7 @@ class TestPitchdeckServiceAnalyzePDF:
         with pytest.raises(ValueError) as exc_info:
             service.analyze_pitch_deck(b'')
         
-        assert 'PDF data is required' in str(exc_info.value) or 'empty' in str(exc_info.value).lower()
+        assert 'PDF data is required - file is empty' in str(exc_info.value)
 
     # =========================================================================
     # INVALID INPUT TESTS
@@ -156,7 +156,7 @@ class TestPitchdeckServiceAnalyzePDF:
         with pytest.raises(ValueError) as exc_info:
             service.analyze_pitch_deck(not_a_pdf)
         
-        assert 'Invalid PDF' in str(exc_info.value) or 'not a valid PDF' in str(exc_info.value).lower()
+        assert 'Invalid PDF - not a valid PDF file' in str(exc_info.value)
 
     def test_analyze_pdf_rejects_oversized_file(self, app):
         """
@@ -174,7 +174,7 @@ class TestPitchdeckServiceAnalyzePDF:
         with pytest.raises(ValueError) as exc_info:
             service.analyze_pitch_deck(oversized_data)
         
-        assert 'too large' in str(exc_info.value).lower() or 'size' in str(exc_info.value).lower()
+        assert 'too large' in str(exc_info.value).lower()
 
     def test_analyze_pdf_rejects_corrupted_pdf(self, app):
         """
@@ -215,13 +215,13 @@ class TestPitchdeckServiceAnalyzePDF:
             with pytest.raises(TimeoutError) as exc_info:
                 service.analyze_pitch_deck(pdf_bytes)
             
-            assert 'timed out' in str(exc_info.value).lower() or 'timeout' in str(exc_info.value).lower()
+            assert 'timed out' in str(exc_info.value).lower()
 
     def test_analyze_pdf_handles_rate_limit(self, app):
         """
         Given: Gemini API returns 429 rate limit
         When: analyze_pitch_deck() is called
-        Then: Raises RateLimitError or returns graceful fallback
+        Then: Raises Exception indicating rate limit reached
         """
         from backend.services.pitchdeck_service import PitchdeckService
         import requests
@@ -235,19 +235,14 @@ class TestPitchdeckServiceAnalyzePDF:
             error = requests.exceptions.HTTPError(response=mock_response)
             mock_gemini.side_effect = error
             
-            # Should either raise or return fallback
-            try:
-                result = service.analyze_pitch_deck(pdf_bytes)
-                # If it returns, should indicate rate limit
-                assert 'error' in result or result.get('status') == 'rate_limited'
-            except Exception as e:
-                assert 'rate' in str(e).lower() or '429' in str(e)
+            with pytest.raises(Exception, match='Rate limit reached'):
+                service.analyze_pitch_deck(pdf_bytes)
 
     def test_analyze_pdf_handles_server_error(self, app):
         """
         Given: Gemini API returns 500 server error
         When: analyze_pitch_deck() is called
-        Then: Raises ServiceUnavailableError with retry hint
+        Then: Raises Exception with service unavailable hint
         """
         from backend.services.pitchdeck_service import PitchdeckService
         import requests
@@ -264,13 +259,13 @@ class TestPitchdeckServiceAnalyzePDF:
             with pytest.raises(Exception) as exc_info:
                 service.analyze_pitch_deck(pdf_bytes)
             
-            assert 'unavailable' in str(exc_info.value).lower() or 'server' in str(exc_info.value).lower()
+            assert 'unavailable' in str(exc_info.value).lower()
 
     def test_analyze_pdf_handles_malformed_response(self, app):
         """
         Given: Gemini returns non-JSON or malformed response
         When: analyze_pitch_deck() is called
-        Then: Returns graceful fallback with error indication
+        Then: Raises ValueError indicating failed response parsing
         """
         from backend.services.pitchdeck_service import PitchdeckService
         
@@ -287,14 +282,8 @@ class TestPitchdeckServiceAnalyzePDF:
                 }]
             }
             
-            # Should handle gracefully, not crash
-            try:
-                result = service.analyze_pitch_deck(pdf_bytes)
-                # If it returns, should indicate parsing error
-                assert result is None or 'error' in result
-            except ValueError as e:
-                # ValueError for parsing is acceptable
-                assert 'parse' in str(e).lower() or 'json' in str(e).lower()
+            with pytest.raises(ValueError, match='Failed to parse analysis response'):
+                service.analyze_pitch_deck(pdf_bytes)
 
     # =========================================================================
     # OUTPUT SANITIZATION TESTS
@@ -486,7 +475,7 @@ class TestPitchdeckServiceAnalyzePDF:
 
             assert result is not None
             assert result['company_name'] == 'NoCorp'
-            assert result.get('vc_metrics') is None or 'vc_metrics' not in result
+            assert 'vc_metrics' not in result
 
     def test_analyze_pdf_sanitizes_vc_metrics_detail(self, app):
         """
@@ -641,13 +630,16 @@ startxref
 
     def test_endpoint_rate_limited(self, auth_client):
         """
-        Given: Too many requests in short period
+        Given: Too many requests in short period (>10 per hour)
         When: Multiple POST /api/pitchdeck/analyze
-        Then: Eventually returns 429 Too Many Requests
+        Then: 11th request returns 429 Too Many Requests
         """
-        # Note: Actual rate limit testing depends on Flask-Limiter config
-        # This test verifies the endpoint exists and handles load
-        pass  # Rate limit testing is complex with test client
+        for _ in range(10):
+            resp = auth_client.post('/api/pitchdeck/analyze', json={})
+            assert resp.status_code == 400
+
+        throttled = auth_client.post('/api/pitchdeck/analyze', json={})
+        assert throttled.status_code == 429
 
 
 class TestPitchdeckServiceVisionCall:
@@ -753,7 +745,7 @@ startxref
 
         assert '<pitchdeck_data_boundary>' in user_prompt
         assert '</pitchdeck_data_boundary>' in user_prompt
-        assert 'passive data' in user_prompt.lower() or 'passive data' in system_instruction.lower()
+        assert 'passive data' in user_prompt.lower()
 
     def test_analyze_pdf_extracts_visual_table_and_clinical_claims(self, app):
         """

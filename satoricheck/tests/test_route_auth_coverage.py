@@ -85,7 +85,7 @@ def test_user_protected_routes_were_discovered():
 @pytest.mark.parametrize('rule,method,endpoint', USER_PROTECTED, ids=_ids(USER_PROTECTED))
 def test_user_protected_route_rejects_unauthenticated_request(client, rule, method, endpoint):
     response = client.open(rule, method=method, json={})
-    assert response.status_code in (401, 403), (
+    assert response.status_code == 401, (
         f'{method} {rule} ({endpoint}) answered {response.status_code} to an unauthenticated '
         'request. Add @login_required, or declare the route in an allowlist category.'
     )
@@ -100,6 +100,6 @@ def test_scheduler_route_rejects_missing_secret(client, rule, method, endpoint):
 @pytest.mark.parametrize('rule,method,endpoint', WEBHOOK_ROUTES, ids=_ids(WEBHOOK_ROUTES))
 def test_webhook_route_rejects_unsigned_request(client, rule, method, endpoint):
     response = client.open(rule, method=method, json={'type': 'checkout.session.completed'})
-    assert response.status_code in (400, 401, 403), (
+    assert response.status_code == 400, (
         f'{endpoint} accepted an unsigned payload with {response.status_code}'
     )

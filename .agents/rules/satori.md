@@ -50,3 +50,8 @@ trigger: always_on
 - **Python Environment**: Always use the virtual environment at repo root (`.venv/bin/python`, `.venv/bin/pytest`).
 - **Test Personas**: `test@authenix.ai` is reserved for local `TEST_MODE=true`. Unit tests use `@example.com` (RFC 2606).
 - **Regression Testing**: Run `pytest tests/ --ignore=tests/e2e` before completing backend tasks.
+- **Test Integrity Invariants** (enforced mechanically by `tests/conftest.py` and `tests/test_suite_integrity.py`):
+  1. **Wire-Only Mocking**: Mock only public external SDK/network boundaries (`client.models.generate_content`, `stripe.checkout.Session.create`, `requests.post` to xAI). Never mock DB sessions, route helpers, or local crypto/SSRF validators (`stripe.Webhook.construct_event`, JWT decode, `_is_private_ip`).
+  2. **Exact Assertions**: Assert exact HTTP status codes and payload fields. Never use `status_code in [...]`, `assert True`, `or True`, or permissive `assert a or b`.
+  3. **Triple State Verification**: For any mutating endpoint/service test, assert (a) exact HTTP status and payload, (b) persisted `db_session` state (`TokenBalance`, created/deleted rows), and (c) external SDK call arguments.
+  4. **Break-to-Verify**: Prove mutation resistance by temporarily inverting the guarded business logic to confirm the test fails with `AssertionError`, then restore and verify a clean working tree via `git diff`.

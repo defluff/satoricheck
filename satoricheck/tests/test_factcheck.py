@@ -50,13 +50,16 @@ class TestFactCheck:
     def test_factcheck_no_balance_rejected(self, auth_client, test_user, db_session_fixture, mocker):
         """User with 0 CP must be rejected with 403 before calling Gemini."""
         from backend.models import FactCheck, TokenBalance
+        from backend.services import get_gemini_service
         
         tb = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).first()
         tb.balance = 0
         tb.unbilled_words = 0
         db_session_fixture.commit()
         
-        mock_analyze = mocker.patch('backend.services.gemini_service.GeminiService.analyze_claim')
+        mock_generate = mocker.patch.object(
+            get_gemini_service().client.models, 'generate_content'
+        )
         long_text = "word " * 2000  # 2000 words costs 1 CP
         
         response = auth_client.post('/api/factcheck/analyze', json={
@@ -65,7 +68,7 @@ class TestFactCheck:
         
         assert response.status_code == 403
         assert 'Insufficient tokens' in response.get_json()['error']
-        mock_analyze.assert_not_called()
+        mock_generate.assert_not_called()
         assert db_session_fixture.query(FactCheck).filter_by(user_id=test_user.id).count() == 0
 
 

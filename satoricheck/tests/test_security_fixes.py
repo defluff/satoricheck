@@ -613,6 +613,7 @@ class TestMultiInstanceHardening:
              patch.object(db_mod.engine, 'begin', return_value=mock_ctx):
             # Should complete cleanly without raising OperationalError
             db_mod._apply_migrations()
+            assert mock_conn.execute.call_count == 4
 
     def test_normalize_database_url_maps_postgresql_to_psycopg2_driver(self):
         """Bare postgresql:// and postgres:// URLs must resolve to psycopg2 under SQLAlchemy 2.1+."""
