@@ -2,8 +2,10 @@
 Pytest configuration and fixtures for Authenix integration tests.
 Uses isolated SQLite database and mocked external services.
 """
+import ipaddress
 import pytest
 import os
+import socket
 import sys
 
 # Ensure backend is importable
@@ -18,6 +20,100 @@ os.environ['GEMINI_API_KEY'] = 'test-gemini-key'
 os.environ['STRIPE_SECRET_KEY'] = 'sk_test_fake'
 os.environ['STRIPE_WEBHOOK_SECRET'] = 'whsec_test_fake'
 os.environ['SCHEDULER_SECRET'] = 'test-scheduler-secret-for-tests'
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        'markers',
+        'live: test talks to a real external API; exempt from the network guard',
+    )
+
+
+class ExternalNetworkBlocked(RuntimeError):
+    """Raised when a unit test attempts a non-loopback network connection."""
+
+
+def _normalize_host(host):
+    return host.decode() if isinstance(host, bytes) else host
+
+
+def _is_ip_literal(host) -> bool:
+    try:
+        ipaddress.ip_address(_normalize_host(host))
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_loopback(host) -> bool:
+    host = _normalize_host(host)
+    if host is None or host == 'localhost':
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+@pytest.fixture(autouse=True)
+def block_external_network(request, monkeypatch):
+    """Fail any unit test that reaches a non-loopback host.
+
+    Why: an unmocked Gemini/Stripe/Grok path otherwise hits the real API with the fake
+    key, and the route's broad `except Exception` turns that into a 503 that a lenient
+    assertion can accept as a pass. Raising alone is not enough for the same reason,
+    so attempts are also recorded and the test is failed at teardown.
+
+    Exempt: tests marked `@pytest.mark.live` and the Playwright suite in tests/e2e.
+    """
+    if request.node.get_closest_marker('live') or 'e2e' in request.node.path.parts:
+        yield
+        return
+
+    attempts = []
+    real_connect = socket.socket.connect
+    real_connect_ex = socket.socket.connect_ex
+    real_getaddrinfo = socket.getaddrinfo
+
+    def _deny(target):
+        attempts.append(target)
+        raise ExternalNetworkBlocked(
+            f'Unit test attempted a real network call to {target!r}. '
+            'Mock the external boundary or mark the test @pytest.mark.live.'
+        )
+
+    def _target_host(sock, address):
+        # AF_UNIX addresses are filesystem paths, not hosts.
+        return None if sock.family == getattr(socket, 'AF_UNIX', None) else address[0]
+
+    def guarded_connect(sock, address):
+        if not _is_loopback(_target_host(sock, address)):
+            _deny(address)
+        return real_connect(sock, address)
+
+    def guarded_connect_ex(sock, address):
+        if not _is_loopback(_target_host(sock, address)):
+            _deny(address)
+        return real_connect_ex(sock, address)
+
+    def guarded_getaddrinfo(host, *args, **kwargs):
+        # Resolving an IP literal performs no DNS lookup, so only hostnames are
+        # gated here; connecting to a non-loopback IP is still blocked above.
+        if not (_is_loopback(host) or _is_ip_literal(host)):
+            _deny(host)
+        return real_getaddrinfo(host, *args, **kwargs)
+
+    monkeypatch.setattr(socket.socket, 'connect', guarded_connect)
+    monkeypatch.setattr(socket.socket, 'connect_ex', guarded_connect_ex)
+    monkeypatch.setattr(socket, 'getaddrinfo', guarded_getaddrinfo)
+
+    yield
+
+    if attempts:
+        pytest.fail(
+            f'Blocked {len(attempts)} external network attempt(s): {attempts[:3]}',
+            pytrace=False,
+        )
 
 
 @pytest.fixture(scope='function')

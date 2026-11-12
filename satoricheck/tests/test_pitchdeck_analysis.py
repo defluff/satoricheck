@@ -16,6 +16,12 @@ import base64
 import json
 
 
+@pytest.fixture(autouse=True)
+def disable_live_genai_client(monkeypatch):
+    """Prevent PitchdeckService unit tests from initializing a live genai.Client."""
+    monkeypatch.setattr('backend.services.gemini.client.genai.Client', lambda *a, **kw: None)
+
+
 class TestPitchdeckServiceAnalyzePDF:
     """Unit tests for PitchdeckService.analyze_pitch_deck()."""
 
@@ -92,12 +98,11 @@ class TestPitchdeckServiceAnalyzePDF:
             
             result = service.analyze_pitch_deck(pdf_bytes)
             
-            # Core fields are required
-            assert 'company_name' in result
-            assert 'summary' in result
-            assert 'usp' in result
-            # Extended fields may be present
-            assert 'market_size' in result or True  # Optional
+            # Core and extended fields are extracted
+            assert result['company_name'] == 'TechCorp'
+            assert result['summary'] == 'AI-powered analytics platform.'
+            assert result['usp'] == 'Real-time insights with 99.9% accuracy.'
+            assert result['market_size'] == '$100B by 2030'
 
     # =========================================================================
     # NULL AND EMPTY INPUT TESTS
@@ -173,26 +178,20 @@ class TestPitchdeckServiceAnalyzePDF:
 
     def test_analyze_pdf_rejects_corrupted_pdf(self, app):
         """
-        Given: A file with PDF header but corrupted content
-        When: analyze_pitch_deck() is called  
-        Then: Raises ValueError or handles gracefully
+        Given: A file with PDF header but corrupted content that Gemini cannot parse
+        When: analyze_pitch_deck() is called
+        Then: Retries and raises the upstream parse exception
         """
         from backend.services.pitchdeck_service import PitchdeckService
         
         service = PitchdeckService()
-        
-        # PDF header but garbage content
         corrupted_pdf = b'%PDF-1.4\ngarbage data that is not valid PDF structure'
         
-        # Should either raise ValueError or handle gracefully
-        # Implementation may choose to let Gemini handle it
-        try:
-            with patch.object(service, '_call_gemini_vision') as mock_gemini:
-                mock_gemini.side_effect = Exception('Unable to parse document')
+        with patch.object(service, '_call_gemini_vision') as mock_gemini:
+            mock_gemini.side_effect = Exception('Unable to parse document')
+            with pytest.raises(Exception, match='Unable to parse document'):
                 service.analyze_pitch_deck(corrupted_pdf)
-        except (ValueError, Exception) as e:
-            # Either explicit validation or Gemini error is acceptable
-            assert True
+            assert mock_gemini.call_count == 2
 
     # =========================================================================
     # TIMEOUT AND API ERROR TESTS
@@ -584,7 +583,7 @@ class TestPitchdeckAPIEndpoint:
         assert response.status_code == 400
         
         data = response.get_json()
-        assert 'error' in data or 'message' in data
+        assert 'error' in data
 
     def test_endpoint_rejects_invalid_base64(self, auth_client):
         """

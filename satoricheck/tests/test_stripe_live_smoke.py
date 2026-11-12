@@ -15,10 +15,13 @@ from backend.config import Config
 
 SMOKE_STRIPE_KEY = os.getenv('STRIPE_SMOKE_API_KEY')
 
-pytestmark = pytest.mark.skipif(
-    not SMOKE_STRIPE_KEY,
-    reason="Set STRIPE_SMOKE_API_KEY=<real key> to run live Stripe API smoke tests",
-)
+pytestmark = [
+    pytest.mark.live,
+    pytest.mark.skipif(
+        not SMOKE_STRIPE_KEY,
+        reason="Set STRIPE_SMOKE_API_KEY=<real key> to run live Stripe API smoke tests",
+    ),
+]
 
 
 @pytest.mark.parametrize("pkg_id", list(Config.TOKEN_PACKAGES.keys()))

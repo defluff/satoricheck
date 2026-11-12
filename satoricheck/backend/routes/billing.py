@@ -261,9 +261,10 @@ def stripe_webhook():
         if event['type'] == 'checkout.session.completed':
             session = event['data']['object']
             
-            # Extract metadata — use attribute access (stripe-python v15: StripeObject no
-            # longer inherits from dict, so .get() / ['key'] raise AttributeError).
-            metadata = getattr(session, 'metadata', None) or {}
+            # Extract metadata — convert StripeObject to dict (stripe-python v15+:
+            # StripeObject no longer inherits from dict, so .get() raises AttributeError).
+            raw_metadata = getattr(session, 'metadata', None)
+            metadata = raw_metadata.to_dict() if hasattr(raw_metadata, 'to_dict') else (raw_metadata or {})
             if metadata and 'user_id' in metadata:
                 user_id = int(metadata['user_id'])
                 package_type = metadata.get('package_type')

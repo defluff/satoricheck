@@ -2,10 +2,46 @@
 Billing & Stripe Integration Tests.
 Tests Payment Flow, Checkout Session Creation, Webhook Handling, Idempotency, and Portal.
 """
+import hashlib
+import hmac
+import json
+import time
 import pytest
 from unittest.mock import patch, MagicMock
 import stripe
 from backend.config import Config
+
+
+def _build_signed_webhook_request(
+    user_id: int,
+    secret: str,
+    package_type: str = 'battery_small',
+    tokens: int = 86,
+    session_id: str = 'cs_test_hmac_123',
+    timestamp: int | None = None,
+) -> tuple[bytes, str]:
+    """Build a raw Stripe webhook JSON payload and HMAC-SHA256 Stripe-Signature header."""
+    payload_str = json.dumps({
+        'id': f'evt_{session_id}',
+        'object': 'event',
+        'type': 'checkout.session.completed',
+        'data': {
+            'object': {
+                'id': session_id,
+                'object': 'checkout.session',
+                'customer': 'cus_test_hmac_123',
+                'metadata': {
+                    'user_id': str(user_id),
+                    'package_type': package_type,
+                    'tokens': str(tokens),
+                },
+            }
+        },
+    })
+    ts = timestamp if timestamp is not None else int(time.time())
+    signed_payload = f'{ts}.{payload_str}'.encode('utf-8')
+    signature = hmac.new(secret.encode('utf-8'), signed_payload, hashlib.sha256).hexdigest()
+    return payload_str.encode('utf-8'), f't={ts},v1={signature}'
 
 
 class TestStripeWebhook:
@@ -86,6 +122,94 @@ class TestStripeWebhook:
         ).first().balance
         
         assert final_balance == initial_balance + 100
+
+    def test_webhook_rejects_forged_hmac_signature(self, client, test_user, db_session_fixture):
+        """Webhook signed with a wrong secret or tampered payload must be rejected with 400 and credit 0 tokens."""
+        from backend.models import TokenBalance, Transaction
+
+        initial_balance = db_session_fixture.query(TokenBalance).filter_by(
+            user_id=test_user.id
+        ).first().balance
+
+        # 1. Payload signed with a forged secret instead of whsec_test_fake
+        forged_body, forged_sig = _build_signed_webhook_request(
+            user_id=test_user.id,
+            secret='whsec_forged_attacker_secret',
+            tokens=500,
+            session_id='cs_forged_sig_001',
+        )
+        resp_forged = client.post(
+            '/api/billing/webhook',
+            data=forged_body,
+            content_type='application/json',
+            headers={'Stripe-Signature': forged_sig},
+        )
+        assert resp_forged.status_code == 400
+        assert resp_forged.get_json()['error'] == 'Invalid signature'
+
+        # 2. Valid signature for 86 tokens, but attacker tampers body to 9999 tokens
+        valid_body, valid_sig = _build_signed_webhook_request(
+            user_id=test_user.id,
+            secret='whsec_test_fake',
+            tokens=86,
+            session_id='cs_tampered_body_002',
+        )
+        tampered_body = valid_body.replace(b'"tokens": "86"', b'"tokens": "9999"')
+        resp_tampered = client.post(
+            '/api/billing/webhook',
+            data=tampered_body,
+            content_type='application/json',
+            headers={'Stripe-Signature': valid_sig},
+        )
+        assert resp_tampered.status_code == 400
+        assert resp_tampered.get_json()['error'] == 'Invalid signature'
+
+        # Balance and transaction table must remain completely untouched
+        final_balance = db_session_fixture.query(TokenBalance).filter_by(
+            user_id=test_user.id
+        ).first().balance
+        assert final_balance == initial_balance
+        assert db_session_fixture.query(Transaction).filter(
+            Transaction.stripe_session_id.in_(['cs_forged_sig_001', 'cs_tampered_body_002'])
+        ).count() == 0
+
+    def test_webhook_accepts_valid_hmac_signature_end_to_end(self, client, test_user, db_session_fixture):
+        """Real stripe.Webhook.construct_event HMAC verification with whsec_test_fake must fulfill the order."""
+        from backend.models import TokenBalance, Transaction
+
+        initial_balance = db_session_fixture.query(TokenBalance).filter_by(
+            user_id=test_user.id
+        ).first().balance
+
+        body, sig_header = _build_signed_webhook_request(
+            user_id=test_user.id,
+            secret='whsec_test_fake',
+            package_type='battery_small',
+            tokens=86,
+            session_id='cs_real_hmac_verified_123',
+        )
+        response = client.post(
+            '/api/billing/webhook',
+            data=body,
+            content_type='application/json',
+            headers={'Stripe-Signature': sig_header},
+        )
+
+        assert response.status_code == 200
+        assert response.get_json() == {'success': True}
+
+        new_balance = db_session_fixture.query(TokenBalance).filter_by(
+            user_id=test_user.id
+        ).first().balance
+        assert new_balance == initial_balance + 86
+
+        tx = db_session_fixture.query(Transaction).filter_by(
+            stripe_session_id='cs_real_hmac_verified_123'
+        ).first()
+        assert tx is not None
+        assert tx.amount == 86
+        assert tx.package_type == 'battery_small'
+        assert tx.user_id == test_user.id
 
 
 class TestCheckoutSession:

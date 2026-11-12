@@ -14,6 +14,7 @@ def gemini_service():
         mock_client_class.return_value = mock_client
         service = GeminiService()
         service.client = mock_client
+        service._validate_url = MagicMock(return_value=True)
         return service
 
 def make_mock_response(text):

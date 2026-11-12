@@ -35,7 +35,8 @@ class TestBatchOptimization:
             svc = get_gemini_service()
             old_client = svc.client
             svc.client = mock_client
-            yield mock_client
+            with patch.object(svc, '_validate_url', return_value=True):
+                yield mock_client
             svc.client = old_client
 
     def test_legacy_chatty_behavior(self, auth_client, mock_gemini_client):

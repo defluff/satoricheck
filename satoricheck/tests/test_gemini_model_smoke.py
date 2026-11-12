@@ -19,10 +19,13 @@ from backend.config import Config
 
 SMOKE_API_KEY = os.getenv('GEMINI_SMOKE_API_KEY')
 
-pytestmark = pytest.mark.skipif(
-    not SMOKE_API_KEY,
-    reason="Set GEMINI_SMOKE_API_KEY to run live Gemini model smoke tests",
-)
+pytestmark = [
+    pytest.mark.live,
+    pytest.mark.skipif(
+        not SMOKE_API_KEY,
+        reason="Set GEMINI_SMOKE_API_KEY to run live Gemini model smoke tests",
+    ),
+]
 
 
 @pytest.mark.parametrize("thinking_level", ["low", "high"])
