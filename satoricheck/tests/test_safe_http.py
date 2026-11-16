@@ -83,6 +83,40 @@ class TestSafeRequestRedirects:
             safe_http.assert_public_url(url)
         fake_dns.assert_not_called()
 
+    def test_dns_rebinding_pins_initial_resolution_during_connect(self):
+        """Finding 8b: if an attacker DNS server returns a public IP on lookup 1 and
+        169.254.169.254 on lookup 2, safe_request pins lookup 1 across the HTTP send
+        so urllib3 never queries the attacker DNS a second time."""
+        rebind_answers = [
+            [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', (PUBLIC_IP, 443))],
+            [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('169.254.169.254', 443))],
+        ]
+        observed_connect_ips = []
+
+        def transport_get(url, **kwargs):
+            resolved = socket.getaddrinfo('rebind.example.com', 443, proto=socket.IPPROTO_TCP)
+            observed_connect_ips.append(resolved[0][4][0])
+            return _response(200)
+
+        with patch('backend.services.safe_http.socket.getaddrinfo', side_effect=rebind_answers) as mock_dns, \
+             patch('backend.services.safe_http.requests.get', side_effect=transport_get):
+            resp = safe_http.safe_request('GET', 'https://rebind.example.com/img.png', timeout=5)
+
+        assert resp.status_code == 200
+        assert observed_connect_ips == [PUBLIC_IP]
+        assert mock_dns.call_count == 1
+
+    def test_peer_ip_check_aborts_if_socket_connected_to_private_ip(self, fake_dns):
+        """Defense-in-depth: if the underlying socket peer IP is private, abort and close."""
+        resp = _response(200)
+        resp.raw._connection.sock.getpeername.return_value = ('169.254.169.254', 80)
+
+        with patch('backend.services.safe_http.requests.get', return_value=resp):
+            with pytest.raises(safe_http.UnsafeURLError, match='Connected peer address is restricted'):
+                safe_http.safe_request('GET', 'https://public.example.com/img.png', timeout=5)
+
+        resp.close.assert_called_once_with()
+
 
 class TestDownloadBounded:
 

@@ -2,14 +2,12 @@
 
 Why this exists: `requests` follows redirects by default, so validating only the
 first URL lets a public host 302 the server into private/metadata addresses, and
-`resp.content` buffers an unbounded body into memory. Every hop here is re-resolved
-and checked against private ranges, redirects are followed manually, and downloads
-are capped by size and wall-clock time.
-
-Residual risk: DNS is resolved by us and again by urllib3, so a sub-second DNS
-rebinding attack is not fully closed. Pinning the resolved IP needs a custom
-transport adapter; tracked in docs/APP_ARCHITECTURE_AUDIT.md.
+`resp.content` buffers an unbounded body into memory. Every hop here is resolved
+once, checked against private ranges, pinned across the socket connect to close
+DNS-rebinding TOCTOU windows, followed manually on redirects, and capped by byte
+size and wall-clock time.
 """
+from contextlib import contextmanager
 import ipaddress
 import logging
 import socket
@@ -50,8 +48,12 @@ def is_private_ip(ip_str: str) -> bool:
     return addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved
 
 
-def assert_public_url(url: str) -> None:
-    """Raise UnsafeURLError unless `url` is http(s) and every resolved IP is public."""
+def assert_public_url(url: str) -> tuple[str, list]:
+    """Raise UnsafeURLError unless `url` is http(s) and every resolved IP is public.
+
+    Returns `(hostname, addr_infos)` so the caller can pin the validated resolution
+    for the subsequent socket connection without a second DNS query.
+    """
     if not url or not isinstance(url, str):
         raise UnsafeURLError('URL must be a non-empty string')
     parsed = urlparse(url)
@@ -62,10 +64,52 @@ def assert_public_url(url: str) -> None:
         addr_infos = socket.getaddrinfo(parsed.hostname, port, proto=socket.IPPROTO_TCP)
     except (socket.gaierror, OSError, ValueError) as exc:
         raise UnsafeURLError(f'Cannot resolve {parsed.hostname}') from exc
+    if not addr_infos:
+        raise UnsafeURLError(f'No addresses resolved for {parsed.hostname}')
     for *_rest, sockaddr in addr_infos:
         if is_private_ip(sockaddr[0]):
             logger.warning(f"SSRF blocked: {url[:100]} resolved to private IP {sockaddr[0]}")
             raise UnsafeURLError('URL resolves to a restricted address')
+    return parsed.hostname, addr_infos
+
+
+@contextmanager
+def _pin_resolved_dns(hostname: str, addr_infos: list):
+    """Pin `socket.getaddrinfo` for `hostname` to the pre-validated `addr_infos`.
+
+    Why: `urllib3` resolves the hostname again when opening the TCP socket. Pinning
+    the already-validated resolution prevents a `TTL=0` DNS rebinding server from
+    returning a public IP during `assert_public_url` and `169.254.169.254` on connect.
+    """
+    prev_getaddrinfo = socket.getaddrinfo
+    normalized = hostname.lower()
+
+    def _pinned_getaddrinfo(host, port, *args, **kwargs):
+        host_str = host.decode() if isinstance(host, bytes) else str(host)
+        if host_str.lower() == normalized:
+            return addr_infos
+        return prev_getaddrinfo(host, port, *args, **kwargs)
+
+    socket.getaddrinfo = _pinned_getaddrinfo
+    try:
+        yield
+    finally:
+        socket.getaddrinfo = prev_getaddrinfo
+
+
+def _assert_public_peer(resp: requests.Response) -> None:
+    """Defense-in-depth: if the response exposes a connected socket peer IP, verify it is public."""
+    try:
+        raw = getattr(resp, 'raw', None)
+        conn = getattr(raw, '_connection', None)
+        sock = getattr(conn, 'sock', None)
+        peer = sock.getpeername() if sock is not None else None
+        peer_ip = peer[0] if isinstance(peer, tuple) and peer else None
+    except Exception:
+        peer_ip = None
+    if isinstance(peer_ip, str) and is_private_ip(peer_ip):
+        resp.close()
+        raise UnsafeURLError('Connected peer address is restricted')
 
 
 def safe_request(
@@ -82,8 +126,16 @@ def safe_request(
     """
     send = getattr(requests, method.lower())
     for _hop in range(max_redirects + 1):
-        assert_public_url(url)
-        resp = send(url, timeout=timeout, headers=DEFAULT_HEADERS, stream=stream, allow_redirects=False)
+        hostname, addr_infos = assert_public_url(url)
+        with _pin_resolved_dns(hostname, addr_infos):
+            resp = send(
+                url,
+                timeout=timeout,
+                headers=DEFAULT_HEADERS,
+                stream=stream,
+                allow_redirects=False,
+            )
+        _assert_public_peer(resp)
         location = resp.headers.get('Location') if 300 <= resp.status_code < 400 else None
         if not location:
             return resp
