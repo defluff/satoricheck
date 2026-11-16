@@ -2059,9 +2059,24 @@ class PitchdeckModule {
     // Phase 5: One-Click Copy Deal Brief & Structured PDF Export
     // =========================================================================
 
+    _decodeHtmlEntities(str) {
+        if (!str || typeof str !== 'string') return str || '';
+        const entityMap = {
+            '&amp;': '&',
+            '&lt;': '<',
+            '&gt;': '>',
+            '&quot;': '"',
+            '&#x27;': "'",
+            '&#39;': "'",
+            '&#x2F;': '/'
+        };
+        return str.replace(/&(?:amp|lt|gt|quot|#x27|#39|#x2F);/g, match => entityMap[match] || match);
+    }
+
     compileDealBriefMarkdown() {
         const r = this.lastAnalysisResult || {};
-        const companyName = r.company_name || 'Unknown Startup';
+        const dec = val => this._decodeHtmlEntities(val);
+        const companyName = dec(r.company_name) || 'Unknown Startup';
         const analyzedDate = this.currentAnalyzedAt
             ? new Date(this.currentAnalyzedAt).toISOString().split('T')[0]
             : new Date().toISOString().split('T')[0];
@@ -2079,27 +2094,27 @@ class PitchdeckModule {
 
         const formatHighClaims = highClaims.length > 0
             ? highClaims.map(c => {
-                const finding = c.verificationResult?.verification_finding
+                const finding = dec(c.verificationResult?.verification_finding
                     || c.verificationResult?.explanation
                     || c.verification_finding
-                    || 'Contradicted or flagged as high risk.';
-                const question = c.verificationResult?.suggested_question
+                    || 'Contradicted or flagged as high risk.');
+                const question = dec(c.verificationResult?.suggested_question
                     || c.suggested_question
-                    || 'Can you provide primary source documentation for this claim?';
-                return `* **[Slide ${c.slide_number || 1}]** "${c.claim}"\n  * *Finding:* ${finding}\n  * *Ask Founder:* ${question}`;
+                    || 'Can you provide primary source documentation for this claim?');
+                return `* **[Slide ${c.slide_number || 1}]** "${dec(c.claim)}"\n  * *Finding:* ${finding}\n  * *Ask Founder:* ${question}`;
             }).join('\n')
             : '* None identified.';
 
         const formatMedClaims = medClaims.length > 0
             ? medClaims.map(c => {
-                const context = c.verificationResult?.verification_finding
+                const context = dec(c.verificationResult?.verification_finding
                     || c.verificationResult?.explanation
                     || c.verification_finding
-                    || 'Unverifiable publicly. Requires internal Data Room proof.';
-                const question = c.verificationResult?.suggested_question
+                    || 'Unverifiable publicly. Requires internal Data Room proof.');
+                const question = dec(c.verificationResult?.suggested_question
                     || c.suggested_question
-                    || 'Please share underlying cohort or financial schedules in the Data Room.';
-                return `* **[Slide ${c.slide_number || 1}]** "${c.claim}"\n  * *Context:* ${context}\n  * *Ask Founder:* ${question}`;
+                    || 'Please share underlying cohort or financial schedules in the Data Room.');
+                return `* **[Slide ${c.slide_number || 1}]** "${dec(c.claim)}"\n  * *Context:* ${context}\n  * *Ask Founder:* ${question}`;
             }).join('\n')
             : '* None identified.';
 
@@ -2110,12 +2125,12 @@ class PitchdeckModule {
             `**Investor Notes:** ${notesStr}`,
             ``,
             `## Thesis Alignment`,
-            `* **Geography:** ${align.geography.extracted} (${align.geography.status})`,
-            `* **Sector:** ${align.sector.extracted} (${align.sector.status})`,
-            `* **Stage:** ${align.stage.extracted} (${align.stage.status})`,
+            `* **Geography:** ${dec(align.geography.extracted)} (${align.geography.status})`,
+            `* **Sector:** ${dec(align.sector.extracted)} (${align.sector.status})`,
+            `* **Stage:** ${dec(align.stage.extracted)} (${align.stage.status})`,
             ``,
             `## Executive Summary`,
-            `${r.summary || 'No summary available.'}`,
+            `${dec(r.summary) || 'No summary available.'}`,
             ``,
             `## High-Risk Red Flags (Material Contradictions)`,
             formatHighClaims,

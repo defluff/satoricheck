@@ -340,8 +340,9 @@ EXTRACTED CLAIMS:
         # Neutralize unsafe URI schemes if present
         text = re.sub(r'(?i)^\s*(javascript|vbscript|data)\s*:', 'blocked:', text)
 
-        # HTML escape
-        text = html.escape(text)
+        # HTML escape idempotently (unescape first so pre-escaped entities from the LLM
+        # or round-tripped payloads never double-encode into &amp;amp; or &amp;#x27;)
+        text = html.escape(html.unescape(text))
 
         # Enforce maximum length
         return text[:max_length]

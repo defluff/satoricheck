@@ -1251,5 +1251,28 @@ startxref
             assert findings[2]['suggested_question'] is not None
             assert 'Data Room' in findings[2]['suggested_question']
 
+    def test_clean_string_is_idempotent_and_prevents_double_escaping(self, app):
+        """Finding 4: _clean_string must not double-escape already-escaped entities (&amp; -> &amp;amp;)."""
+        from backend.services.pitchdeck_service import PitchdeckService
+
+        service = PitchdeckService()
+        once = service._clean_string("R&D — Founder's <Plan>", 200)
+        twice = service._clean_string(once, 200)
+
+        assert once == "R&amp;D — Founder&#x27;s &lt;Plan&gt;"
+        assert twice == once
+
+    def test_deal_brief_markdown_decodes_html_entities_in_frontend(self):
+        """Finding 4: compileDealBriefMarkdown in pitchdeck.js must decode HTML entities before copying to clipboard."""
+        import pathlib
+
+        js_path = pathlib.Path(__file__).resolve().parents[1] / 'frontend' / 'js' / 'pitchdeck.js'
+        js_source = js_path.read_text(encoding='utf-8')
+
+        assert '_decodeHtmlEntities(str)' in js_source
+        assert 'const dec = val => this._decodeHtmlEntities(val);' in js_source
+        assert 'const companyName = dec(r.company_name)' in js_source
+        assert '${dec(r.summary)' in js_source
+
 
 
