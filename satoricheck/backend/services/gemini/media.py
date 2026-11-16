@@ -4,14 +4,19 @@ import os
 import re
 import time
 from urllib.parse import urlparse, parse_qs
-import requests
 from google.genai import types
+from backend.services import safe_http
 from backend.services.gemini.claims import GeminiServiceClaims
 
 logger = logging.getLogger(__name__)
 
 class GeminiServiceMedia(GeminiServiceClaims):
     """Multimodal media verification, video processing, and embedding methods for GeminiService."""
+
+    # Matches the 50 MB direct-upload cap (MAX_CONTENT_LENGTH) so URL and file inputs
+    # share one memory budget per request.
+    MAX_REMOTE_MEDIA_BYTES = 50 * 1024 * 1024
+    REMOTE_MEDIA_TOTAL_TIMEOUT_S = 60
 
     @staticmethod
     def extract_youtube_id(url: str) -> str | None:
@@ -48,14 +53,14 @@ class GeminiServiceMedia(GeminiServiceClaims):
                 canonical_yt = f"https://www.youtube.com/watch?v={yt_id}"
                 return types.Part.from_uri(file_uri=canonical_yt, mime_type="video/mp4")
 
-            resp = requests.get(
+            # Redirects are re-validated hop by hop and the body is size/time capped:
+            # _validate_url's HEAD walk alone is a TOCTOU check (GET may redirect elsewhere).
+            data = safe_http.download_bounded(
                 url_str,
+                max_bytes=self.MAX_REMOTE_MEDIA_BYTES,
                 timeout=30,
-                headers={'User-Agent': 'Mozilla/5.0 (compatible; Authenix/1.0)'},
-                stream=True
+                total_timeout=self.REMOTE_MEDIA_TOTAL_TIMEOUT_S,
             )
-            resp.raise_for_status()
-            data = resp.content
             return types.Part.from_bytes(data=data, mime_type=mime_type)
         
         if input_type == 'file':

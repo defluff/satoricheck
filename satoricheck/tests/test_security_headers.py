@@ -71,3 +71,65 @@ def test_cors_rejects_unpinned_chrome_extension_origin(client):
 
     assert response.status_code == 200
     assert 'Access-Control-Allow-Origin' not in response.headers
+
+
+@pytest.mark.parametrize('attacker_origin', [
+    'http://localhost.attacker.com',
+    'http://localhost:8080.evil.io',
+    'http://127.0.0.1.nip.io',
+    'http://localhost:3000@evil.io',
+])
+def test_cors_rejects_origins_that_only_prefix_match_localhost(client, attacker_origin):
+    """Flask-CORS uses re.match (start-anchored only); local patterns must be end-anchored."""
+    response = client.get('/health', headers={'Origin': attacker_origin})
+
+    assert response.status_code == 200
+    assert 'Access-Control-Allow-Origin' not in response.headers
+
+
+def test_cors_allows_local_dev_origin_outside_production(client):
+    response = client.get('/health', headers={'Origin': 'http://localhost:3000'})
+
+    assert response.headers.get('Access-Control-Allow-Origin') == 'http://localhost:3000'
+    assert response.headers.get('Access-Control-Allow-Credentials') == 'true'
+
+
+def test_cors_production_allow_list_contains_only_pinned_origins():
+    """No localhost pattern may ever be credentialed in production."""
+    from backend.server import build_cors_origins
+
+    assert build_cors_origins('production') == [
+        'https://authenix.ai',
+        'https://satoricheck-829698588154.europe-west6.run.app',
+        'chrome-extension://egamiabbbonhkjlhjbniocfpihpdcehl',
+    ]
+
+
+def test_rate_limit_buckets_are_per_forwarded_client_ip(client):
+    """Behind Cloud Run every request arrives from the front-end proxy; without
+    ProxyFix(x_for=...) all users would share one bucket and lock each other out."""
+    def failed_login(client_ip):
+        return client.post(
+            '/api/auth/login',
+            json={'email': 'nobody@example.com', 'password': 'wrong-password'},
+            headers={'X-Forwarded-For': client_ip},
+        )
+
+    statuses = [failed_login('203.0.113.10').status_code for _ in range(15)]
+    assert statuses == [401] * 15
+    assert failed_login('203.0.113.10').status_code == 429
+    assert failed_login('203.0.113.20').status_code == 401
+
+
+def test_spoofed_leading_forwarded_for_entry_does_not_escape_rate_limit(client):
+    """Only the hop appended by the trusted proxy counts; a client-supplied prefix is ignored."""
+    def failed_login(forwarded_for):
+        return client.post(
+            '/api/auth/login',
+            json={'email': 'nobody@example.com', 'password': 'wrong-password'},
+            headers={'X-Forwarded-For': forwarded_for},
+        )
+
+    statuses = [failed_login(f'198.51.100.{i}, 203.0.113.30').status_code for i in range(15)]
+    assert statuses == [401] * 15
+    assert failed_login('198.51.100.99, 203.0.113.30').status_code == 429

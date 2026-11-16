@@ -193,7 +193,7 @@ class TestValidateUrlSSRF:
         service = self._get_service()
         assert service._validate_url('http://[::1]/admin') is False
 
-    @patch('backend.services.gemini.client.socket.getaddrinfo')
+    @patch('backend.services.safe_http.socket.getaddrinfo')
     def test_blocks_localhost_hostname(self, mock_getaddrinfo):
         """Must block 'localhost' hostname that resolves to 127.0.0.1."""
         mock_getaddrinfo.return_value = [
@@ -202,8 +202,8 @@ class TestValidateUrlSSRF:
         service = self._get_service()
         assert service._validate_url('http://localhost/admin') is False
 
-    @patch('backend.services.gemini.client.socket.getaddrinfo')
-    @patch('backend.services.gemini.client.requests.head')
+    @patch('backend.services.safe_http.socket.getaddrinfo')
+    @patch('backend.services.safe_http.requests.head')
     def test_allows_public_url(self, mock_head, mock_getaddrinfo):
         """Must allow legitimate public URLs."""
         mock_getaddrinfo.return_value = [
@@ -642,7 +642,25 @@ class TestMultiInstanceHardening:
 
         assert "--preload" in content, "Gunicorn must use --preload so app crashes fail before binding $PORT"
         assert "--no-control-socket" in content, "Gunicorn 26.2+ in stateless container should disable control socket"
+        assert "--timeout 300" in content, "Gunicorn must enforce a bounded 300s worker timeout (not --timeout 0)"
+        assert "--timeout 0" not in content, "Unbounded --timeout 0 allows wedged sockets to block workers forever"
         assert "useradd -r -m" in content, "Non-root user should have a valid home directory"
+
+    def test_gemini_client_sets_http_timeout(self):
+        """GeminiService must configure genai.Client with an explicit HttpOptions timeout."""
+        from google.genai import types
+        from backend.config import Config
+        from backend.services.gemini_service import GeminiService
+
+        assert Config.GEMINI_HTTP_TIMEOUT_MS == 120_000
+
+        with patch('backend.services.gemini.client.genai.Client') as mock_client_cls:
+            GeminiService()
+
+        mock_client_cls.assert_called_once_with(
+            api_key=Config.GEMINI_API_KEY,
+            http_options=types.HttpOptions(timeout=Config.GEMINI_HTTP_TIMEOUT_MS),
+        )
 
 
 

@@ -37,9 +37,13 @@ class TestMediaAnalysisService:
             }
         })
 
+        public_dns = [(2, 1, 6, '', ('93.184.216.34', 443))]  # example.com
+        png_bytes = b'\x89PNG\r\n\x1a\n'  # Minimal PNG header bytes
+
         with patch('backend.services.gemini.client.genai.Client') as mock_client_class, \
-             patch('requests.get') as mock_get, \
-             patch('backend.services.gemini_service.GeminiService._validate_url', return_value=True), \
+             patch('backend.services.safe_http.socket.getaddrinfo', return_value=public_dns), \
+             patch('backend.services.safe_http.requests.head') as mock_head, \
+             patch('backend.services.safe_http.requests.get') as mock_get, \
              patch('backend.services.gemini_service.GeminiService.create_cache', return_value=None):
             
             mock_client = MagicMock()
@@ -48,12 +52,13 @@ class TestMediaAnalysisService:
             service = GeminiService()
             service.client = mock_client
             
-            # Mock URL download
+            # Wire-level mocks: HEAD reachability probe + streamed GET download
+            mock_head.return_value = MagicMock(status_code=200, headers={})
             mock_get.return_value = MagicMock(
                 status_code=200,
-                content=b'\x89PNG\r\n\x1a\n'  # Minimal PNG header bytes
+                headers={'Content-Length': str(len(png_bytes))},
             )
-            mock_get.return_value.raise_for_status = MagicMock()
+            mock_get.return_value.iter_content.return_value = [png_bytes]
 
             # Mock generate_content response
             part = MagicMock()
@@ -75,6 +80,13 @@ class TestMediaAnalysisService:
             assert result['verdict'] == 'ai'
             assert result['confidence'] == 87
             assert 'criteria' in result
+            mock_get.assert_called_with(
+                test_url,
+                timeout=30,
+                headers={'User-Agent': 'Mozilla/5.0 (compatible; Authenix/1.0)'},
+                stream=True,
+                allow_redirects=False,
+            )
             
             # 2. Test Embedding
             mock_embedding_obj = MagicMock()

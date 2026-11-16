@@ -17,7 +17,7 @@ from backend.models import MediaCheck
 from backend.routes.auth import login_required
 from backend.routes.tokens import reserve_flat_tokens, refund_flat_tokens
 from backend.error_handlers import APIError
-from backend.services import get_gemini_service
+from backend.services import get_gemini_service, safe_http
 from backend.config import Config
 from backend.extensions import limiter
 
@@ -216,9 +216,11 @@ def analyze_url() -> tuple:
             if not gemini_service._validate_url(url):
                 raise APIError('Invalid or restricted URL. The address cannot be resolved or is not accessible.', status_code=400)
 
-            import requests as http_requests
             try:
-                head_resp = http_requests.head(url, timeout=5, allow_redirects=True)
+                # safe_request re-validates every redirect hop; a blanket
+                # allow_redirects=True here would let a public URL bounce to a private one.
+                head_resp = safe_http.safe_request('HEAD', url, timeout=5)
+                head_resp.close()
                 ct = head_resp.headers.get('Content-Type', '')
                 # Strip parameters (e.g. "image/jpeg; charset=utf-8" → "image/jpeg")
                 ct_base = ct.split(';')[0].strip().lower()

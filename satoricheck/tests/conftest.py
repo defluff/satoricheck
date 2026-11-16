@@ -239,7 +239,7 @@ def mock_gemini(mocker):
 
     mocker.patch.object(socket, 'getaddrinfo', side_effect=_resolve_example_com)
     mocker.patch(
-        'backend.services.gemini.client.requests.head',
+        'backend.services.safe_http.requests.head',
         return_value=MagicMock(status_code=200, headers={}),
     )
     return mock_payload

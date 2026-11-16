@@ -43,6 +43,9 @@ class Config:
     # changes on deploy. Upgrade by setting GEMINI_MODEL in the environment.
     GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
     GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-3.8-flash')
+    # Hard ceiling (in milliseconds, per google.genai.types.HttpOptions) for any single
+    # Gemini SDK HTTP call so a stalled upstream socket cannot wedge a Gunicorn thread.
+    GEMINI_HTTP_TIMEOUT_MS = int(os.getenv('GEMINI_HTTP_TIMEOUT_MS', '120000'))
 
     # Google OAuth
     GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')
@@ -58,6 +61,13 @@ class Config:
     MAINTENANCE_MODE = os.getenv('MAINTENANCE_MODE', 'false').lower() == 'true'
     DATABASE_URL = normalize_database_url(os.getenv('DATABASE_URL', 'sqlite:///authenix.db'))
     RATELIMIT_STORAGE_URI = os.getenv('RATELIMIT_STORAGE_URI', 'memory://')
+
+    # Number of trusted proxies that append to X-Forwarded-For. Cloud Run's front end
+    # appends exactly one entry (the real client IP), so 1 is correct for direct
+    # *.run.app / domain-mapping ingress. Set to 2 when a Global External Application
+    # Load Balancer sits in front (it appends "<client>,<lb-ip>"). Too low → every user
+    # shares the proxy's rate-limit bucket; too high → clients can spoof their IP.
+    TRUSTED_PROXY_HOPS = int(os.getenv('TRUSTED_PROXY_HOPS', '1'))
     
     # Scheduler auth (Cloud Scheduler cron jobs). The random fallback keeps dev/test
     # endpoints un-guessable, but is per-process, so production must set it explicitly

@@ -6,6 +6,7 @@ from flask import Flask, jsonify, send_from_directory, request, redirect
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 import logging
+import re
 import sys
 from sqlalchemy import text # For DB health check
 
@@ -39,21 +40,40 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = Config.ENV == 'production'
 
-# Trust proxy headers (Cloud Run, nginx, etc.)
-app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+# Trust proxy headers (Cloud Run, nginx, etc.). x_for is required so request.remote_addr
+# (and therefore the per-IP rate limiter) sees the real client instead of the shared
+# Google front-end address, which would put every user in one global bucket.
+app.wsgi_app = ProxyFix(
+    app.wsgi_app,
+    x_for=Config.TRUSTED_PROXY_HOPS,
+    x_proto=1,
+    x_host=1,
+)
 
 # Limit upload size to 50MB
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
 # Enable CORS (Production + Extension + Local)
-CORS(app, supports_credentials=True, origins=[
-    'https://authenix.ai',  # Production custom domain
-    'https://satoricheck-829698588154.europe-west6.run.app',  # Legacy Cloud Run (remove after Phase 2)
-    # TODO: add new Cloud Run URL after service creation: 'https://authenix-XXXXX.run.app'
-    'chrome-extension://egamiabbbonhkjlhjbniocfpihpdcehl',  # Published Chrome Web Store extension
-    'http://localhost:*',
-    'http://127.0.0.1:*'
-])
+def build_cors_origins(env: str) -> list:
+    """Return the credentialed CORS allow-list for the given environment.
+
+    Why compiled, anchored regexes for local origins: Flask-CORS treats any string
+    containing regex characters (e.g. 'http://localhost:*') as a pattern and uses
+    re.match, which only anchors at the start — so 'http://localhost.attacker.com'
+    would be echoed back with Allow-Credentials. Local origins are also dropped in
+    production, where no legitimate caller runs on localhost.
+    """
+    origins = [
+        'https://authenix.ai',  # Production custom domain
+        'https://satoricheck-829698588154.europe-west6.run.app',  # Legacy Cloud Run (remove after Phase 2)
+        'chrome-extension://egamiabbbonhkjlhjbniocfpihpdcehl',  # Published Chrome Web Store extension
+    ]
+    if env != 'production':
+        origins.append(re.compile(r'^http://(localhost|127\.0\.0\.1)(:\d{1,5})?\Z', re.IGNORECASE))
+    return origins
+
+
+CORS(app, supports_credentials=True, origins=build_cors_origins(Config.ENV))
 
 # Rate limiting to prevent abuse
 from backend.extensions import limiter
