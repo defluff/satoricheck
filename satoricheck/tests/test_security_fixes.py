@@ -662,5 +662,65 @@ class TestMultiInstanceHardening:
             http_options=types.HttpOptions(timeout=Config.GEMINI_HTTP_TIMEOUT_MS),
         )
 
+    def test_backend_imports_are_declared_and_pinned_in_requirements(self):
+        """Every third-party import in backend/ must map to an exact-pinned (==) entry in
+        satoricheck/requirements.txt so local .venv drift never crashes Cloud Run."""
+        import ast
+        import pathlib
+        import sys
+
+        satori_root = pathlib.Path(__file__).resolve().parents[1]
+        req_lines = [
+            line.strip()
+            for line in (satori_root / 'requirements.txt').read_text(encoding='utf-8').splitlines()
+            if line.strip() and not line.strip().startswith('#')
+        ]
+
+        pinned_packages = {}
+        for line in req_lines:
+            assert '==' in line, f'Unpinned requirement in requirements.txt: {line!r}'
+            pkg, version = line.split('==', 1)
+            pinned_packages[pkg.lower()] = version
+
+        assert pinned_packages.get('cryptography') == '50.0.2'
+        assert pinned_packages.get('werkzeug') == '3.1.9'
+        assert 'aiohttp' not in pinned_packages
+
+        import_to_Requirement = {
+            'authlib': 'authlib',
+            'bcrypt': 'bcrypt',
+            'dotenv': 'python-dotenv',
+            'flask': 'flask',
+            'flask_cors': 'flask-cors',
+            'flask_limiter': 'flask-limiter',
+            'google': 'google-genai',
+            'jwt': 'pyjwt',
+            'requests': 'requests',
+            'sqlalchemy': 'sqlalchemy',
+            'stripe': 'stripe',
+            'werkzeug': 'werkzeug',
+        }
+
+        stdlib_and_local = sys.stdlib_module_names | {'backend'}
+        discovered_third_party = set()
+        for py_file in (satori_root / 'backend').rglob('*.py'):
+            tree = ast.parse(py_file.read_text(encoding='utf-8'), filename=str(py_file))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        top = alias.name.split('.')[0]
+                        if top not in stdlib_and_local:
+                            discovered_third_party.add(top)
+                elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                    top = node.module.split('.')[0]
+                    if top not in stdlib_and_local:
+                        discovered_third_party.add(top)
+
+        undeclared = [
+            mod for mod in sorted(discovered_third_party)
+            if import_to_Requirement.get(mod, mod.lower()) not in pinned_packages
+        ]
+        assert undeclared == [], f'Backend imports missing from requirements.txt: {undeclared}'
+
 
 
