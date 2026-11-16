@@ -60,6 +60,8 @@ class Config:
     TEST_MODE = os.getenv('TEST_MODE', 'false').lower() == 'true'
     MAINTENANCE_MODE = os.getenv('MAINTENANCE_MODE', 'false').lower() == 'true'
     DATABASE_URL = normalize_database_url(os.getenv('DATABASE_URL', 'sqlite:///authenix.db'))
+    # Per-process in-memory counters by default (single-instance Cloud Run). When scaling
+    # Cloud Run max-instances > 1, set RATELIMIT_STORAGE_URI to a shared Redis/Memorystore URI.
     RATELIMIT_STORAGE_URI = os.getenv('RATELIMIT_STORAGE_URI', 'memory://')
 
     # Number of trusted proxies that append to X-Forwarded-For. Cloud Run's front end

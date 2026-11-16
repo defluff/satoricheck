@@ -118,8 +118,8 @@ def set_security_headers(response):
     # Prevent MIME-type sniffing
     response.headers['X-Content-Type-Options'] = 'nosniff'
     
-    # XSS protection (legacy browsers)
-    response.headers['X-XSS-Protection'] = '1; mode=block'
+    # Disable legacy browser XSS auditor (modern OWASP/MDN recommendation alongside CSP)
+    response.headers['X-XSS-Protection'] = '0'
     
     # Referrer policy
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
@@ -260,11 +260,7 @@ def main():
         logger.warning("⚠️  TEST MODE ENABLED - Authentication bypassed")
         logger.warning("⚠️  Disable TEST_MODE in production!")
     
-    # Initialize database
-    logger.info("Initializing database...")
-    init_db()
-    
-    # Start server
+    # Start server (database is already initialized at module import time)
     logger.info(f"Starting server on {Config.HOST}:{Config.PORT}")
     logger.info("=" * 60)
     

@@ -722,5 +722,16 @@ class TestMultiInstanceHardening:
         ]
         assert undeclared == [], f'Backend imports missing from requirements.txt: {undeclared}'
 
+    def test_server_main_does_not_call_init_db_a_second_time(self):
+        """Finding 5.1: server.py initializes DB at module load; main() must not call init_db() again."""
+        import backend.server as server_mod
+
+        with patch.object(server_mod, 'init_db') as mock_init_db, \
+             patch.object(server_mod.app, 'run') as mock_run:
+            server_mod.main()
+
+        mock_init_db.assert_not_called()
+        mock_run.assert_called_once()
+
 
 

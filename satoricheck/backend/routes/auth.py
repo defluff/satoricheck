@@ -26,6 +26,13 @@ from backend.jwt_utils import (
 
 logger = logging.getLogger(__name__)
 
+# Precomputed bcrypt hash used when login is attempted for a non-existent email so
+# unknown-user and wrong-password paths spend comparable time in bcrypt.checkpw.
+_DUMMY_BCRYPT_HASH = bcrypt.hashpw(
+    b'authenix-timing-equalization-guard',
+    bcrypt.gensalt(rounds=4 if Config.ENV == 'testing' else 12),
+)
+
 # Import rate limiter from server
 def get_limiter():
     """Lazy import to avoid circular dependency."""
@@ -267,6 +274,7 @@ def login():
         # Find user
         user = db_session.query(User).filter_by(email=email).first()
         if not user:
+            bcrypt.checkpw(password.encode('utf-8'), _DUMMY_BCRYPT_HASH)
             logger.warning(f"Login: User not found: {email}")
             raise APIError('Invalid email or password', status_code=401)
         

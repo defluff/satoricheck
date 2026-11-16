@@ -12,6 +12,7 @@ REQUIRED_HEADERS = {
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
+    'X-XSS-Protection': '0',
 }
 
 

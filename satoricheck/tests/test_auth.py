@@ -101,6 +101,21 @@ class TestLogin:
         
         assert response.status_code == 401
 
+    def test_login_unknown_user_still_executes_bcrypt_checkpw_timing_guard(self, client, mocker):
+        """Finding 11: login for a non-existent email must still run bcrypt.checkpw to prevent timing enumeration."""
+        import bcrypt
+        from backend.routes import auth as auth_mod
+
+        spy = mocker.spy(bcrypt, 'checkpw')
+        response = client.post('/api/auth/login', json={
+            'email': 'does-not-exist@example.com',
+            'password': 'candidate-password-123',
+        })
+
+        assert response.status_code == 401
+        assert response.get_json()['error'] == 'Invalid email or password'
+        spy.assert_called_once_with(b'candidate-password-123', auth_mod._DUMMY_BCRYPT_HASH)
+
 
 class TestTokenRefresh:
     """Test JWT sliding window refresh."""
