@@ -217,7 +217,8 @@ def signup():
         # Provision new user (balance + streak)
         provision_new_user(user, bonus_amount=bonus)
         
-        # Log user in
+        # Create JWT token and set legacy session for backwards compatibility
+        jwt_token = create_token(user.id, user.email)
         session['user_id'] = user.id
         
         logger.info(f"New user registered: {email}")
@@ -226,7 +227,7 @@ def signup():
         if was_deleted:
             msg = 'Welcome back! Your account has been recreated.'
             
-        return jsonify({
+        response = make_response(jsonify({
             'success': True,
             'message': msg,
             'user': {
@@ -234,7 +235,9 @@ def signup():
                 'balance': bonus,
                 'streak': 1
             }
-        })
+        }))
+        set_jwt_cookie(response, jwt_token)
+        return response
         
     except APIError:
         raise

@@ -50,7 +50,7 @@ CORS(app, supports_credentials=True, origins=[
     'https://authenix.ai',  # Production custom domain
     'https://satoricheck-829698588154.europe-west6.run.app',  # Legacy Cloud Run (remove after Phase 2)
     # TODO: add new Cloud Run URL after service creation: 'https://authenix-XXXXX.run.app'
-    'chrome-extension://*',  # TODO: pin to specific extension ID after store submission
+    'chrome-extension://egamiabbbonhkjlhjbniocfpihpdcehl',  # Published Chrome Web Store extension
     'http://localhost:*',
     'http://127.0.0.1:*'
 ])

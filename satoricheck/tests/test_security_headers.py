@@ -52,3 +52,22 @@ def test_csp_workers_are_same_origin_only(production_response):
         if part.strip()
     )
     assert directives['worker-src'] == "'self' blob:"
+
+
+def test_cors_allows_pinned_chrome_extension_origin(client):
+    """CORS must allow the published Chrome Web Store extension origin with credentials."""
+    pinned_origin = 'chrome-extension://egamiabbbonhkjlhjbniocfpihpdcehl'
+    response = client.get('/health', headers={'Origin': pinned_origin})
+
+    assert response.status_code == 200
+    assert response.headers.get('Access-Control-Allow-Origin') == pinned_origin
+    assert response.headers.get('Access-Control-Allow-Credentials') == 'true'
+
+
+def test_cors_rejects_unpinned_chrome_extension_origin(client):
+    """CORS must not grant credentialed cross-origin access to arbitrary Chrome extensions."""
+    rogue_origin = 'chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    response = client.get('/health', headers={'Origin': rogue_origin})
+
+    assert response.status_code == 200
+    assert 'Access-Control-Allow-Origin' not in response.headers

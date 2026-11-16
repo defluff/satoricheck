@@ -55,6 +55,26 @@ class TestSignup:
         
         assert balance.balance == 0  # No bonus for returning user
 
+    def test_signup_sets_jwt_cookie(self, client):
+        """Signup should issue a stateless HttpOnly authenix_token JWT cookie."""
+        response = client.post('/api/auth/signup', json={
+            'email': 'jwt_signup@example.com',
+            'password': 'SecurePass123!'
+        })
+
+        assert response.status_code == 200
+
+        cookies = response.headers.getlist('Set-Cookie')
+        jwt_cookies = [c for c in cookies if 'authenix_token=' in c]
+        assert len(jwt_cookies) == 1
+        assert 'HttpOnly' in jwt_cookies[0]
+
+        # Clear legacy Flask session cookie to prove stateless JWT auth succeeds alone
+        client.delete_cookie('session', domain='localhost')
+        me_response = client.get('/api/auth/me')
+        assert me_response.status_code == 200
+        assert me_response.get_json()['user']['email'] == 'jwt_signup@example.com'
+
 
 class TestLogin:
     """Test login flow."""
