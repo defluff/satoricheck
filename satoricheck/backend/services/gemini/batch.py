@@ -116,34 +116,6 @@ class GeminiServiceBatch(GeminiServiceUtils):
             logger.error(f"Error deleting cache {cache_name}: {e}")
             return False
 
-    def generate_with_cache(
-        self,
-        cache_name: str,
-        prompt: str,
-        config: types.GenerateContentConfig = None,
-        model: str | None = None,
-    ) -> dict:
-        """Generate content referencing an existing Context Cache."""
-        if not self.client:
-            raise Exception("Gemini client not initialized")
-        try:
-            if not config:
-                config = types.GenerateContentConfig()
-            config.cached_content = cache_name
-            # In Gemini API, CachedContent cannot be combined with system_instruction, tools, or tool_config on GenerateContent
-            config.system_instruction = None
-            config.tools = None
-            config.tool_config = None
-            response = self.client.models.generate_content(
-                model=model or self.MODEL,
-                contents=prompt,
-                config=config
-            )
-            return {'text': response.text, 'raw': response}
-        except Exception as e:
-            logger.error(f"Failed to generate with cache: {e}")
-            raise
-
     def analyze_claims_batch(
         self,
         claims,

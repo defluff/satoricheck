@@ -44,11 +44,6 @@ class GeminiServiceClient:
     MODEL = Config.GEMINI_MODEL
     MODEL_MEDIA = Config.GEMINI_MEDIA_MODEL
     
-    TIMEOUT_PRO = 30
-    TIMEOUT_FAST = 30
-    TIMEOUT_TRIAGE = 10
-    TIMEOUT_SLOW = 60
-    
     MAX_CLAIMS_PER_PROMPT = 8
     _MAX_REDIRECT_DEPTH = 5
 
