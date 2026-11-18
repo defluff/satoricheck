@@ -5,6 +5,7 @@ Only wire boundaries are mocked (DNS via socket.getaddrinfo, HTTP via requests.g
 the real is_private_ip / redirect-walking logic executes.
 """
 import socket
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -105,6 +106,85 @@ class TestSafeRequestRedirects:
         assert resp.status_code == 200
         assert observed_connect_ips == [PUBLIC_IP]
         assert mock_dns.call_count == 1
+
+    def test_dns_pin_is_scoped_to_resolved_port(self):
+        """Pinning hostname:443 must not intercept a subsequent lookup for hostname:80."""
+        dns_answers = [
+            [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', (PUBLIC_IP, 443))],
+            [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('93.184.216.99', 80))],
+        ]
+        observed = {}
+
+        def transport_get(url, **kwargs):
+            observed['https'] = socket.getaddrinfo('rebind.example.com', 443, proto=socket.IPPROTO_TCP)[0][4]
+            observed['http'] = socket.getaddrinfo('rebind.example.com', 80, proto=socket.IPPROTO_TCP)[0][4]
+            return _response(200)
+
+        with patch('backend.services.safe_http.socket.getaddrinfo', side_effect=dns_answers) as mock_dns, \
+             patch('backend.services.safe_http.requests.get', side_effect=transport_get):
+            resp = safe_http.safe_request('GET', 'https://rebind.example.com/img.png', timeout=5)
+
+        assert resp.status_code == 200
+        assert observed == {
+            'https': (PUBLIC_IP, 443),
+            'http': ('93.184.216.99', 80),
+        }
+        assert mock_dns.call_count == 2
+
+    def test_concurrent_requests_with_out_of_order_exit_do_not_leak_dns_pin(self, fake_dns):
+        """Overlapping threads that exit out of order must stay isolated and restore socket.getaddrinfo."""
+        both_in_pin = threading.Barrier(2, timeout=2)
+        thread_a_exited = threading.Event()
+        results = {}
+        errors = []
+
+        def transport_get(url, **kwargs):
+            if 'public.example.com' in url:
+                both_in_pin.wait()
+                # Thread A sees its own pin and does NOT see Thread B's pin for cdn.example.com
+                results['a_own'] = socket.getaddrinfo('public.example.com', 443, proto=socket.IPPROTO_TCP)[0][4][0]
+                results['a_other_hits_dns'] = socket.getaddrinfo('cdn.example.com', 443, proto=socket.IPPROTO_TCP)[0][4][0]
+                return _response(200)
+
+            both_in_pin.wait()
+            assert thread_a_exited.wait(timeout=2)
+            results['b_own'] = socket.getaddrinfo('cdn.example.com', 443, proto=socket.IPPROTO_TCP)[0][4][0]
+            return _response(200)
+
+        def run_a():
+            try:
+                safe_http.safe_request('GET', 'https://public.example.com/a.png', timeout=5)
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                thread_a_exited.set()
+
+        def run_b():
+            try:
+                safe_http.safe_request('GET', 'https://cdn.example.com/b.png', timeout=5)
+            except BaseException as exc:
+                errors.append(exc)
+
+        with patch('backend.services.safe_http.requests.get', side_effect=transport_get):
+            t_a = threading.Thread(target=run_a)
+            t_b = threading.Thread(target=run_b)
+            t_a.start()
+            t_b.start()
+            t_a.join(timeout=5)
+            t_b.join(timeout=5)
+
+        assert errors == []
+        assert results == {
+            'a_own': PUBLIC_IP,
+            'a_other_hits_dns': DNS_TABLE['cdn.example.com'],
+            'b_own': DNS_TABLE['cdn.example.com'],
+        }
+        assert socket.getaddrinfo is fake_dns
+        assert safe_http._DNS_PIN_ACTIVE_COUNT == 0
+        # After both threads exit, public.example.com hits fake_dns again (not a leaked pin)
+        calls_before = fake_dns.call_count
+        socket.getaddrinfo('public.example.com', 443, proto=socket.IPPROTO_TCP)
+        assert fake_dns.call_count == calls_before + 1
 
     def test_peer_ip_check_aborts_if_socket_connected_to_private_ip(self, fake_dns):
         """Defense-in-depth: if the underlying socket peer IP is private, abort and close."""

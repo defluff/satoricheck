@@ -11,6 +11,7 @@ from contextlib import contextmanager
 import ipaddress
 import logging
 import socket
+import threading
 import time
 from urllib.parse import urljoin, urlparse
 
@@ -73,28 +74,86 @@ def assert_public_url(url: str) -> tuple[str, list]:
     return parsed.hostname, addr_infos
 
 
+_DNS_PIN_LOCK = threading.Lock()
+_DNS_PIN_ACTIVE_COUNT = 0
+_DNS_PIN_ORIG_GETADDRINFO = None
+_THREAD_DNS_PINS = threading.local()
+
+
+def _normalize_port(port) -> int | None:
+    """Normalize a getaddrinfo port argument to int when numeric."""
+    if isinstance(port, bool) or port is None:
+        return None
+    if isinstance(port, int):
+        return port
+    if isinstance(port, str) and port.isdigit():
+        return int(port)
+    return None
+
+
+def _dispatch_pinned_getaddrinfo(host, port, *args, **kwargs):
+    """Thread-local DNS pin dispatcher installed while at least one pin is active."""
+    pins = getattr(_THREAD_DNS_PINS, 'pins', None)
+    if pins:
+        host_str = host.decode('ascii', 'ignore') if isinstance(host, bytes) else str(host)
+        key = (host_str.strip('[]').lower(), _normalize_port(port))
+        pinned = pins.get(key)
+        if pinned is not None:
+            family = args[0] if args else kwargs.get('family', 0)
+            if family not in (0, socket.AF_UNSPEC):
+                return [ai for ai in pinned if ai[0] == family]
+            return pinned
+    with _DNS_PIN_LOCK:
+        orig = _DNS_PIN_ORIG_GETADDRINFO or socket.getaddrinfo
+    return orig(host, port, *args, **kwargs)
+
+
 @contextmanager
-def _pin_resolved_dns(hostname: str, addr_infos: list):
-    """Pin `socket.getaddrinfo` for `hostname` to the pre-validated `addr_infos`.
+def _pin_resolved_dns(hostname: str, addr_infos: list, port: int | None = None):
+    """Pin `socket.getaddrinfo` on the calling thread for `(hostname, port)` to `addr_infos`.
 
     Why: `urllib3` resolves the hostname again when opening the TCP socket. Pinning
     the already-validated resolution prevents a `TTL=0` DNS rebinding server from
     returning a public IP during `assert_public_url` and `169.254.169.254` on connect.
+    Pins are stored per-thread and the global `socket.getaddrinfo` hook is reference-
+    counted under `_DNS_PIN_LOCK` so concurrent threads never overwrite or leak each
+    other's wrappers on out-of-order exit.
     """
-    prev_getaddrinfo = socket.getaddrinfo
-    normalized = hostname.lower()
+    global _DNS_PIN_ACTIVE_COUNT, _DNS_PIN_ORIG_GETADDRINFO
 
-    def _pinned_getaddrinfo(host, port, *args, **kwargs):
-        host_str = host.decode() if isinstance(host, bytes) else str(host)
-        if host_str.lower() == normalized:
-            return addr_infos
-        return prev_getaddrinfo(host, port, *args, **kwargs)
+    if port is None and addr_infos:
+        try:
+            port = int(addr_infos[0][4][1])
+        except (IndexError, TypeError, ValueError):
+            port = None
 
-    socket.getaddrinfo = _pinned_getaddrinfo
+    key = (hostname.strip('[]').lower(), port)
+    pins = getattr(_THREAD_DNS_PINS, 'pins', None)
+    if pins is None:
+        pins = {}
+        _THREAD_DNS_PINS.pins = pins
+    had_prev = key in pins
+    prev_entry = pins.get(key)
+    pins[key] = addr_infos
+
+    with _DNS_PIN_LOCK:
+        if _DNS_PIN_ACTIVE_COUNT == 0:
+            _DNS_PIN_ORIG_GETADDRINFO = socket.getaddrinfo
+            socket.getaddrinfo = _dispatch_pinned_getaddrinfo
+        _DNS_PIN_ACTIVE_COUNT += 1
+
     try:
         yield
     finally:
-        socket.getaddrinfo = prev_getaddrinfo
+        if had_prev:
+            pins[key] = prev_entry
+        else:
+            pins.pop(key, None)
+        with _DNS_PIN_LOCK:
+            _DNS_PIN_ACTIVE_COUNT -= 1
+            if _DNS_PIN_ACTIVE_COUNT == 0:
+                socket.getaddrinfo = _DNS_PIN_ORIG_GETADDRINFO
+                _DNS_PIN_ORIG_GETADDRINFO = None
 
 
 def _assert_public_peer(resp: requests.Response) -> None:
@@ -127,7 +186,9 @@ def safe_request(
     send = getattr(requests, method.lower())
     for _hop in range(max_redirects + 1):
         hostname, addr_infos = assert_public_url(url)
-        with _pin_resolved_dns(hostname, addr_infos):
+        parsed = urlparse(url)
+        port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+        with _pin_resolved_dns(hostname, addr_infos, port=port):
             resp = send(
                 url,
                 timeout=timeout,
