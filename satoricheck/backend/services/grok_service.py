@@ -40,6 +40,14 @@ def validate_social_url(url: str) -> Optional[str]:
     return None
 
 
+_TEMPORAL_TRIGGER_RE = re.compile(
+    r'\b(?:just|today|now|breaking|just\s+now|just\s+did)\b'
+)
+_QUOTE_TRIGGER_RE = re.compile(
+    r'(?:\b\w+\s+said\b|\baccording\s+to\s+\w+|\b\w+\s+tweeted\b|\b\w+\s+posted\b)'
+)
+
+
 def should_fire_grok(claim: str, gemini_result: dict = None) -> bool:
     """
     Detect triggers that warrant a Grok social context search.
@@ -47,7 +55,7 @@ def should_fire_grok(claim: str, gemini_result: dict = None) -> bool:
     Triggers:
     - @handles (e.g., @elonmusk)
     - #hashtags (e.g., #breaking)
-    - Temporal keywords (just, today, now, breaking)
+    - Temporal keywords (whole-word: just, today, now, breaking)
     - Quote patterns (X said, according to X)
     - Gemini couldn't verify (fallback)
     """
@@ -60,21 +68,13 @@ def should_fire_grok(claim: str, gemini_result: dict = None) -> bool:
     if '@' in claim or '#' in claim:
         return True
     
-    # Temporal triggers (recent events)
-    temporal_keywords = ['just', 'today', 'now', 'breaking', 'just now', 'just did']
-    if any(keyword in claim_lower for keyword in temporal_keywords):
+    # Temporal triggers (recent events) using whole-word boundaries
+    if _TEMPORAL_TRIGGER_RE.search(claim_lower):
         return True
     
     # Quote claim patterns
-    quote_patterns = [
-        r'\b\w+\s+said\b',           # "Trump said"
-        r'\baccording to\s+\w+',     # "according to Elon"
-        r'\b\w+\s+tweeted\b',        # "Biden tweeted"
-        r'\b\w+\s+posted\b',         # "Musk posted"
-    ]
-    for pattern in quote_patterns:
-        if re.search(pattern, claim_lower):
-            return True
+    if _QUOTE_TRIGGER_RE.search(claim_lower):
+        return True
     
     # Fallback: Gemini couldn't verify
     if gemini_result:
@@ -108,6 +108,9 @@ class GrokService:
         Returns:
             dict with keys: found, source, text, url, verified, engagement
         """
+        if not Config.GROK_ENABLED:
+            logger.info("Grok social search skipped: GROK_ENABLED is false")
+            return {'found': False, 'error': 'disabled'}
         if not self.api_key:
             logger.error("Cannot search: GROK_API_KEY not configured")
             return {'found': False, 'error': 'API not configured'}

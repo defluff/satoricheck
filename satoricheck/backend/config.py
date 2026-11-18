@@ -37,12 +37,14 @@ class Config:
     SECRET_KEY = os.getenv('FLASK_SECRET_KEY')
     ENV = os.getenv('FLASK_ENV', 'production')
     
-    # Google Gemini — one model for all calls; workload depth is set per call via
-    # thinking_level ("low" for extraction/triage, "high" for verification/forensics).
-    # Pinned to an explicit stable ID (not a "-latest" alias) so verdict behavior only
-    # changes on deploy. Upgrade by setting GEMINI_MODEL in the environment.
+    # Google Gemini — Module-Boundary Hybrid Architecture:
+    # - GEMINI_MODEL (Flash 3.8): text claim extraction, stream triage, verification,
+    #   and Flash-pinned context caches (depth set per call via thinking_level: "low" or "high").
+    # - GEMINI_MEDIA_MODEL (Argon 4): multimodal media forensics and pitch deck visual extraction.
+    # Both use explicit stable IDs (never "-latest" aliases) so behavior only changes on deploy.
     GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
     GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-3.8-flash')
+    GEMINI_MEDIA_MODEL = os.getenv('GEMINI_MEDIA_MODEL', 'gemini-4-argon')
     # Hard ceiling (in milliseconds, per google.genai.types.HttpOptions) for any single
     # Gemini SDK HTTP call so a stalled upstream socket cannot wedge a Gunicorn thread.
     GEMINI_HTTP_TIMEOUT_MS = int(os.getenv('GEMINI_HTTP_TIMEOUT_MS', '120000'))

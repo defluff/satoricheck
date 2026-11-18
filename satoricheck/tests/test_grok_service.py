@@ -35,11 +35,15 @@ class TestTriggerDetection:
         assert should_fire_grok("Biden tweeted about it") == True
     
     def test_no_trigger_on_normal_claims(self):
-        """Should NOT trigger on regular factual claims."""
+        """Should NOT trigger on regular factual claims or words containing 'now'/'just' substrings."""
         from backend.services.grok_service import should_fire_grok
         assert should_fire_grok("The earth is round") == False
         assert should_fire_grok("Water boils at 100 degrees") == False
         assert should_fire_grok("Paris is the capital of France") == False
+        assert should_fire_grok("The knowledge economy is growing") == False
+        assert should_fire_grok("Snow fell across Zurich in January") == False
+        assert should_fire_grok("Social justice reforms passed in 1998") == False
+        assert should_fire_grok("Adjust the thermostat to 20 degrees") == False
     
     def test_fallback_trigger_on_could_not_verify(self):
         """Should trigger when Gemini couldn't verify."""

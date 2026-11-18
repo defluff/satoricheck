@@ -116,7 +116,14 @@ def test_single_agentic_claim_uses_high_thinking(gemini_service):
 
 
 def test_unified_model_used_across_thinking_levels(gemini_service):
-    """Verify extraction, AI detection, and verification all use unified GeminiService.MODEL."""
+    """Verify text extraction, AI detection, triage, batch, and single-claim verification route to Flash (MODEL)."""
+    from backend.config import Config
+
+    assert Config.GEMINI_MODEL == 'gemini-3.8-flash'
+    assert Config.GEMINI_MEDIA_MODEL == 'gemini-4-argon'
+    assert gemini_service.MODEL == 'gemini-3.8-flash'
+    assert gemini_service.MODEL_MEDIA == 'gemini-4-argon'
+
     gemini_service.client.models.generate_content.return_value = make_mock_response(
         '{"claims": ["Water boils at 100C"]}'
     )
@@ -126,12 +133,36 @@ def test_unified_model_used_across_thinking_levels(gemini_service):
     assert identify_kwargs['config'].thinking_config.thinking_level == types.ThinkingLevel.LOW
 
     gemini_service.client.models.generate_content.return_value = make_mock_response(
+        '[{"index": 1, "priority": "NORMAL", "strategy": "SEARCH_VERIFY", "is_hyperbole": false}]'
+    )
+    gemini_service.triage_for_stream(["Water boils at 100C."])
+    triage_kwargs = gemini_service.client.models.generate_content.call_args.kwargs
+    assert triage_kwargs['model'] == gemini_service.MODEL
+    assert triage_kwargs['config'].thinking_config.thinking_level == types.ThinkingLevel.LOW
+
+    gemini_service.client.models.generate_content.return_value = make_mock_response(
         '{"results": [{"claim_index": 1, "verdict": "TRUE", "explanation": "Valid", "sources": []}]}'
     )
     gemini_service.analyze_claims_batch(["Water boils at 100C."])
     batch_kwargs = gemini_service.client.models.generate_content.call_args.kwargs
     assert batch_kwargs['model'] == gemini_service.MODEL
     assert batch_kwargs['config'].thinking_config.thinking_level == types.ThinkingLevel.LOW
+
+    gemini_service.client.models.generate_content.return_value = make_mock_response(
+        '{"is_claim": true, "verdict": "TRUE", "explanation": "Verified", "fallacy": null, "sources": []}'
+    )
+    gemini_service.analyze_claim("Water boils at 100C.", smart_agent=True)
+    single_kwargs = gemini_service.client.models.generate_content.call_args.kwargs
+    assert single_kwargs['model'] == gemini_service.MODEL
+    assert single_kwargs['config'].thinking_config.thinking_level == types.ThinkingLevel.HIGH
+
+    gemini_service.client.models.generate_content.return_value = make_mock_response(
+        '{"ai_probability": 10, "confidence": "HIGH", "detected_register": "general", "explanation": "Human"}'
+    )
+    gemini_service.analyze_ai_content("Water boils at 100 degrees Celsius at sea level in standard conditions.")
+    ai_kwargs = gemini_service.client.models.generate_content.call_args.kwargs
+    assert ai_kwargs['model'] == gemini_service.MODEL
+    assert ai_kwargs['config'].thinking_config.thinking_level == types.ThinkingLevel.LOW
 
 
 def test_grok_tool_gated_by_social_triggers(gemini_service):
