@@ -57,7 +57,7 @@ def test_analyze_claims_batch_with_context_cache(gemini_service):
     gemini_service.create_cache = MagicMock(return_value="cachedContents/12345")
     
     claims = ["The consulate opened in Nuuk."]
-    context = "Reference text about Nuuk consulate..." * 150  # >4000 chars
+    context = "Reference text about Nuuk consulate..." * 450  # >=16000 chars (~4,096 token cache floor)
     
     results = gemini_service.analyze_claims_batch(claims, context=context)
     

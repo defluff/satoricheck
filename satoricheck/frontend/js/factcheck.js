@@ -175,33 +175,18 @@ class FactCheckManager {
             // Create a temporary card to show status
             tempCardId = ui.createCard("🧠 Smart Agent identifying claims...", true);
 
-            const maxRetries = 2;
             let lastError = null;
             let identifiedClaims = null;
 
-            // Step 1: Identification Phase (Not interruptible as it's one call)
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                try {
-                    // Call backend to identify claims
-                    const response = await api.identifyClaims(text);
-
-                    if (response.claims) {
-                        identifiedClaims = response.claims;
-                        break; // Success
-                    }
-                } catch (error) {
-                    lastError = error;
-                    console.error(`Smart Agent attempt ${attempt} failed:`, error);
-                    if (attempt < maxRetries) {
-                        // Update temp card status
-                        ui.updateCard(tempCardId, {
-                            verdict: 'CHECKING...',
-                            explanation: `Taking longer than usual... (Retrying ${attempt}/${maxRetries})`,
-                            sources: []
-                        });
-                        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-                    }
+            // Step 1: Identification Phase (single request; api.js handles transient 503 retry)
+            try {
+                const response = await api.identifyClaims(text);
+                if (response.claims) {
+                    identifiedClaims = response.claims;
                 }
+            } catch (error) {
+                lastError = error;
+                console.error('Smart Agent identification failed:', error);
             }
 
             // Remove the temporary card - we will either replace it or show error
@@ -210,7 +195,12 @@ class FactCheckManager {
             }
 
             if (!identifiedClaims) {
-                // All retries exhausted - fall back to standard check
+                // Do not escalate auth, balance, or rate-limit errors into a fallback /analyze call
+                if (lastError && (lastError.status === 401 || lastError.status === 403 || lastError.status === 429)) {
+                    ui.showToast(lastError.message, 'error');
+                    if (lastError.status === 403) ui.showModal('buy-tokens-modal');
+                    return;
+                }
                 console.error('Smart Agent failed identifiers:', lastError);
                 ui.showToast('Smart Agent unavailable, using standard check', 'warning');
                 await this.checkText(text, null);
@@ -242,9 +232,9 @@ class FactCheckManager {
                     this.checkedTexts.add(claim.trim()); // Optimistically mark as checked
                 });
 
-                // 2b. Pre-create context cache once (avoids redundant creation per micro-batch)
+                // 2b. Pre-create context cache once (aligned with backend 16k-char / ~4,096-token floor)
                 let cacheName = null;
-                if (text.length > 4000) {
+                if (text.length >= 16000) {
                     try {
                         const cacheResponse = await api.request('/factcheck/create-context-cache', {
                             method: 'POST',

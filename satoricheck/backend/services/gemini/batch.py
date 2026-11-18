@@ -2,6 +2,7 @@ import json
 import logging
 from datetime import datetime, UTC
 from google.genai import types
+from backend.config import Config
 from backend.services.gemini.client import ClaimPriority
 from backend.services.gemini.utils import GeminiServiceUtils
 
@@ -9,6 +10,10 @@ logger = logging.getLogger(__name__)
 
 class GeminiServiceBatch(GeminiServiceUtils):
     """Batch claim verification and triage methods for GeminiService."""
+
+    # Minimum text length (~4,096 tokens at ~4 chars/token) before attempting explicit
+    # Gemini 3.8 Flash Context Cache creation so short texts don't hit 400 "too small".
+    MIN_TEXT_CACHE_CHARS = 16000
 
     def create_cache(
         self,
@@ -18,15 +23,23 @@ class GeminiServiceBatch(GeminiServiceUtils):
         tools: list | None = None,
         tool_config: types.ToolConfig | None = None,
         include_agent_tools: bool = False,
+        include_social_tool: bool = False,
+        model: str | None = None,
     ) -> str:
         """Create a Context Cache for Gemini.
 
         In the Gemini API, a GenerateContent call that references cached_content
         cannot specify system_instruction, tools, or tool_config—those must be
         baked into the CachedContent resource at creation time. When
-        include_agent_tools=True (or when creating a batch verification cache),
-        we automatically bundle the batch verification system instruction,
-        Google Search grounding, and the Grok social tool into the cache.
+        include_agent_tools=True, we bundle the batch verification system instruction
+        and Google Search grounding, attaching the Grok social tool only when
+        include_social_tool=True and Config.GROK_ENABLED.
+
+        Args:
+            model: Target model ID that will consume this cache (defaults to
+                   self.MODEL). Must match the model used in downstream
+                   generate_content calls because Gemini caches are pinned to
+                   the exact model that created them.
         """
         if not self.client:
             return None
@@ -57,11 +70,14 @@ class GeminiServiceBatch(GeminiServiceUtils):
                         fallback="You are an expert fact-checker. Verify claims accurately and minimize API calls."
                     )
                 if tools is None:
-                    from backend.services.grok_service import get_grok_service
-                    grok = get_grok_service()
-                    grok_tool = self._build_grok_tool(grok)
                     google_search_tool = types.Tool(google_search=types.GoogleSearch())
-                    tools = [google_search_tool, grok_tool]
+                    if include_social_tool and Config.GROK_ENABLED:
+                        from backend.services.grok_service import get_grok_service
+                        grok = get_grok_service()
+                        grok_tool = self._build_grok_tool(grok)
+                        tools = [google_search_tool, grok_tool]
+                    else:
+                        tools = [google_search_tool]
                 if tool_config is None:
                     tool_config = types.ToolConfig(
                         include_server_side_tool_invocations=True
@@ -74,11 +90,15 @@ class GeminiServiceBatch(GeminiServiceUtils):
             if tool_config:
                 cache_config.tool_config = tool_config
 
+            target_model = model or self.MODEL
             cache = self.client.caches.create(
-                model=self.MODEL,
+                model=target_model,
                 config=cache_config
             )
-            logger.info(f"Created Gemini Context Cache: {cache.name} at {datetime.now(UTC)} (TTL: {ttl_minutes}m)")
+            logger.info(
+                f"Created Gemini Context Cache: {cache.name} on {target_model} "
+                f"at {datetime.now(UTC)} (TTL: {ttl_minutes}m)"
+            )
             return cache.name
         except Exception as e:
             logger.error(f"Failed to create context cache: {e}")
@@ -96,7 +116,13 @@ class GeminiServiceBatch(GeminiServiceUtils):
             logger.error(f"Error deleting cache {cache_name}: {e}")
             return False
 
-    def generate_with_cache(self, cache_name: str, prompt: str, config: types.GenerateContentConfig = None) -> dict:
+    def generate_with_cache(
+        self,
+        cache_name: str,
+        prompt: str,
+        config: types.GenerateContentConfig = None,
+        model: str | None = None,
+    ) -> dict:
         """Generate content referencing an existing Context Cache."""
         if not self.client:
             raise Exception("Gemini client not initialized")
@@ -109,7 +135,7 @@ class GeminiServiceBatch(GeminiServiceUtils):
             config.tools = None
             config.tool_config = None
             response = self.client.models.generate_content(
-                model=self.MODEL,
+                model=model or self.MODEL,
                 contents=prompt,
                 config=config
             )
@@ -118,17 +144,26 @@ class GeminiServiceBatch(GeminiServiceUtils):
             logger.error(f"Failed to generate with cache: {e}")
             raise
 
-    def analyze_claims_batch(self, claims, context=None, cache_name=None, pre_triaged: bool = False):
+    def analyze_claims_batch(
+        self,
+        claims,
+        context=None,
+        cache_name=None,
+        pre_triaged: bool = False,
+        strategy_hints: list[str] | None = None,
+    ):
         """Agentic Batch Analysis with Flash Triage + Thinking Mode + Tool Calling.
 
         Args:
-            claims:      List of claim strings to verify.
-            context:     Optional source document or session context string.
-            cache_name:  Optional Gemini Context Cache name.
-            pre_triaged: Set True when claims were already extracted and filtered
-                         for falsifiability by an upstream agent pass (`identify_claims`,
-                         `vc_analyst`, or `media_forensics`), skipping redundant
-                         `triage_for_stream` calls.
+            claims:         List of claim strings to verify.
+            context:        Optional source document or session context string.
+            cache_name:     Optional Gemini Context Cache name.
+            pre_triaged:    Set True when claims were already extracted and filtered
+                            for falsifiability by an upstream agent pass (`identify_claims`,
+                            `vc_analyst`, or `media_forensics`), skipping redundant
+                            `triage_for_stream` calls.
+            strategy_hints: Optional per-claim strategy hints (e.g. `CONTEXT_CHECK` vs
+                            `SEARCH_VERIFY`) used when `pre_triaged=True` or batch <= 2.
         """
         if not claims:
             return []
@@ -138,7 +173,16 @@ class GeminiServiceBatch(GeminiServiceUtils):
         # STEP 1: Fast Triage (skipped when claims are pre-extracted or batch is small)
         if pre_triaged or len(claims) <= 2:
             triaged = [
-                {"claim": c, "index": i, "priority": ClaimPriority.NORMAL, "strategy": "SEARCH_VERIFY"}
+                {
+                    "claim": c,
+                    "index": i,
+                    "priority": ClaimPriority.NORMAL,
+                    "strategy": (
+                        strategy_hints[i]
+                        if strategy_hints and i < len(strategy_hints) and strategy_hints[i]
+                        else "SEARCH_VERIFY"
+                    ),
+                }
                 for i, c in enumerate(claims)
             ]
         else:
@@ -165,25 +209,32 @@ class GeminiServiceBatch(GeminiServiceUtils):
         logger.info(f"Verifying {len(verify_items)} claims (skipped {len(skip_indices)})")
         
         # STEP 2: Setup for verification
-        from backend.services.grok_service import get_grok_service
+        from backend.services.grok_service import get_grok_service, should_fire_grok
         grok = get_grok_service()
+        claims_to_verify = [v["claim"] for v in verify_items]
+        needs_social_cache = any(should_fire_grok(c) for c in claims_to_verify)
         
         inline_context = None
         if cache_name:
             logger.info(f"Reusing pre-created Context Cache: {cache_name}")
         elif context:
-            if len(context) > 4000:
+            if len(context) >= self.MIN_TEXT_CACHE_CHARS:
                 try:
-                    cache_name = self.create_cache(context, ttl_minutes=5, include_agent_tools=True)
-                    logger.info(f"Created Context Cache: {cache_name}")
+                    create_kwargs = {"ttl_minutes": 5, "include_agent_tools": True}
+                    if needs_social_cache:
+                        create_kwargs["include_social_tool"] = True
+                    cache_name = self.create_cache(context, **create_kwargs)
                 except Exception as e:
                     logger.warning(f"Cache creation failed, using inline: {e}")
+                    cache_name = None
+                if cache_name:
+                    logger.info(f"Created Context Cache: {cache_name}")
+                else:
+                    logger.warning("Context cache returned None, falling back to inline context.")
                     inline_context = context
             else:
-                logger.info("Context too short for cache, injecting inline.")
+                logger.info("Context below minimum cache threshold, injecting inline.")
                 inline_context = context
-        
-        claims_to_verify = [v["claim"] for v in verify_items]
         
         # STEP 3: Sub-batching
         if len(claims_to_verify) <= self.MAX_CLAIMS_PER_PROMPT:
@@ -198,8 +249,8 @@ class GeminiServiceBatch(GeminiServiceUtils):
         
         # STEP 4: Process each sub-batch
         for batch_items, batch_claims in sub_batches:
-            strategy_hints = {i + 1: v["strategy"] for i, v in enumerate(batch_items)}
-            prompt = self._build_agentic_batch_prompt(batch_claims, inline_context, strategy_hints)
+            batch_strategy_hints = {i + 1: v["strategy"] for i, v in enumerate(batch_items)}
+            prompt = self._build_agentic_batch_prompt(batch_claims, inline_context, batch_strategy_hints)
             batch_results = self._run_agentic_batch(
                 prompt, batch_claims, grok, cache_name
             )
@@ -231,9 +282,15 @@ class GeminiServiceBatch(GeminiServiceUtils):
         )
 
         def _batch_parser(final_text, response):
-            if final_text:
-                return self._parse_thinking_batch_response(response, len(claims_to_verify))
-            return None
+            if not final_text:
+                return None
+            try:
+                return self._parse_thinking_batch_response(
+                    response, len(claims_to_verify), raise_on_error=True
+                )
+            except Exception as parse_err:
+                logger.warning(f"Batch turn emitted unparseable response: {parse_err}")
+                return None
 
         parsed = self._run_verification_loop(
             prompt=prompt,
@@ -252,14 +309,10 @@ class GeminiServiceBatch(GeminiServiceUtils):
         if parsed is not None:
             return parsed
 
-        # Fallback
+        # Propagate total upstream failure so route handlers refund reserved CP
+        # and never persist poisoned COULD_NOT_VERIFY rows into the FactCheck cache.
         logger.error("Agentic sub-batch failed after all turns")
-        return [{
-            "is_claim": True,
-            "verdict": "COULD_NOT_VERIFY",
-            "explanation": "Agentic analysis failed",
-            "sources": []
-        } for _ in claims_to_verify]
+        raise RuntimeError("Batch verification service unavailable")
  
     def _build_agentic_batch_prompt(self, claims, inline_context=None, strategy_hints=None):
         """Build the user prompt containing target claims list and any inline context."""
@@ -295,7 +348,7 @@ CLAIMS TO ANALYZE:
  
 For each claim, select the appropriate strategy from your guidelines, verify it, and respond with a JSON results array in the same order."""
  
-    def _parse_thinking_batch_response(self, response_data, expected_count):
+    def _parse_thinking_batch_response(self, response_data, expected_count, raise_on_error: bool = False):
         """Parse the one-shot thinking response into structured results."""
         try:
             content_text = ""
@@ -316,7 +369,9 @@ For each claim, select the appropriate strategy from your guidelines, verify it,
  
             json_text = self._extract_json(content_text)
             result_data = json.loads(json_text)
-            results = result_data.get('results', [])
+            if not isinstance(result_data, dict) or not isinstance(result_data.get('results'), list):
+                raise ValueError("Missing 'results' array in batch response")
+            results = result_data['results']
 
             grounding_urls = self._extract_grounding_urls(candidate)
 
@@ -407,6 +462,8 @@ For each claim, select the appropriate strategy from your guidelines, verify it,
             
         except Exception as e:
             logger.error(f"Failed to parse One-Shot response: {e}")
+            if raise_on_error:
+                raise
             return [{
                 "is_claim": True,
                 "verdict": "COULD_NOT_VERIFY",

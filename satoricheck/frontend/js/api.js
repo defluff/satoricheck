@@ -6,7 +6,7 @@
 const API_BASE = '/api';
 
 class APIClient {
-    async request(endpoint, options = {}, retries = 5, delay = 1500) {
+    async request(endpoint, options = {}, retries = 1, delay = 1500) {
         try {
             const headers = { ...options.headers };
 
@@ -46,10 +46,8 @@ class APIClient {
 
             console.error(`API Error (${endpoint}):`, error);
 
-            // Retry on 503 (Service Unavailable) or 429 (Rate Limit)
-            // Also retry if message explicitly says "temporarily unavailable" (legacy support)
+            // Retry once on transient 503 only (never retry 429 rate limits automatically)
             const isTransient = error.status === 503 ||
-                error.status === 429 ||
                 (error.message && error.message.includes('temporarily unavailable'));
 
             if (isTransient && retries > 0) {

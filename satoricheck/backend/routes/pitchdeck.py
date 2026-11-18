@@ -4,6 +4,7 @@ Handles PDF upload and analysis using Gemini Vision.
 """
 from flask import Blueprint, request, jsonify
 import base64
+import hmac
 import logging
 
 from backend.routes.auth import login_required
@@ -172,7 +173,7 @@ def verify_market_claims():
         market_size = data.get('market_size')
         competition = data.get('competition', [])
         industry = data.get('industry')
-        cache_name = data.get('cache_name')
+        requested_cache = data.get('cache_name')
         company = data.get('company') or data.get('company_name')
         summary = data.get('summary')
         
@@ -181,6 +182,18 @@ def verify_market_claims():
             raise APIError('No claims to verify', status_code=400)
         
         user = request.current_user
+        # Enforce cache ownership: all users share one GEMINI_API_KEY, so never forward
+        # an unverified client-supplied cachedContents ID that could belong to another tenant.
+        cache_name = None
+        if requested_cache and isinstance(requested_cache, str):
+            owned_cache = user.current_pitchdeck_cache
+            if owned_cache and hmac.compare_digest(requested_cache, owned_cache):
+                cache_name = owned_cache
+            else:
+                logger.warning(
+                    f"[Pitchdeck] Ignoring unauthorized or stale cache_name for user {user.id}"
+                )
+
         logger.info(f"[Pitchdeck] Verify request - claims: {len(verifiable_claims)}, company: {company}, cache: {bool(cache_name)}")
         
         # --- PRICING: 1 CP flat per market verification ---
@@ -206,7 +219,8 @@ def verify_market_claims():
         except Exception as e:
             # Refund on service failure
             refund_flat_tokens(user.id, cost)
-            raise
+            logger.error(f"[Pitchdeck] Verification upstream failure (refunded {cost} CP): {e}", exc_info=True)
+            raise APIError('Verification temporarily unavailable. Please try again.', status_code=503)
         
         logger.info(f"[Pitchdeck] Verification complete for user {user.id}: {len(findings)} findings. Cost: {cost} CP")
         

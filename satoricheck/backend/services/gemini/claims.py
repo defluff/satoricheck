@@ -80,7 +80,7 @@ Verify the claim and respond with JSON matching the required schema."""
                 response_parser=_single_claim_parser,
                 cache_name=cache_name,
                 max_turns=4,
-                retries_per_turn=2,
+                retries_per_turn=1,
                 raise_on_turn_failure=True,
                 enable_closing_turn=True,
                 context_label_prefix="agentic",
@@ -119,8 +119,8 @@ Verify the claim and respond with JSON matching the required schema."""
         except Exception as e:
             logger.warning(f"Cache lookup failed: {e}")
  
-        # 2. Call API with Retries
-        max_retries = 3
+        # 2. Call API with bounded transient retries
+        max_retries = 2
         retry_delay = 1
         last_exception = None
  
@@ -165,19 +165,16 @@ Verify the claim and respond with JSON matching the required schema."""
             except Exception as e:
                 logger.error(f"Gemini API error (Attempt {attempt + 1}): {str(e)}", exc_info=True)
                 last_exception = str(e)
-                if attempt < max_retries - 1:
+                is_transient = any(tok in last_exception for tok in ('429', '503', 'RESOURCE_EXHAUSTED', 'UNAVAILABLE', 'Timeout', 'timed out'))
+                if attempt < max_retries - 1 and is_transient:
                     time.sleep(retry_delay)
                     retry_delay *= 2
+                    continue
+                break
  
         logger.error(f"Gemini API failed after {max_retries} attempts. Last error: {last_exception}")
         
         if last_exception and "429" in last_exception:
-             return {
-                'is_claim': True,
-                'verdict': 'COULD_NOT_VERIFY',
-                'explanation': 'System is experiencing high traffic. Please try again in a few minutes.',
-                'fallacy': None,
-                'sources': []
-            }
+            raise Exception("Fact-check service is experiencing high traffic (rate limited). Please try again.")
             
         raise Exception("Fact-check service temporarily unavailable. Please try again.")

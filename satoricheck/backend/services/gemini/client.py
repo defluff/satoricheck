@@ -42,7 +42,7 @@ def _read_skill_file(skill_name: str) -> str | None:
 class GeminiServiceClient:
     """Base client for Gemini Service utilizing the modern google-genai SDK."""
     MODEL = Config.GEMINI_MODEL
-    MODEL_EMBEDDING = "gemini-embedding-2-preview"
+    MODEL_MEDIA = Config.GEMINI_MEDIA_MODEL
     
     TIMEOUT_PRO = 30
     TIMEOUT_FAST = 30
@@ -286,10 +286,9 @@ class GeminiServiceClient:
         fallback recovery, and tool-response synthesis across every verification module.
         """
         google_search_tool = types.Tool(google_search=types.GoogleSearch())
-        if needs_social:
-            tools_list = [google_search_tool, self._build_grok_tool(grok)]
-        else:
-            tools_list = [google_search_tool]
+        attach_grok = bool(needs_social and Config.GROK_ENABLED)
+        grok_tool = self._build_grok_tool(grok) if attach_grok else None
+        tools_list = [google_search_tool, grok_tool] if grok_tool else [google_search_tool]
         tool_cfg = types.ToolConfig(
             include_server_side_tool_invocations=True
         )
@@ -386,30 +385,23 @@ class GeminiServiceClient:
         if enable_closing_turn and conversation and conversation[-1].role == "tool":
             try:
                 logger.info("Agentic closing turn (producing final answer from tool results)...")
+                # Drop cached_content on the closing turn: Gemini rejects combining cached_content
+                # (which bakes in active tools) with response_mime_type="application/json" and
+                # forbids passing FunctionCallingConfigMode.NONE alongside cached_content.
                 closing_tool_cfg = types.ToolConfig(
                     function_calling_config=types.FunctionCallingConfig(
                         mode=types.FunctionCallingConfigMode.NONE
                     )
                 )
-                if cache_name:
-                    closing_config = types.GenerateContentConfig(
-                        cached_content=cache_name,
-                        response_mime_type="application/json",
-                        thinking_config=types.ThinkingConfig(
-                            thinking_level=thinking_level,
-                            include_thoughts=True,
-                        ),
-                    )
-                else:
-                    closing_config = types.GenerateContentConfig(
-                        system_instruction=system_instruction,
-                        response_mime_type="application/json",
-                        thinking_config=types.ThinkingConfig(
-                            thinking_level=thinking_level,
-                            include_thoughts=True,
-                        ),
-                        tool_config=closing_tool_cfg,
-                    )
+                closing_config = types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    response_mime_type="application/json",
+                    thinking_config=types.ThinkingConfig(
+                        thinking_level=thinking_level,
+                        include_thoughts=True,
+                    ),
+                    tool_config=closing_tool_cfg,
+                )
 
                 response, _ = self._generate_with_cache_fallback(
                     model=self.MODEL,

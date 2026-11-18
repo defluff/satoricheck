@@ -423,9 +423,27 @@ def delete_account():
         db_session.query(FactCheck).filter_by(user_id=user.id).delete()
 
         
+        # Capture any remote Gemini Context Caches owned by this user before deletion
+        # so GDPR erasure also purges cached PDFs/documents from Google's servers.
+        from backend.routes.factcheck import purge_user_factcheck_cache
+        caches_to_delete = [
+            cache_name
+            for cache_name in (user.current_pitchdeck_cache, purge_user_factcheck_cache(user.id))
+            if cache_name
+        ]
+
         # 3. Delete the user
         db_session.delete(user)
         db_session.commit()
+
+        if caches_to_delete:
+            try:
+                from backend.services import get_gemini_service
+                gemini_svc = get_gemini_service()
+                for cache_name in caches_to_delete:
+                    gemini_svc.delete_cache(cache_name)
+            except Exception as cache_err:
+                logger.warning(f"Failed to purge remote caches during account deletion: {cache_err}")
         
         logger.info(f"Account deleted successfully: {user_email}")
         

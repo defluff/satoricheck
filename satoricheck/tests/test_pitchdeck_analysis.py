@@ -1274,5 +1274,143 @@ startxref
         assert 'const companyName = dec(r.company_name)' in js_source
         assert '${dec(r.summary)' in js_source
 
+    def test_analyze_pitch_deck_caches_full_pdf_pinned_to_verification_model(self, app):
+        """analyze_pitch_deck must cache the full PDF Part alongside summary text and pin to self.MODEL."""
+        from google.genai import types
+        from backend.services.pitchdeck_service import PitchdeckService
+
+        service = PitchdeckService()
+        mock_client = MagicMock()
+        service.client = mock_client
+
+        mock_gen_resp = MagicMock()
+        mock_gen_resp.text = json.dumps({
+            'company_name': 'HydroNova',
+            'summary': 'Clean water technology startup.',
+            'usp': 'Patented desalination membrane.',
+            'industry': 'CleanTech',
+            'sector': 'Water',
+            'competition': None,
+            'verifiable_claims': [
+                {'claim': 'Market size is $50B', 'category': 'market_size'}
+            ],
+        })
+        mock_client.models.generate_content.return_value = mock_gen_resp
+
+        mock_cache = MagicMock()
+        mock_cache.name = 'cachedContents/deck-abc'
+        mock_client.caches.create.return_value = mock_cache
+
+        pdf_bytes = b'%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF'
+        result = service.analyze_pitch_deck(pdf_bytes)
+
+        assert result['cache_name'] == 'cachedContents/deck-abc'
+        mock_client.caches.create.assert_called_once()
+        cache_kwargs = mock_client.caches.create.call_args.kwargs
+        assert cache_kwargs['model'] == service.MODEL
+
+        cfg = cache_kwargs['config']
+        assert cfg.ttl == '1800s'
+        assert len(cfg.contents) == 2
+        assert isinstance(cfg.contents[0], types.Part)
+        assert cfg.contents[0].inline_data.data == pdf_bytes
+        assert cfg.contents[0].inline_data.mime_type == 'application/pdf'
+        assert 'HydroNova' in cfg.contents[1]
+        assert '<pitchdeck_data_boundary>' in cfg.contents[1]
+        assert cfg.system_instruction
+        # Non-social claims must cache GoogleSearch only (Grok gated on social triggers)
+        assert len(cfg.tools) == 1
+        assert cfg.tools[0].google_search is not None
+
+    def test_create_cache_respects_explicit_model_override_for_cross_model_pinning(self, app):
+        """create_cache must honor explicit model= parameter so consumer model matches downstream queries."""
+        from backend.services.pitchdeck_service import PitchdeckService
+
+        service = PitchdeckService()
+        mock_client = MagicMock()
+        service.client = mock_client
+        service.MODEL = 'gemini-4-argon'
+
+        mock_cache = MagicMock()
+        mock_cache.name = 'cachedContents/flash-pinned-123'
+        mock_client.caches.create.return_value = mock_cache
+
+        cache_name = service.create_cache(
+            'Deck content payload',
+            ttl_minutes=30,
+            include_agent_tools=True,
+            model='gemini-3.8-flash',
+        )
+
+        assert cache_name == 'cachedContents/flash-pinned-123'
+        mock_client.caches.create.assert_called_once()
+        assert mock_client.caches.create.call_args.kwargs['model'] == 'gemini-3.8-flash'
+
+    def test_analyze_pitch_deck_uses_argon_vision_and_flash_cache_split(self, app):
+        """Phase 1 extraction must use MODEL_MEDIA (Argon) at low thinking while cache pins to MODEL (Flash)."""
+        from google.genai import types
+        from backend.services.pitchdeck_service import PitchdeckService
+
+        service = PitchdeckService()
+        mock_client = MagicMock()
+        service.client = mock_client
+
+        mock_gen_resp = MagicMock()
+        mock_gen_resp.text = json.dumps({
+            'company_name': 'SplitBrainCorp',
+            'summary': 'Hybrid verification test.',
+            'usp': 'Fast extraction and cheap cached checks.',
+            'verifiable_claims': [{'claim': 'TAM is $10B', 'category': 'market_size'}],
+        })
+        mock_client.models.generate_content.return_value = mock_gen_resp
+
+        mock_cache = MagicMock()
+        mock_cache.name = 'cachedContents/flash-consumer-cache'
+        mock_client.caches.create.return_value = mock_cache
+
+        pdf_bytes = b'%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF'
+        result = service.analyze_pitch_deck(pdf_bytes)
+
+        assert result['company_name'] == 'SplitBrainCorp'
+        assert result['cache_name'] == 'cachedContents/flash-consumer-cache'
+
+        vision_kwargs = mock_client.models.generate_content.call_args.kwargs
+        assert vision_kwargs['model'] == service.MODEL_MEDIA
+        assert vision_kwargs['model'] == 'gemini-4-argon'
+        assert vision_kwargs['config'].thinking_config.thinking_level == types.ThinkingLevel.LOW
+
+        cache_kwargs = mock_client.caches.create.call_args.kwargs
+        assert cache_kwargs['model'] == service.MODEL
+        assert cache_kwargs['model'] == 'gemini-3.8-flash'
+
+    def test_call_gemini_vision_uploads_large_pdf_via_files_api_and_cleans_up(self, app):
+        """PDFs > 14 MB must use Files API instead of oversized inline bytes and clean up on completion."""
+        from backend.services.pitchdeck_service import PitchdeckService
+
+        service = PitchdeckService()
+        mock_client = MagicMock()
+        service.client = mock_client
+
+        uploaded = MagicMock()
+        uploaded.name = 'files/large-deck-1'
+        uploaded.state = MagicMock()
+        uploaded.state.name = 'ACTIVE'
+        mock_client.files.upload.return_value = uploaded
+
+        mock_resp = MagicMock()
+        mock_resp.text = '{"company_name": "BigDeck"}'
+        mock_client.models.generate_content.return_value = mock_resp
+
+        large_pdf = b'%PDF-1.4\n' + (b'0' * ((14 * 1024 * 1024) + 1024))
+        with patch('requests.post') as mock_rest_post:
+            res = service._call_gemini_vision(large_pdf, "Analyze", model=service.MODEL_MEDIA)
+
+        assert res['candidates'][0]['content']['parts'][0]['text'] == '{"company_name": "BigDeck"}'
+        mock_client.files.upload.assert_called_once()
+        mock_client.files.delete.assert_called_once_with(name='files/large-deck-1')
+        mock_rest_post.assert_not_called()
+
+
+
 
 

@@ -3,8 +3,10 @@ Fact-checking routes.
 Handles text analysis and fact verification using Gemini API.
 """
 from flask import Blueprint, request, jsonify
+import hmac
 import json
 import logging
+import threading
 import time
 from datetime import datetime, UTC, timedelta
 
@@ -14,6 +16,7 @@ from backend.routes.auth import login_required, scheduler_secret_required
 from backend.routes.tokens import reserve_word_tokens, refund_word_tokens
 from backend.error_handlers import APIError
 from backend.services import get_gemini_service
+from backend.services.grok_service import should_fire_grok
 from backend.extensions import limiter
 
 logger = logging.getLogger(__name__)
@@ -21,6 +24,48 @@ logger = logging.getLogger(__name__)
 factcheck_bp = Blueprint('factcheck', __name__, url_prefix='/api/factcheck')
 
 MAX_TEXT_LENGTH = 50000
+_FACTCHECK_CACHE_TTL_SECONDS = 300
+_FACTCHECK_CACHE_LOCK = threading.Lock()
+# Maps user_id -> (cache_name, expires_monotonic) for short-lived 5m factcheck caches
+# without adding a DB column; enforces per-user ownership on single-instance Cloud Run.
+_FACTCHECK_CACHE_OWNERS: dict[int, tuple[str, float]] = {}
+
+
+def _set_owned_factcheck_cache(user_id: int, cache_name: str) -> str | None:
+    """Register cache_name for user_id and return any previous active cache_name to delete."""
+    now = time.monotonic()
+    with _FACTCHECK_CACHE_LOCK:
+        prev = _FACTCHECK_CACHE_OWNERS.get(user_id)
+        _FACTCHECK_CACHE_OWNERS[user_id] = (cache_name, now + _FACTCHECK_CACHE_TTL_SECONDS)
+    return prev[0] if prev and prev[1] > now and prev[0] != cache_name else None
+
+
+def purge_user_factcheck_cache(user_id: int) -> str | None:
+    """Remove and return any active factcheck cache owned by user_id (used on GDPR deletion)."""
+    now = time.monotonic()
+    with _FACTCHECK_CACHE_LOCK:
+        entry = _FACTCHECK_CACHE_OWNERS.pop(user_id, None)
+    return entry[0] if entry and entry[1] > now else None
+
+
+def _resolve_owned_factcheck_cache(user, requested_cache) -> str | None:
+    """Return requested_cache only if it matches the authenticated user's tracked factcheck cache.
+
+    Why: All users share one GEMINI_API_KEY, so trusting an arbitrary client-supplied
+    cachedContents resource name creates a cross-tenant cache IDOR.
+    """
+    if not requested_cache or not isinstance(requested_cache, str):
+        return None
+    now = time.monotonic()
+    with _FACTCHECK_CACHE_LOCK:
+        entry = _FACTCHECK_CACHE_OWNERS.get(user.id)
+        if entry and entry[1] <= now:
+            _FACTCHECK_CACHE_OWNERS.pop(user.id, None)
+            entry = None
+    if entry and hmac.compare_digest(requested_cache, entry[0]):
+        return entry[0]
+    logger.warning(f"Ignoring unauthorized or stale factcheck cache_name for user {user.id}")
+    return None
 
 
 
@@ -71,18 +116,11 @@ def analyze_claim():
         # Record start time
         start_time = time.time()
         
-        # Always use the agentic path (smart_agent is now the default, not a flag)
+        # Always use the agentic path (smart_agent is now the default, not a flag);
+        # _run_verification_loop handles cache fallback recovery in-place.
         try:
-            # Check if cache_name is explicitly passed in the request payload
-            active_cache = data.get('cache_name')
-            try:
-                result = gemini_service.analyze_claim(analysis_text, smart_agent=True, cache_name=active_cache)
-            except Exception:
-                if active_cache:
-                    logger.warning(f"Explicit cache {active_cache} failed, retrying without cache")
-                    result = gemini_service.analyze_claim(analysis_text, smart_agent=True, cache_name=None)
-                else:
-                    raise
+            active_cache = _resolve_owned_factcheck_cache(user, data.get('cache_name'))
+            result = gemini_service.analyze_claim(analysis_text, smart_agent=True, cache_name=active_cache)
             
             # If agentic mode was used, 'social' might be in the result already
             # or integrated into the explanation. Check if we need to structure it.
@@ -162,6 +200,7 @@ def analyze_claim():
 
 @factcheck_bp.route('/create-context-cache', methods=['POST'])
 @login_required
+@limiter.limit("10 per minute")
 def create_context_cache():
     """Pre-create a Gemini context cache for reuse across micro-batches."""
     try:
@@ -170,13 +209,30 @@ def create_context_cache():
             raise APIError('No text provided')
         
         text = data['text'].strip()
-        
-        # Only cache if text is large enough (>4KB)
-        if len(text) <= 4000:
-            return jsonify({'success': True, 'cache_name': None})
+        if len(text) > MAX_TEXT_LENGTH:
+            raise APIError(f'Text exceeds maximum limit of {MAX_TEXT_LENGTH:,} characters.')
+
+        user = request.current_user
+        token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
+        if not token_balance or token_balance.balance < 1:
+            raise APIError('Insufficient tokens to create context cache', status_code=403)
         
         gemini_service = get_gemini_service()
-        cache_name = gemini_service.create_cache(text, ttl_minutes=5, include_agent_tools=True)
+
+        # Only cache if text clears Gemini's minimum explicit cache token floor (~4,096 tokens)
+        if len(text) < gemini_service.MIN_TEXT_CACHE_CHARS:
+            return jsonify({'success': True, 'cache_name': None})
+
+        cache_name = gemini_service.create_cache(
+            text,
+            ttl_minutes=5,
+            include_agent_tools=True,
+            include_social_tool=should_fire_grok(text),
+        )
+        if cache_name:
+            prev_cache = _set_owned_factcheck_cache(user.id, cache_name)
+            if prev_cache:
+                gemini_service.delete_cache(prev_cache)
         
         logger.info(f"Pre-created context cache: {cache_name}")
         return jsonify({'success': True, 'cache_name': cache_name})
@@ -184,6 +240,7 @@ def create_context_cache():
     except APIError:
         raise
     except Exception as e:
+        db_session.rollback()
         logger.error(f"Cache creation error: {e}", exc_info=True)
         # Non-fatal: frontend can proceed without cache
         return jsonify({'success': True, 'cache_name': None})
@@ -211,7 +268,7 @@ def analyze_batch_claims():
             
         user = request.current_user
         context = data.get('context')
-        cache_name = data.get('cache_name')  # Pre-created cache from /create-context-cache
+        cache_name = _resolve_owned_factcheck_cache(user, data.get('cache_name'))
         pre_triaged = bool(data.get('pre_triaged', False))
         
         # 1. Cache Lookup
@@ -230,11 +287,12 @@ def analyze_batch_claims():
                 
             clean_text = claim_text.strip()
             
-            # Check cache
+            # Check cache (skip COULD_NOT_VERIFY so transient/unverified results are never frozen)
             cached = db_session.query(FactCheck).filter(
                 and_(
                     FactCheck.claim_text == clean_text,
                     FactCheck.user_id == user.id,
+                    FactCheck.verdict != 'COULD_NOT_VERIFY',
                 )
             ).order_by(FactCheck.timestamp.desc()).first()
             
@@ -270,29 +328,18 @@ def analyze_batch_claims():
                 user.id, total_word_count, min_cost=1
             )
             
-            # Call API with Context (only reuse cache_name if explicitly provided).
-            # Guard against stale caches (expired TTL): retry without cache on failure.
+            # Call API with Context; _run_verification_loop handles cache fallback recovery in-place.
             gemini_service = get_gemini_service()
             try:
-                effective_cache = cache_name
-                try:
-                    api_results = gemini_service.analyze_claims_batch(
-                        texts_to_analyze, context=context, cache_name=effective_cache, pre_triaged=pre_triaged
-                    )
-                except Exception:
-                    if effective_cache:
-                        logger.warning(f"Volatile cache {effective_cache} failed, retrying without cache")
-                        api_results = gemini_service.analyze_claims_batch(
-                            texts_to_analyze, context=context, cache_name=None, pre_triaged=pre_triaged
-                        )
-                    else:
-                        raise
+                api_results = gemini_service.analyze_claims_batch(
+                    texts_to_analyze, context=context, cache_name=cache_name, pre_triaged=pre_triaged
+                )
                 
             except Exception as e:
                 # Refund committed reservation
                 refund_word_tokens(user.id, token_cost, current_unbilled)
                 logger.error(f"Batch analysis failed: {e}")
-                raise APIError("Batch analysis service unavailable")
+                raise APIError("Batch analysis service unavailable", status_code=503)
 
             # Process API Results
             # Distribute cost roughly evenly for recording purposes? 

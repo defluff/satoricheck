@@ -1606,12 +1606,12 @@ class PitchdeckModule {
     }
 
     /**
-     * Verify a batch of claims in a single API call (up to 10 claims per batch)
+     * Verify a batch of claims in a single API call (up to 8 claims per batch, aligned with backend MAX_CLAIMS_PER_PROMPT)
      */
     async verifyClaimsBatch(claimsToVerify) {
         if (!claimsToVerify || claimsToVerify.length === 0) return;
 
-        const BATCH_SIZE = 10;
+        const BATCH_SIZE = 8;
         for (let i = 0; i < claimsToVerify.length; i += BATCH_SIZE) {
             const batch = claimsToVerify.slice(i, i + BATCH_SIZE);
 
