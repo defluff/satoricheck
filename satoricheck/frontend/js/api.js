@@ -145,7 +145,7 @@ class APIClient {
                         is_claim: true
                     });
                 });
-                if (error.status === 403 || error.status === 401) throw error;
+                if (error.status === 403 || error.status === 402 || error.status === 401) throw error;
             }
         }
 

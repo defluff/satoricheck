@@ -1,6 +1,6 @@
 /**
  * Transcript UI Module
- * Handles Live Pro text streaming
+ * Handles live speech-to-text transcript rendering (Web Speech API)
  */
 
 class TranscriptUI {

@@ -611,6 +611,7 @@
                         </button>
                     </div>
                     <p class="ma-url-hint">⚠️ Only publicly accessible, non-gated URLs are supported. Press Enter to analyse.</p>
+                    <p class="ma-url-hint hidden" id="ma-yt-window-hint">⏱️ Analyzes a 30-second window starting at your link's timestamp (40 CP).</p>
                 </div>
 
                 <p class="ma-disclaimer">
@@ -1144,6 +1145,39 @@
             </div>
 
             <button class="btn-primary" id="intro-close-btn">Get Started!</button>
+        </div>
+    </div>
+
+    <!-- Media Forensics Cost Notice Modal -->
+    <div class="modal hidden" id="ma-cost-modal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content intro-content">
+            <button class="modal-close" id="close-ma-cost-modal" aria-label="Close">×</button>
+            <h2>🔬 Media Forensics &amp; Compute Notice</h2>
+
+            <div class="intro-features">
+                <div class="intro-feature">
+                    <span class="intro-icon">⚡</span>
+                    <div>
+                        <strong>Frontier Multimodal Frame &amp; Audio Inspection</strong>
+                        <p>Media authenticity checks run on a frontier multimodal model (Gemini 4 Argon) that inspects video frames and audio waveforms frame-by-frame, consuming substantially more compute tokens than text fact-checks.</p>
+                    </div>
+                </div>
+                <div class="intro-feature">
+                    <span class="intro-icon">🛡️</span>
+                    <div>
+                        <strong>Predictable Check Point (CP) Caps</strong>
+                        <p>Video is billed by file size and never exceeds 40 CP. Clips longer than 30 seconds are analyzed on their first 30 seconds. YouTube links analyze a 30-second window starting from your link's timestamp.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="intro-pricing">
+                <p>🖼️ <strong>Images:</strong> 4 CP per check · 🎵 <strong>Audio:</strong> 5 CP per check</p>
+                <p>🎬 <strong>Video:</strong> 15 CP up to 5 MB · 25 CP for 5–14 MB · <strong>40 CP</strong> above 14 MB or YouTube (first 30s analyzed)</p>
+            </div>
+
+            <button class="btn-primary" id="ma-cost-ack-btn">I Understand, Continue</button>
         </div>
     </div>
 

@@ -196,9 +196,9 @@ class FactCheckManager {
 
             if (!identifiedClaims) {
                 // Do not escalate auth, balance, or rate-limit errors into a fallback /analyze call
-                if (lastError && (lastError.status === 401 || lastError.status === 403 || lastError.status === 429)) {
+                if (lastError && (lastError.status === 401 || lastError.status === 402 || lastError.status === 403 || lastError.status === 429)) {
                     ui.showToast(lastError.message, 'error');
-                    if (lastError.status === 403) ui.showModal('buy-tokens-modal');
+                    if (lastError.status === 402 || lastError.status === 403) ui.showModal('buy-tokens-modal');
                     return;
                 }
                 console.error('Smart Agent failed identifiers:', lastError);
@@ -324,8 +324,11 @@ class FactCheckManager {
                         });
 
                         // Stop on auth/payment errors
-                        if (error.status === 403 || error.status === 401) {
+                        if (error.status === 403 || error.status === 402 || error.status === 401) {
                             ui.showToast('Insufficient tokens. Purchase more to continue.', 'error');
+                            if (error.status === 402 || error.status === 403) {
+                                ui.showModal('buy-tokens-modal');
+                            }
                             break;
                         }
                     }
@@ -394,7 +397,7 @@ class FactCheckManager {
     }
 
     async handleAutoCheck(chunkText) {
-        // Called from audio input (both standard browser SpeechRecognition and Live Pro)
+        // Called from browser Web Speech API audio input (audio.js)
         if (!this.autoCheck) return;
 
         const transcriptEl = ui.elements.transcriptContainer;
@@ -491,6 +494,9 @@ class FactCheckManager {
                 explanation: error.message || 'Analysis failed. Please try again.'
             });
             ui.showToast('AI detection failed: ' + error.message, 'error');
+            if (error.status === 402 || error.status === 403) {
+                ui.showModal('buy-tokens-modal');
+            }
         }
     }
 }

@@ -20,7 +20,9 @@ class MediaModule {
         this.currentFile = null;
         this.currentUrl = null;
         this.currentBlobUrl = null;
-        this.mediaType = null; // 'video' | 'audio' | 'image'
+        this.currentYtId = null;
+        this.currentYtStart = 0;
+        this.mediaType = null; // 'video' | 'audio' | 'image' | 'youtube'
         this.extractedClaims = [];
         this.verifiedClaimsMap = new Map();
 
@@ -87,6 +89,12 @@ class MediaModule {
             claimsList: document.getElementById('ma-claims-list'),
             claimsCountBadge: document.getElementById('ma-claims-count-badge'),
             verifyAllBtn: document.getElementById('ma-verify-all-btn'),
+
+            // YouTube Window Hint & Cost Notice Modal
+            ytWindowHint: document.getElementById('ma-yt-window-hint'),
+            costModal: document.getElementById('ma-cost-modal'),
+            closeCostModalBtn: document.getElementById('close-ma-cost-modal'),
+            costAckBtn: document.getElementById('ma-cost-ack-btn'),
         };
 
         if (!this.elements.tabUpload) return; // Guard: media view not present
@@ -99,6 +107,7 @@ class MediaModule {
         if (this.elements.mediaView) {
             this.elements.mediaView.classList.remove('hidden');
         }
+        this._maybeShowCostModal();
     }
 
     hide() {
@@ -187,9 +196,28 @@ class MediaModule {
 
         // --- Claims Desk Verification ---
         verifyAllBtn?.addEventListener('click', () => this.verifyAllClaims());
+
+        // --- Cost Notice Modal ---
+        this.elements.costAckBtn?.addEventListener('click', () => this._acknowledgeCostModal());
+        this.elements.closeCostModalBtn?.addEventListener('click', () => this._acknowledgeCostModal());
+    }
+
+    _maybeShowCostModal() {
+        try {
+            if (localStorage.getItem('authenix_media_cost_ack') === '1') return;
+        } catch (_) {}
+        ui.showModal('ma-cost-modal');
+    }
+
+    _acknowledgeCostModal() {
+        try {
+            localStorage.setItem('authenix_media_cost_ack', '1');
+        } catch (_) {}
+        ui.hideModal('ma-cost-modal');
     }
 
     _handleFileSelected(file) {
+        this._maybeShowCostModal();
         this.currentFile = file;
         this.currentUrl = null;
 
@@ -240,6 +268,36 @@ class MediaModule {
         return null;
     }
 
+    _extractYouTubeStartSeconds(url) {
+        if (!url || typeof url !== 'string') return 0;
+        try {
+            const parsed = new URL(url.trim());
+            let raw = parsed.searchParams.get('t') || parsed.searchParams.get('start');
+            if (!raw && parsed.hash) {
+                const hashParams = new URLSearchParams(parsed.hash.replace(/^#/, ''));
+                raw = hashParams.get('t') || hashParams.get('start');
+            }
+            if (!raw) return 0;
+            const match = raw.trim().match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$/i);
+            if (!match || (!match[1] && !match[2] && !match[3])) return 0;
+            return (parseInt(match[1] || '0', 10) * 3600)
+                + (parseInt(match[2] || '0', 10) * 60)
+                + parseInt(match[3] || '0', 10);
+        } catch (_) {}
+        return 0;
+    }
+
+    _formatSecondsTimestamp(totalSeconds) {
+        const sec = Math.max(0, Math.floor(totalSeconds || 0));
+        const hrs = Math.floor(sec / 3600);
+        const mins = Math.floor((sec % 3600) / 60);
+        const rem = sec % 60;
+        if (hrs > 0) {
+            return `${hrs}:${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
+        }
+        return `${mins}:${String(rem).padStart(2, '0')}`;
+    }
+
     _handleUrlPreview(url) {
         if (!url) {
             this._hidePreview();
@@ -249,7 +307,9 @@ class MediaModule {
         const ytId = this._extractYouTubeId(url);
         if (ytId) {
             this.mediaType = 'youtube';
-            this._setupPreviewPlayer(url, `YouTube (${ytId})`, 'youtube', ytId);
+            const ytStart = this._extractYouTubeStartSeconds(url);
+            const label = `YouTube (${ytId} · 30s window from ${this._formatSecondsTimestamp(ytStart)})`;
+            this._setupPreviewPlayer(url, label, 'youtube', ytId, ytStart);
             return;
         }
 
@@ -266,8 +326,8 @@ class MediaModule {
         this._setupPreviewPlayer(url, displayName, detectedType);
     }
 
-    _setupPreviewPlayer(src, filename, type, ytId = null) {
-        const { previewCard, previewFilename, previewBadge, previewIcon, player, audioPlayer, imagePreview, youtubeContainer, youtubeThumbnailWrapper, youtubeThumb, youtubeExternalLink, youtubePlayer } = this.elements;
+    _setupPreviewPlayer(src, filename, type, ytId = null, ytStart = 0) {
+        const { previewCard, previewFilename, previewBadge, previewIcon, player, audioPlayer, imagePreview, youtubeContainer, youtubeThumbnailWrapper, youtubeThumb, youtubeExternalLink, youtubePlayer, ytWindowHint } = this.elements;
         if (!previewCard) return;
 
         previewCard.classList.remove('hidden');
@@ -277,6 +337,7 @@ class MediaModule {
         audioPlayer.classList.add('hidden');
         imagePreview.classList.add('hidden');
         if (youtubeContainer) youtubeContainer.classList.add('hidden');
+        if (ytWindowHint) ytWindowHint.classList.add('hidden');
         if (youtubePlayer) {
             youtubePlayer.classList.add('hidden');
             youtubePlayer.src = '';
@@ -284,12 +345,18 @@ class MediaModule {
 
         if (type === 'youtube' && ytId) {
             this.currentYtId = ytId;
+            this.currentYtStart = ytStart || 0;
             previewIcon.textContent = '▶️';
             previewBadge.textContent = 'YOUTUBE';
             if (youtubeContainer) youtubeContainer.classList.remove('hidden');
+            if (ytWindowHint) ytWindowHint.classList.remove('hidden');
             if (youtubeThumbnailWrapper) youtubeThumbnailWrapper.classList.remove('hidden');
             if (youtubeThumb) youtubeThumb.src = `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`;
-            if (youtubeExternalLink) youtubeExternalLink.href = `https://www.youtube.com/watch?v=${ytId}`;
+            if (youtubeExternalLink) {
+                youtubeExternalLink.href = this.currentYtStart > 0
+                    ? `https://www.youtube.com/watch?v=${ytId}&t=${this.currentYtStart}s`
+                    : `https://www.youtube.com/watch?v=${ytId}`;
+            }
         } else if (type === 'video') {
             previewIcon.textContent = '🎬';
             previewBadge.textContent = 'VIDEO';
@@ -311,12 +378,16 @@ class MediaModule {
     _activateYouTubeIframe() {
         if (!this.currentYtId || !this.elements.youtubePlayer) return;
         this.elements.youtubeThumbnailWrapper?.classList.add('hidden');
-        this.elements.youtubePlayer.src = `https://www.youtube-nocookie.com/embed/${this.currentYtId}?autoplay=1&enablejsapi=1`;
+        const startParam = this.currentYtStart > 0 ? `&start=${this.currentYtStart}` : '';
+        this.elements.youtubePlayer.src = `https://www.youtube-nocookie.com/embed/${this.currentYtId}?autoplay=1&enablejsapi=1${startParam}`;
         this.elements.youtubePlayer.classList.remove('hidden');
     }
 
     _hidePreview() {
         this._pausePlayback();
+        if (this.elements.ytWindowHint) {
+            this.elements.ytWindowHint.classList.add('hidden');
+        }
         if (this.elements.previewCard) {
             this.elements.previewCard.classList.add('hidden');
         }
@@ -433,7 +504,10 @@ class MediaModule {
             loadingSection?.classList.add('hidden');
             scannerBeam?.classList.add('hidden');
             this.renderResult(response.result);
-            ui.showToast('Media analysis complete', 'success');
+            const toastMsg = response.cost_incurred
+                ? `Media analysis complete (${response.cost_incurred} CP)`
+                : 'Media analysis complete';
+            ui.showToast(toastMsg, 'success');
 
             // Update user balance in header if returned
             if (response.new_balance !== undefined) {
@@ -534,6 +608,7 @@ class MediaModule {
         this._updateCriterion('metadata',    criteria.metadata);
 
         // 3. Claims Desk (Spoken Claims Extraction)
+        this.lastExplanation = result.explanation || null;
         this.extractedClaims = result.claims || [];
         this.renderClaimsDesk(this.extractedClaims);
 
@@ -550,7 +625,8 @@ class MediaModule {
 
         const tagLower = (data.tag || '').toLowerCase();
         let signal = 'uncertain';
-        if (tagLower.includes('high') || tagLower.includes('suspicious')) signal = 'suspicious';
+        if (tagLower === 'n/a') signal = 'clear';
+        else if (tagLower.includes('high') || tagLower.includes('suspicious')) signal = 'suspicious';
         else if (tagLower.includes('low') || tagLower.includes('clean') || tagLower.includes('clear')) signal = 'clear';
 
         const score = data.score || 0;
@@ -597,12 +673,17 @@ class MediaModule {
             card.id = `ma-claim-${index}`;
 
             const timestamp = item.timestamp || '00:00';
-            const seconds = item.timestamp_seconds !== undefined ? item.timestamp_seconds : this._parseTimestampToSeconds(timestamp);
+            const escapedTimestamp = this._escapeHtml(timestamp);
+            const rawSeconds = (item.timestamp_seconds !== undefined && item.timestamp_seconds !== null)
+                ? item.timestamp_seconds
+                : this._parseTimestampToSeconds(timestamp);
+            const parsedSeconds = Number(rawSeconds);
+            const seconds = Number.isFinite(parsedSeconds) ? Math.max(0, Math.floor(parsedSeconds)) : 0;
 
             card.innerHTML = `
                 <div class="ma-claim-top">
-                    <button class="ma-timestamp-tag" data-seconds="${seconds}" title="Click to seek player to ${timestamp}">
-                        ▶ ${timestamp}
+                    <button class="ma-timestamp-tag" data-seconds="${seconds}" title="Click to seek player to ${escapedTimestamp}">
+                        ▶ ${escapedTimestamp}
                     </button>
                     <span class="ma-claim-status-pill" data-verdict="pending" id="ma-pill-${index}">PENDING</span>
                 </div>
@@ -625,7 +706,7 @@ class MediaModule {
      * Seek video or audio player to specific second.
      */
     seekToTimestamp(seconds) {
-        if (typeof seconds !== 'number' || isNaN(seconds)) return;
+        if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return;
 
         if (this.mediaType === 'youtube') {
             if (this.elements.youtubePlayer && !this.elements.youtubePlayer.classList.contains('hidden')) {
@@ -669,7 +750,7 @@ class MediaModule {
 
         try {
             const claimTexts = this.extractedClaims.map(c => c.claim);
-            const batchResponse = await api.analyzeBatch(claimTexts);
+            const batchResponse = await api.analyzeBatch(claimTexts, this.lastExplanation);
 
             const results = batchResponse.results || [];
             results.forEach((item, index) => {
