@@ -80,9 +80,10 @@ def get_balance():
     # Get streak
     streak = db_session.query(Streak).filter_by(user_id=user.id).first()
     current_streak = streak.current_streak if streak else 0
+    high_water = (streak.cycle_reward_high_water or 0) if streak else 0
     
     # Get streak info
-    streak_info = get_streak_info(current_streak)
+    streak_info = get_streak_info(current_streak, high_water)
     
     # Check if a reward was granted today (for frontend toast)
     today_reward = None

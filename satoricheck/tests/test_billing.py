@@ -395,7 +395,7 @@ class TestBillingPackagesAndRedirects:
         data = response.get_json()
         assert data['success'] is True
         assert set(data['packages'].keys()) == {'battery_small', 'battery_medium', 'battery_large', 'wizard'}
-        assert data['packages']['wizard']['price'] == 99900
+        assert data['packages']['wizard']['price'] == 190000
         assert 'words_per_cp' not in data
         assert 'tokens_per_cp_unit' not in data
 

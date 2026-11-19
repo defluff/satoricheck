@@ -79,6 +79,6 @@ class TestPricingDisplay:
             page_text = page.locator('body').inner_text()
             
             # These prices should match Config.TOKEN_PACKAGES
-            # Small: 4.50 CHF, Medium: 24 CHF, Large: 99 CHF
-            has_prices = any(price in page_text for price in ['4.50', '24', '99', 'CHF'])
+            # Small: 4.50 CHF, Medium: 49 CHF, Large: 99 CHF
+            has_prices = any(price in page_text for price in ['4.50', '49', '99', 'CHF'])
             # Soft assertion - prices may be formatted differently

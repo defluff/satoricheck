@@ -22,6 +22,7 @@ class StreakUI {
 
     renderStreakRoadmap(streakData) {
         const currentStreak = streakData.current_streak || 0;
+        const claimedUpTo = streakData.cycle_reward_high_water || 0;
 
         // Calculate Cycle (Prestige Level)
         const cycle = Math.floor((currentStreak - 1) / 30);
@@ -33,10 +34,12 @@ class StreakUI {
 
         // Reward schedule
         const rewards = {
-            6: { icon: '🔋', amount: 100 },
-            14: { icon: '🔋', amount: 200 },
-            21: { icon: '⚡', amount: 400 },
-            30: { icon: '💎', amount: 1000 }
+            3: { icon: '🔋', amount: 10 },
+            6: { icon: '🔋', amount: 25 },
+            10: { icon: '☕', amount: 40 },
+            14: { icon: '🔋', amount: 50 },
+            21: { icon: '⚡', amount: 100 },
+            30: { icon: '💎', amount: 250 }
         };
 
         let html = `
@@ -66,9 +69,12 @@ class StreakUI {
 
             let tooltipAttr = '';
             if (rewards[i]) {
-                classes += ' reward-day';
+                const isClaimedInCycle = i <= claimedUpTo;
+                classes += isClaimedInCycle ? ' reward-day claimed' : ' reward-day';
                 iconHtml = `<span class="streak-reward-icon large">${rewards[i].icon}</span>`;
-                tooltipAttr = `data-tooltip="Reward: ${rewards[i].amount} CP"`;
+                tooltipAttr = isClaimedInCycle
+                    ? `data-tooltip="Claimed this cycle (${rewards[i].amount} CP)"`
+                    : `data-tooltip="Reward: ${rewards[i].amount} CP"`;
             }
 
             html += `

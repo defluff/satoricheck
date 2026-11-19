@@ -7,10 +7,12 @@ from backend.config import Config
 
 # Streak reward schedule (day -> CP amount)
 STREAK_REWARDS = {
-    6: 100,
-    14: 200,
-    21: 400,
-    30: 1000
+    3: 10,
+    6: 25,
+    10: 40,
+    14: 50,
+    21: 100,
+    30: 250
 }
 
 
@@ -53,24 +55,39 @@ def update_streak(streak_obj, last_active):
     return streak_obj.current_streak
 
 
-def check_and_grant_streak_reward(user_id, current_streak, db_session):
+def check_and_grant_streak_reward(user_id, current_streak, db_session, streak_obj=None):
     """
     Check if user qualifies for a streak reward and grant it.
+
+    Rewards are locked per 30-day cycle via ``cycle_reward_high_water`` so
+    breaking a streak does not allow re-farming earlier milestones until a
+    full 30-day cycle is completed.
     
     Args:
         user_id: User ID
         current_streak: Current streak count
         db_session: Database session
+        streak_obj: Optional Streak instance to read/update cycle high-water mark
         
     Returns:
         Tuple (reward_amount, reward_message) if granted, else (0, None)
     """
-    from backend.models import TokenBalance, Transaction
+    from backend.models import Streak, TokenBalance, Transaction
+
+    if current_streak <= 0:
+        return 0, None
     
     # Calculate cycle day (rewards repeat every 30 days)
     cycle_day = (current_streak - 1) % 30 + 1
     
     if cycle_day not in STREAK_REWARDS:
+        return 0, None
+
+    if streak_obj is None:
+        streak_obj = db_session.query(Streak).filter_by(user_id=user_id).first()
+
+    high_water = (streak_obj.cycle_reward_high_water or 0) if streak_obj else 0
+    if cycle_day <= high_water:
         return 0, None
     
     reward_amount = STREAK_REWARDS[cycle_day]
@@ -92,13 +109,18 @@ def check_and_grant_streak_reward(user_id, current_streak, db_session):
         return 0, None
     
     token_balance.balance += reward_amount
+    if streak_obj is not None:
+        # Reset at Day 30 so completing a full cycle unlocks rewards again from Day 1
+        streak_obj.cycle_reward_high_water = 0 if cycle_day == 30 else cycle_day
     
     # Build reward message
     messages = {
-        6: "Mojo Rising! +100 CP Reward",
-        14: "Two Weeks Strong! +200 CP Reward",
-        21: "Habit Master! +400 CP Reward",
-        30: "LEGENDARY! +1000 CP Reward"
+        3: f"You're on a roll! +{STREAK_REWARDS[3]} CP Reward",
+        6: f"Mojo Rising! +{STREAK_REWARDS[6]} CP Reward",
+        10: f"You got yourself a coffee on the house! +{STREAK_REWARDS[10]} CP Reward",
+        14: f"Two Weeks Strong! +{STREAK_REWARDS[14]} CP Reward",
+        21: f"Habit Master! +{STREAK_REWARDS[21]} CP Reward",
+        30: f"LEGENDARY! +{STREAK_REWARDS[30]} CP Reward"
     }
     reward_message = messages.get(cycle_day, f"Streak Day {cycle_day} Reward")
     
@@ -114,12 +136,13 @@ def check_and_grant_streak_reward(user_id, current_streak, db_session):
     return reward_amount, reward_message
 
 
-def get_streak_info(streak_count):
+def get_streak_info(streak_count, cycle_reward_high_water=0):
     """
     Get streak milestone information.
     
     Args:
         streak_count: Current streak count
+        cycle_reward_high_water: Highest cycle day reward already claimed in the active 30-day cycle
         
     Returns:
         Dict with milestone name and next milestone info
@@ -138,6 +161,7 @@ def get_streak_info(streak_count):
     return {
         'current_milestone': current_milestone,
         'current_streak': streak_count,
+        'cycle_reward_high_water': cycle_reward_high_water,
         'next_milestone': next_milestone,
         'next_count': next_count,
         'days_until_next': next_count - streak_count if next_count else 0
@@ -179,7 +203,9 @@ def handle_login_streak(user_id, db_session):
     current_count = update_streak(streak, streak.last_active_date)
     
     # Check for rewards
-    reward_amount, reward_message = check_and_grant_streak_reward(user_id, current_count, db_session)
+    reward_amount, reward_message = check_and_grant_streak_reward(
+        user_id, current_count, db_session, streak_obj=streak
+    )
     
     return {
         "streak_count": current_count,

@@ -94,37 +94,37 @@ class Config:
     TOKEN_PACKAGES = {
         'battery_small': {
             'name': 'Small Battery',
-            'tokens': 86,
+            'tokens': 40,
             'price': 450,  # 4.50 CHF
             'currency': 'chf',
             'stripe_price_id': 'price_1SiEx8DnKgm8pOxQ6XL616H1'
         },
         'battery_medium': {
             'name': 'Medium Battery',
-            'tokens': 486,
-            'price': 2400,  # 24 CHF
+            'tokens': 450,
+            'price': 4900,  # 49 CHF
             'currency': 'chf',
-            'stripe_price_id': 'price_1SiExTDnKgm8pOxQIx7ONzbb'
+            'stripe_price_id': 'price_1UdbvwDnKgm8pOxQLJKUrLtM'
         },
         'battery_large': {
             'name': 'Large Battery',
-            'tokens': 2222,
+            'tokens': 1000,
             'price': 9900,  # 99 CHF
             'currency': 'chf',
             'stripe_price_id': 'price_1SiEy2DnKgm8pOxQ0heRz08W'
         },
         'wizard': {
             'name': 'Wizard Energy Plantation',
-            'tokens': 1000,  # per month
-            'price': 99900,  # 999 CHF ONE-TIME
+            'tokens': 500,  # per month
+            'price': 190000,  # 1900 CHF ONE-TIME
             'currency': 'chf',
             'is_subscription': False,
             'duration': 60,  # 5 years of monthly refills
-            'stripe_price_id': 'price_1SiEyODnKgm8pOxQIlGabEOQ'
+            'stripe_price_id': 'price_1UdbzCDnKgm8pOxQSGyIVyB0'
         }
     }
     
-    WIZARD_REFILL_AMOUNT = 1000
+    WIZARD_REFILL_AMOUNT = 500
     
     # Token costs
     MEDIA_CP_IMAGE = 4

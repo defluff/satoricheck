@@ -113,6 +113,18 @@
     background: var(--bg-warning-hover);
 }
 
+.streak-day.reward-day.claimed:not(.completed) {
+    border-color: var(--color-border);
+    border-style: dashed;
+    color: var(--color-text-secondary);
+    background: transparent;
+    opacity: 0.55;
+}
+
+.streak-day.reward-day.claimed:not(.completed) .streak-reward-icon {
+    filter: grayscale(1);
+}
+
 .streak-reward-icon {
     position: absolute;
     top: -8px;

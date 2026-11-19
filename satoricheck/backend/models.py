@@ -67,6 +67,7 @@ class Streak(Base):
     user_id = Column(Integer, ForeignKey('users.id'), unique=True, nullable=False)
     current_streak = Column(Integer, default=0)
     longest_streak = Column(Integer, default=0)
+    cycle_reward_high_water = Column(Integer, default=0)
     last_active_date = Column(DateTime)
     
     user = relationship('User', back_populates='streak')
