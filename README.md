@@ -15,7 +15,7 @@ Authenix is my AI-powered BS detector for live audio streams, text claims, start
 - **Media Forensics**: Drop in an image, video, or audio clip to check if it's real, CGI, or fresh out of an AI generator.
 - **Hybrid Gemini + xAI Grok Tag-Team**: Gemini 3.8 Flash handles text extraction, triage, and grounded claim verification (plus cached pitch-deck follow-ups), Gemini 4 Argon powers frontier media forensics and visual pitch deck extraction, and Grok 4.7 steps in whenever a claim involves breaking news, quotes, or viral X/Twitter drama.
 - **Chrome Extension (MV3)**: A side-panel companion with 1-click Google login so you can fact-check dubious articles and posts without leaving your tab.
-- **Batteries & Check Points (CP)**: Daily login streaks, fair word-based token billing, and Stripe top-ups so my API bill doesn't bankrupt me.
+- **Batteries & Check Points (CP)**: Daily login streaks, predictable flat Check Point (CP) billing, and Stripe top-ups so my API bill doesn't bankrupt me.
 - **Privacy First (Swiss nDSG & GDPR)**: PDFs and media are processed in memory and immediately tossed. History auto-purges after 7 days, and "Delete My Account" actually deletes your account.
 
 ---
