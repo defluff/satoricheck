@@ -416,11 +416,6 @@ class GeminiServiceClient:
 
         return None
 
-    @staticmethod
-    def _is_private_ip(ip_str: str) -> bool:
-        """Return True if the IP is private, loopback, link-local, or cloud metadata."""
-        return safe_http.is_private_ip(ip_str)
-
     def _validate_url(self, url: str) -> bool:
         """Check if a URL is reachable and every redirect hop is public (SSRF guard)."""
         try:

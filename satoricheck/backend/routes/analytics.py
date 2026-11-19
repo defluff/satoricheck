@@ -9,28 +9,16 @@ from backend.database import db_session
 from backend.models import ShareStats
 from backend.routes.auth import login_required
 from backend.error_handlers import APIError
+from backend.extensions import limiter
 
 logger = logging.getLogger(__name__)
 
 analytics_bp = Blueprint('analytics', __name__, url_prefix='/api/analytics')
 
 
-# Lazy limiter import to avoid circular dependency
-def get_limiter():
-    from backend.server import limiter
-    return limiter
-
-
-# Apply rate limiting via before_request hook (avoids decorator circular import)
-@analytics_bp.before_request
-def apply_rate_limit():
-    """Apply rate limit: 10 per minute for analytics endpoints."""
-    limiter = get_limiter()
-    limiter.limit("10 per minute")(lambda: None)()
-
-
 @analytics_bp.route('/share', methods=['POST'])
 @login_required
+@limiter.limit("10 per minute")
 def track_share():
     """Track share event without storing content.
     

@@ -214,19 +214,6 @@ export async function analyzeAI(text) {
 }
 
 /**
- * Submit a media URL for authenticity analysis.
- * @param {string} url - Public media URL
- * @returns {Promise<Object>} Media analysis result
- */
-export async function analyzeMediaUrl(url) {
-    return request('/media/analyze-url', {
-        method: 'POST',
-        body: JSON.stringify({ url }),
-        timeoutMs: ANALYSIS_TIMEOUT_MS,
-    });
-}
-
-/**
  * Unified Modular Analyzer.
  * Executes analysis according to mode:
  *   - 'both': Runs Claims Verification & AI Text Scanner in parallel (Default)

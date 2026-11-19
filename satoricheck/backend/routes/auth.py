@@ -33,12 +33,6 @@ _DUMMY_BCRYPT_HASH = bcrypt.hashpw(
     bcrypt.gensalt(rounds=4 if Config.ENV == 'testing' else 12),
 )
 
-# Import rate limiter from server
-def get_limiter():
-    """Lazy import to avoid circular dependency."""
-    from backend.server import limiter
-    return limiter
-
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 

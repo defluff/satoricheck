@@ -44,7 +44,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (authStatus) authStatus.textContent = 'Checking session…';
     const user = await syncWebAuthSession();
     if (user) {
-        await showConnectedState();
+        await showConnectedState(user);
     } else {
         showDisconnectedState();
     }
@@ -59,7 +59,7 @@ function setupEventListeners() {
         try {
             const user = await initiateGoogleLogin();
             if (user) {
-                await showConnectedState();
+                await showConnectedState(user);
             } else {
                 if (authStatus) authStatus.textContent = 'Sign-in canceled or timed out.';
             }
@@ -117,10 +117,9 @@ function setupEventListeners() {
 
 // --- State Transitions ---
 
-async function showConnectedState() {
+async function showConnectedState(prefetchedUser = null) {
     try {
-        const response = await getCurrentUser();
-        const user = response.user;
+        const user = prefetchedUser || (await getCurrentUser()).user;
 
         accountEmail.textContent = user.email || 'Connected';
         balanceBadge.textContent = `${user.balance ?? 0} CP`;
