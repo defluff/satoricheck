@@ -662,7 +662,7 @@ class PitchdeckModule {
         this.currentThesisAlignment = alignment;
 
         const applyDimensionBadge = (valEl, badgeEl, dimData) => {
-            if (valEl) valEl.textContent = dimData.extracted || 'Unclear';
+            if (valEl) valEl.innerHTML = DOMPurify.sanitize(dimData.extracted || 'Unclear');
             if (!badgeEl) return;
 
             badgeEl.className = 'badge';
@@ -1124,7 +1124,7 @@ class PitchdeckModule {
             if (competitors.length > 0) {
                 competitors.forEach(comp => {
                     const li = document.createElement('li');
-                    li.textContent = comp;
+                    li.innerHTML = DOMPurify.sanitize(comp);
                     competitionList.appendChild(li);
                 });
             } else {
@@ -1516,7 +1516,7 @@ class PitchdeckModule {
             const trimmed = flagText.trim();
             const isCritical = trimmed.toUpperCase().startsWith('CRITICAL');
             li.className = isCritical ? 'callout-item callout-item--critical' : 'callout-item';
-            li.textContent = trimmed;
+            li.innerHTML = DOMPurify.sanitize(trimmed);
             list.appendChild(li);
         });
         container.classList.remove('hidden');
