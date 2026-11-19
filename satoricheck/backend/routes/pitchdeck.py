@@ -6,6 +6,7 @@ from flask import Blueprint, request, jsonify
 import base64
 import hmac
 import logging
+import math
 
 from backend.routes.auth import login_required
 from backend.routes.tokens import reserve_flat_tokens, refund_flat_tokens
@@ -61,35 +62,30 @@ def analyze_pitch_deck():
             logger.warning(f"Invalid base64 data: {e}")
             raise APIError('Invalid base64-encoded PDF data', status_code=400)
         
-        # --- PRICING LOGIC ---
+        # --- PRICING & INPUT VALIDATION ---
         user = request.current_user
-        
-        # 1. Estimate Page Count (Lean Regex)
-        # Finds top-level /Count N in PDF trailer/catalog. Fallback to 1 if not found.
-        page_count = 1
-        try:
-            import re
-            import math
-            # Search for /Count 123 in first 5kb (linearized) or last 5kb (standard)
-            # Simplest approach: search entire bytestream with a safe limit or just search
-            match = re.search(rb'/Count\s+(\d+)', pdf_bytes)
-            if match:
-                page_count = int(match.group(1).decode('utf-8'))
-        except Exception as e:
-            logger.warning(f"[Pitchdeck] Page count regex failed: {e}. Defaulting to 1 page.")
-            page_count = 1
-            
-        if page_count > 100:
+        service = _resolve_pitchdeck_service()
+
+        if not service._is_valid_pdf(pdf_bytes):
+            raise APIError('Invalid PDF - not a valid PDF file', status_code=400)
+        if len(pdf_bytes) > service.MAX_FILE_SIZE:
+            raise APIError(
+                f'File too large. Maximum size is {service.MAX_FILE_SIZE // (1024 * 1024)}MB',
+                status_code=400,
+            )
+
+        page_count = service._estimate_page_count(pdf_bytes)
+        if page_count > service.MAX_SLIDES_HARDCAP:
             raise APIError('Pitch deck exceeds maximum allowed size (100 slides). Please upload core deck.', status_code=400)
 
-        # 2. Calculate Cost (1 CP per 10 slides, Min 1, Max 6 CP for up to 60 standard slides)
-        # Examples: 8 slides -> 1 CP. 12 slides -> 2 CP. 55 slides -> 6 CP.
+        # Calculate Cost (2 CP per 10 slides, Min 2, Max 12 CP for up to 60 standard slides)
+        # Examples: 8 slides -> 2 CP. 12 slides -> 4 CP. 55 slides -> 12 CP.
         effective_pages = min(page_count, 60)
-        cost = max(1, math.ceil(effective_pages / 10))
+        cost = max(2, math.ceil(effective_pages / 10) * 2)
         
         logger.info(f"[Pitchdeck] Pricing: {page_count} pages (effective {effective_pages}) -> {cost} CP")
 
-        # 3. Atomically Reserve Tokens (Optimistic Reservation)
+        # Atomically Reserve Tokens (Optimistic Reservation)
         from backend.database import db_session
         reserve_flat_tokens(
             user.id,
@@ -104,13 +100,12 @@ def analyze_pitch_deck():
             from backend.services import get_gemini_service
             gemini_svc = get_gemini_service()
 
-            # 5. Flush Previous Cache (Volatile Caching)
+            # Flush Previous Cache (Volatile Caching)
             if user.current_pitchdeck_cache:
                 gemini_svc.delete_cache(user.current_pitchdeck_cache)
                 user.current_pitchdeck_cache = None
                 db_session.commit()
 
-            service = _resolve_pitchdeck_service()
             result = service.analyze_pitch_deck(pdf_bytes)
             
             # Use the cache_name from the result
@@ -170,15 +165,13 @@ def verify_market_claims():
             raise APIError('No data provided', status_code=400)
         
         verifiable_claims = data.get('verifiable_claims', [])
-        market_size = data.get('market_size')
-        competition = data.get('competition', [])
         industry = data.get('industry')
         requested_cache = data.get('cache_name')
         company = data.get('company') or data.get('company_name')
         summary = data.get('summary')
         
         # Validate at least one claim to verify
-        if not verifiable_claims and not market_size and not competition:
+        if not verifiable_claims or not isinstance(verifiable_claims, list):
             raise APIError('No claims to verify', status_code=400)
         
         user = request.current_user
@@ -209,8 +202,6 @@ def verify_market_claims():
             service = _resolve_pitchdeck_service()
             findings = service.verify_market_claims(
                 verifiable_claims=verifiable_claims,
-                market_size=market_size,
-                competition=competition,
                 industry=industry,
                 cache_name=cache_name,
                 company=company,

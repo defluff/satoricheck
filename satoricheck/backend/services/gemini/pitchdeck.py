@@ -715,120 +715,76 @@ class GeminiServicePitchdeck(GeminiServiceMedia):
     def verify_market_claims(
         self,
         verifiable_claims: Optional[list] = None,
-        market_size: Optional[str] = None,
-        competition: Optional[list] = None,
         industry: Optional[str] = None,
         cache_name: Optional[str] = None,
         company: Optional[str] = None,
         summary: Optional[str] = None
     ) -> list:
         """Fact-check claims using GeminiService batch verification with company context."""
+        if not verifiable_claims or not isinstance(verifiable_claims, list):
+            return []
+
         findings = []
         industry_ctx = html.unescape(str(industry)) if industry else "technology"
         company_ctx = html.unescape(str(company)) if company else "Target Startup"
         summary_clean = html.unescape(str(summary)) if summary else ""
         summary_ctx = f" | Summary: {summary_clean}" if summary_clean else ""
 
-        if verifiable_claims and isinstance(verifiable_claims, list):
-            valid_claims = [
-                c for c in verifiable_claims[:10]
-                if isinstance(c, dict) and c.get("claim") and len(c.get("claim", "")) >= 5
-            ]
-            if not valid_claims:
-                logger.info("[Pitchdeck] No valid verifiable claims to process")
-                return []
+        valid_claims = [
+            c for c in verifiable_claims[:10]
+            if isinstance(c, dict) and c.get("claim") and len(c.get("claim", "")) >= 5
+        ]
+        if not valid_claims:
+            logger.info("[Pitchdeck] No valid verifiable claims to process")
+            return []
 
-            logger.info(f"[Pitchdeck] Batch processing {len(valid_claims)} claims for company: {company_ctx}")
-            batch_inputs = []
-            strategy_hints = []
-            for c in valid_claims:
-                claim_text = html.unescape(str(c.get("claim", "")))
-                cat = c.get("category", "other")
-                raw_source = c.get("source_cited")
-                source_cited = html.unescape(str(raw_source)) if raw_source else "None"
-                raw_ctx = c.get("context") or ""
-                claim_ctx = html.unescape(str(raw_ctx)) if raw_ctx else ""
-                batch_inputs.append(
-                    f'"{claim_text}" (Subject Entity/Company: {company_ctx}, Category: {cat}, Context: {claim_ctx}, Source cited: {source_cited})'
-                )
-                strategy_hints.append(
-                    "CONTEXT_CHECK" if c.get("verifiability") == "internal" else "SEARCH_VERIFY"
-                )
-
-            from backend.services import get_gemini_service
-            gemini_svc = get_gemini_service()
-            rich_context = f"Startup: {company_ctx} | Industry Vertical: {industry_ctx}{summary_ctx}"
-            # Let upstream exceptions propagate so /api/pitchdeck/verify-market refunds CP
-            batch_results = gemini_svc.analyze_claims_batch(
-                batch_inputs,
-                context=rich_context,
-                cache_name=cache_name,
-                pre_triaged=True,
-                strategy_hints=strategy_hints,
+        logger.info(f"[Pitchdeck] Batch processing {len(valid_claims)} claims for company: {company_ctx}")
+        batch_inputs = []
+        strategy_hints = []
+        for c in valid_claims:
+            claim_text = html.unescape(str(c.get("claim", "")))
+            cat = c.get("category", "other")
+            raw_source = c.get("source_cited")
+            source_cited = html.unescape(str(raw_source)) if raw_source else "None"
+            raw_ctx = c.get("context") or ""
+            claim_ctx = html.unescape(str(raw_ctx)) if raw_ctx else ""
+            batch_inputs.append(
+                f'"{claim_text}" (Subject Entity/Company: {company_ctx}, Category: {cat}, Context: {claim_ctx}, Source cited: {source_cited})'
+            )
+            strategy_hints.append(
+                "CONTEXT_CHECK" if c.get("verifiability") == "internal" else "SEARCH_VERIFY"
             )
 
-            for i, c in enumerate(valid_claims):
-                res = batch_results[i] if i < len(batch_results) and batch_results[i] else {}
-                verdict = res.get("verdict", "UNVERIFIED")
-                explanation = res.get("explanation", "Verification unavailable")
-                risk_level = self._map_verdict_to_risk_level(verdict, c)
-                suggested_question = self._build_fallback_question(c, verdict, risk_level)
+        from backend.services import get_gemini_service
+        gemini_svc = get_gemini_service()
+        rich_context = f"Startup: {company_ctx} | Industry Vertical: {industry_ctx}{summary_ctx}"
+        # Let upstream exceptions propagate so /api/pitchdeck/verify-market refunds CP
+        batch_results = gemini_svc.analyze_claims_batch(
+            batch_inputs,
+            context=rich_context,
+            cache_name=cache_name,
+            pre_triaged=True,
+            strategy_hints=strategy_hints,
+        )
 
-                findings.append({
-                    "claim_type": c.get("category", "other"),
-                    "original_claim": c.get("claim", ""),
-                    "source_cited": c.get("source_cited"),
-                    "slide_number": c.get("slide_number"),
-                    "verdict": verdict,
-                    "risk_level": risk_level,
-                    "verifiability": c.get("verifiability", "public"),
-                    "explanation": explanation,
-                    "verification_finding": explanation,
-                    "suggested_question": suggested_question,
-                    "sources": res.get("sources", [])[:3]
-                })
-            return findings
+        for i, c in enumerate(valid_claims):
+            res = batch_results[i] if i < len(batch_results) and batch_results[i] else {}
+            verdict = res.get("verdict", "UNVERIFIED")
+            explanation = res.get("explanation", "Verification unavailable")
+            risk_level = self._map_verdict_to_risk_level(verdict, c)
+            suggested_question = self._build_fallback_question(c, verdict, risk_level)
 
-        # Legacy fallback
-        legacy_claims = []
-        legacy_meta = []
-        if market_size and market_size.lower() not in ['null', 'not mentioned', 'n/a', '']:
-            clean_market_size = html.unescape(str(market_size))
-            legacy_claims.append(f"The {industry_ctx} market size is {clean_market_size}")
-            legacy_meta.append({"claim_type": "market_size", "original_claim": market_size})
-
-        if competition and isinstance(competition, list):
-            for competitor in competition[:3]:
-                if competitor and isinstance(competitor, str):
-                    clean_comp = html.unescape(competitor)
-                    legacy_claims.append(f"{clean_comp} is a company operating in the {industry_ctx} industry")
-                    legacy_meta.append({"claim_type": "competitor", "original_claim": competitor})
-
-        if legacy_claims:
-            from backend.services import get_gemini_service
-            gemini_svc = get_gemini_service()
-            # Let upstream exceptions propagate so /api/pitchdeck/verify-market refunds CP
-            batch_results = gemini_svc.analyze_claims_batch(
-                legacy_claims,
-                context=f"Startup Industry Vertical: {industry_ctx}",
-                cache_name=cache_name,
-                pre_triaged=True,
-            )
-
-            for i, meta in enumerate(legacy_meta):
-                res = batch_results[i] if i < len(batch_results) and batch_results[i] else {}
-                verdict = res.get("verdict", "UNVERIFIED")
-                explanation = res.get("explanation", "Verification unavailable")
-                risk_level = self._map_verdict_to_risk_level(verdict, {"category": meta["claim_type"]})
-                findings.append({
-                    "claim_type": meta["claim_type"],
-                    "original_claim": meta["original_claim"],
-                    "verdict": verdict,
-                    "risk_level": risk_level,
-                    "explanation": explanation,
-                    "verification_finding": explanation,
-                    "suggested_question": self._build_fallback_question(None, verdict, risk_level),
-                    "sources": res.get("sources", [])[:3]
-                })
-
+            findings.append({
+                "claim_type": c.get("category", "other"),
+                "original_claim": c.get("claim", ""),
+                "source_cited": c.get("source_cited"),
+                "slide_number": c.get("slide_number"),
+                "verdict": verdict,
+                "risk_level": risk_level,
+                "verifiability": c.get("verifiability", "public"),
+                "explanation": explanation,
+                "verification_finding": explanation,
+                "suggested_question": suggested_question,
+                "sources": res.get("sources", [])[:3]
+            })
         return findings
