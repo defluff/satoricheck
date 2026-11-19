@@ -6,7 +6,6 @@ Uses google-genai SDK with MODEL_MEDIA (Config.GEMINI_MEDIA_MODEL) at low
 thinking level for visual extraction and caches full PDF context on MODEL
 (Config.GEMINI_MODEL) for downstream claim verification.
 """
-import base64
 import html
 import io
 import json
@@ -31,9 +30,6 @@ class GeminiServicePitchdeck(GeminiServiceMedia):
     # Field length limits for sanitization
     MAX_FIELD_LENGTH = 5000
     MAX_COMPANY_NAME_LENGTH = 200
-
-    # Timeout in seconds
-    TIMEOUT = 90
 
     # Allowed schema keys and categories for strict validation
     ALLOWED_TOP_LEVEL_KEYS = {
@@ -82,11 +78,20 @@ class GeminiServicePitchdeck(GeminiServiceMedia):
         return pdf_bytes[:5] == b'%PDF-'
 
     def _estimate_page_count(self, pdf_bytes: bytes) -> int:
-        """Estimate page count from PDF bytestream."""
+        """Estimate page count from PDF bytestream using max /Count to prevent spoofing."""
         try:
-            match = re.search(rb'/Count\s+(\d+)', pdf_bytes)
-            if match:
-                return int(match.group(1).decode('utf-8'))
+            matches = re.findall(rb'/Count\s+(\d+)', pdf_bytes)
+            if matches:
+                counts = []
+                for m in matches:
+                    stripped = m.lstrip(b'0')
+                    if not stripped:
+                        counts.append(0)
+                    elif len(stripped) > 9:
+                        counts.append(self.MAX_SLIDES_HARDCAP + 1)
+                    else:
+                        counts.append(int(stripped))
+                return max(1, max(counts))
         except Exception as e:
             logger.warning(f"[Pitchdeck] Page count extraction error: {e}")
         return 1
@@ -132,93 +137,57 @@ class GeminiServicePitchdeck(GeminiServiceMedia):
         uploaded_file=None,
     ) -> dict:
         """
-        Execute multimodal vision call via SDK (or REST fallback).
+        Execute multimodal vision call via Google GenAI SDK.
         Maintains backward compatibility with tests patching _call_gemini_vision.
         """
         if user_prompt is None:
             user_prompt = system_instruction
             system_instruction = None
 
+        if not self.client:
+            raise Exception("Gemini client not initialized")
+
         target_model = model or self.MODEL
+        owned_upload = None
+        try:
+            if uploaded_file is not None:
+                pdf_part = uploaded_file
+            elif len(pdf_bytes) > self.MAX_INLINE_MEDIA_BYTES:
+                logger.info(f"[Pitchdeck] Uploading large PDF ({len(pdf_bytes)} bytes) via Files API")
+                owned_upload = self._upload_and_poll_file(io.BytesIO(pdf_bytes), "application/pdf")
+                pdf_part = owned_upload
+            else:
+                pdf_part = types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
 
-        # Prefer modern Client SDK with dynamic model (Files API when > 14 MB inline ceiling)
-        if self.client:
-            owned_upload = None
-            try:
-                if uploaded_file is not None:
-                    pdf_part = uploaded_file
-                elif len(pdf_bytes) > self.MAX_INLINE_MEDIA_BYTES:
-                    logger.info(f"[Pitchdeck] Uploading large PDF ({len(pdf_bytes)} bytes) via Files API")
-                    owned_upload = self._upload_and_poll_file(io.BytesIO(pdf_bytes), "application/pdf")
-                    pdf_part = owned_upload
-                else:
-                    pdf_part = types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
-
-                config = types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    thinking_config=types.ThinkingConfig(
-                        thinking_level="low"
-                    )
+            config = types.GenerateContentConfig(
+                response_mime_type="application/json",
+                thinking_config=types.ThinkingConfig(
+                    thinking_level="low"
                 )
-                if system_instruction:
-                    config.system_instruction = system_instruction
+            )
+            if system_instruction:
+                config.system_instruction = system_instruction
 
-                response = self.client.models.generate_content(
-                    model=target_model,
-                    contents=[pdf_part, user_prompt],
-                    config=config
-                )
+            response = self.client.models.generate_content(
+                model=target_model,
+                contents=[pdf_part, user_prompt],
+                config=config
+            )
 
-                text = response.text or ""
-                return {
-                    'candidates': [{
-                        'content': {
-                            'parts': [{'text': text}]
-                        }
-                    }]
-                }
-            finally:
-                if owned_upload and self.client:
-                    try:
-                        self.client.files.delete(name=owned_upload.name)
-                    except Exception as cleanup_err:
-                        logger.warning(f"[Pitchdeck] Failed to delete Gemini file: {cleanup_err}")
-
-        # REST fallback using target_model
-        import requests
-        pdf_base64 = base64.standard_b64encode(pdf_bytes).decode('utf-8')
-        payload = {
-            "contents": [{
-                "parts": [
-                    {
-                        "inline_data": {
-                            "mime_type": "application/pdf",
-                            "data": pdf_base64
-                        }
-                    },
-                    {
-                        "text": user_prompt
+            text = response.text or ""
+            return {
+                'candidates': [{
+                    'content': {
+                        'parts': [{'text': text}]
                     }
-                ]
-            }]
-        }
-        if system_instruction:
-            payload["systemInstruction"] = {
-                "parts": [{"text": system_instruction}]
+                }]
             }
-        payload["generationConfig"] = {
-            "responseMimeType": "application/json"
-        }
-
-        url = self._get_api_url(target_model)
-        resp = requests.post(
-            url,
-            json=payload,
-            headers=self._get_headers(),
-            timeout=self.TIMEOUT
-        )
-        resp.raise_for_status()
-        return resp.json()
+        finally:
+            if owned_upload and self.client:
+                try:
+                    self.client.files.delete(name=owned_upload.name)
+                except Exception as cleanup_err:
+                    logger.warning(f"[Pitchdeck] Failed to delete Gemini file: {cleanup_err}")
 
     def analyze_pitch_deck(self, pdf_bytes: bytes) -> dict:
         """

@@ -647,69 +647,96 @@ class TestPitchdeckServiceVisionCall:
 
     def test_vision_call_includes_pdf_in_request(self, app):
         """
-        Given: PDF bytes
+        Given: PDF bytes and an initialized Gemini SDK client
         When: _call_gemini_vision() is called
-        Then: Request payload includes PDF as inline data
+        Then: SDK generate_content receives PDF as types.Part inline_data, prompt, and returns parsed structure
         """
+        from google.genai import types
         from backend.services.pitchdeck_service import PitchdeckService
-        
+
         service = PitchdeckService()
+        mock_client = MagicMock()
+        service.client = mock_client
+
+        mock_resp = MagicMock()
+        mock_resp.text = '{"company_name": "Test"}'
+        mock_client.models.generate_content.return_value = mock_resp
+
         pdf_bytes = b'%PDF-1.4\ntest content'
-        
-        with patch('requests.post') as mock_post:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {
-                'candidates': [{
-                    'content': {
-                        'parts': [{'text': '{"company_name": "Test"}'}]
-                    }
-                }]
-            }
-            mock_post.return_value = mock_response
-            
-            service._call_gemini_vision(pdf_bytes, "Analyze this PDF")
-            
-            # Verify PDF data was included in request
-            call_args = mock_post.call_args
-            payload = call_args[1]['json'] if 'json' in call_args[1] else call_args[0][1]
-            
-            # Should contain inline_data with PDF
-            assert 'contents' in payload
+        result = service._call_gemini_vision(pdf_bytes, "Analyze this PDF")
+
+        mock_client.models.generate_content.assert_called_once()
+        call_kwargs = mock_client.models.generate_content.call_args.kwargs
+        assert call_kwargs['model'] == PitchdeckService.MODEL
+
+        contents = call_kwargs['contents']
+        assert len(contents) == 2
+        assert isinstance(contents[0], types.Part)
+        assert contents[0].inline_data.data == pdf_bytes
+        assert contents[0].inline_data.mime_type == 'application/pdf'
+        assert contents[1] == "Analyze this PDF"
+        assert call_kwargs['config'].response_mime_type == 'application/json'
+        assert result == {
+            'candidates': [{
+                'content': {
+                    'parts': [{'text': '{"company_name": "Test"}'}]
+                }
+            }]
+        }
 
     def test_vision_call_uses_pro_model_for_vision(self, app):
         """
-        Given: PDF analysis request
+        Given: PDF analysis request and an initialized Gemini SDK client
+        When: _call_gemini_vision() is called without explicit model override
+        Then: Uses configured default model with JSON response config and PDF Part
+        """
+        from google.genai import types
+        from backend.services.pitchdeck_service import PitchdeckService
+
+        service = PitchdeckService()
+        mock_client = MagicMock()
+        service.client = mock_client
+
+        mock_resp = MagicMock()
+        mock_resp.text = '{}'
+        mock_client.models.generate_content.return_value = mock_resp
+
+        pdf_bytes = b'%PDF-1.4\ntest'
+        result = service._call_gemini_vision(pdf_bytes, "Analyze")
+
+        mock_client.models.generate_content.assert_called_once()
+        call_kwargs = mock_client.models.generate_content.call_args.kwargs
+        assert call_kwargs['model'] == PitchdeckService.MODEL
+
+        contents = call_kwargs['contents']
+        assert len(contents) == 2
+        assert isinstance(contents[0], types.Part)
+        assert contents[0].inline_data.data == pdf_bytes
+        assert contents[0].inline_data.mime_type == 'application/pdf'
+        assert contents[1] == "Analyze"
+        assert call_kwargs['config'].response_mime_type == 'application/json'
+        assert result == {
+            'candidates': [{
+                'content': {
+                    'parts': [{'text': '{}'}]
+                }
+            }]
+        }
+
+    def test_vision_call_raises_when_client_not_initialized(self, app):
+        """
+        Given: PitchdeckService with service.client = None
         When: _call_gemini_vision() is called
-        Then: Uses vision-capable Pro model
+        Then: Raises Exception('Gemini client not initialized')
         """
         from backend.services.pitchdeck_service import PitchdeckService
-        
+
         service = PitchdeckService()
+        service.client = None
         pdf_bytes = b'%PDF-1.4\ntest'
-        
-        with patch('requests.post') as mock_post:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {
-                'candidates': [{
-                    'content': {
-                        'parts': [{'text': '{}'}]
-                    }
-                }]
-            }
-            mock_post.return_value = mock_response
-            
+
+        with pytest.raises(Exception, match="Gemini client not initialized"):
             service._call_gemini_vision(pdf_bytes, "Analyze")
-            
-            # Verify correct model endpoint and payload structure
-            call_url = mock_post.call_args[0][0]
-            assert PitchdeckService.MODEL in call_url
-            
-            payload = mock_post.call_args[1]['json']
-            # Ensure PDF data is sent as inline_data with correct mime type
-            parts = payload['contents'][0]['parts']
-            assert any(part.get('inline_data', {}).get('mime_type') == 'application/pdf' for part in parts)
 
 
 class TestPitchdeckVisualAndSecurityHardening:
@@ -1409,6 +1436,245 @@ startxref
         mock_client.files.upload.assert_called_once()
         mock_client.files.delete.assert_called_once_with(name='files/large-deck-1')
         mock_rest_post.assert_not_called()
+
+
+class TestPitchdeckPageCountHardening:
+    """Tests for _estimate_page_count spoofing resistance, hardcap enforcement, and billing accuracy."""
+
+    @staticmethod
+    def _make_spoofed_pdf(spoofed_count: int, real_count: int) -> bytes:
+        return (
+            f"%PDF-1.4\n% /Count {spoofed_count}\n"
+            f"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+            f"2 0 obj << /Type /Pages /Kids [3 0 R] /Count {real_count} >> endobj\n"
+            f"3 0 obj << /Type /Page /Parent 2 0 R >> endobj\n"
+            f"trailer << /Root 1 0 R >>\n%%EOF"
+        ).encode('utf-8')
+
+    def test_estimate_page_count_uses_max_and_handles_edge_cases(self, app):
+        """_estimate_page_count must take max /Count across all matches, clamp /Count 0 to 1, and fallback to 1."""
+        from backend.services.pitchdeck_service import PitchdeckService
+
+        service = PitchdeckService()
+        assert service._estimate_page_count(self._make_spoofed_pdf(1, 150)) == 150
+        assert service._estimate_page_count(self._make_spoofed_pdf(1, 50)) == 50
+        assert service._estimate_page_count(b'%PDF-1.4\n2 0 obj << /Count 0 >> endobj') == 1
+        assert service._estimate_page_count(b'%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\n%%EOF') == 1
+
+    def test_analyze_pitch_deck_rejects_spoofed_pdf_exceeding_hardcap(self, app):
+        """Service must reject % /Count 1 preceding /Count 150 with ValueError and never invoke Gemini."""
+        from backend.services.pitchdeck_service import PitchdeckService
+
+        service = PitchdeckService()
+        mock_client = MagicMock()
+        service.client = mock_client
+
+        with pytest.raises(ValueError, match=r'exceeds maximum allowed size \(150 slides\)'):
+            service.analyze_pitch_deck(self._make_spoofed_pdf(1, 150))
+
+        mock_client.models.generate_content.assert_not_called()
+        mock_client.caches.create.assert_not_called()
+
+    def test_endpoint_rejects_spoofed_count_150_with_zero_deduction(
+        self, auth_client, test_user, db_session_fixture
+    ):
+        """POST /api/pitchdeck/analyze must return 400 and deduct 0 CP when % /Count 1 precedes /Count 150."""
+        from backend.models import TokenBalance
+        from backend.services import get_gemini_service, get_pitchdeck_service
+
+        pitchdeck_svc = get_pitchdeck_service()
+        gemini_svc = get_gemini_service()
+        mock_client = MagicMock()
+        pdf_b64 = base64.b64encode(self._make_spoofed_pdf(1, 150)).decode('utf-8')
+
+        with patch.object(pitchdeck_svc, 'client', mock_client), \
+             patch.object(gemini_svc, 'client', mock_client):
+            resp = auth_client.post('/api/pitchdeck/analyze', json={'pdf_data': pdf_b64})
+
+        assert resp.status_code == 400
+        assert resp.get_json()['error'] == (
+            'Pitch deck exceeds maximum allowed size (100 slides). Please upload core deck.'
+        )
+        mock_client.models.generate_content.assert_not_called()
+        mock_client.caches.create.assert_not_called()
+
+        db_session_fixture.expire_all()
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert bal.balance == 100
+
+    def test_endpoint_bills_max_count_when_spoofed_low_count_precedes_50_pages(
+        self, auth_client, test_user, db_session_fixture
+    ):
+        """POST /api/pitchdeck/analyze must bill 10 CP (50 pages), not 2 CP, when % /Count 1 precedes /Count 50."""
+        from backend.models import TokenBalance
+        from backend.services import get_gemini_service, get_pitchdeck_service
+
+        pitchdeck_svc = get_pitchdeck_service()
+        gemini_svc = get_gemini_service()
+
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = json.dumps({
+            'company_name': 'SpoofCheckCorp',
+            'summary': 'Fifty-slide deck.',
+            'usp': 'Verified billing.',
+        })
+        mock_client.models.generate_content.return_value = mock_resp
+        mock_cache = MagicMock()
+        mock_cache.name = 'cachedContents/spoof-billing-50'
+        mock_client.caches.create.return_value = mock_cache
+
+        pdf_b64 = base64.b64encode(self._make_spoofed_pdf(1, 50)).decode('utf-8')
+
+        with patch.object(pitchdeck_svc, 'client', mock_client), \
+             patch.object(gemini_svc, 'client', mock_client):
+            resp = auth_client.post('/api/pitchdeck/analyze', json={'pdf_data': pdf_b64})
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['success'] is True
+        assert data['cost_incurred'] == 10
+        assert data['page_count'] == 50
+
+        mock_client.models.generate_content.assert_called_once()
+        assert mock_client.models.generate_content.call_args.kwargs['model'] == pitchdeck_svc.MODEL_MEDIA
+        mock_client.caches.create.assert_called_once()
+
+        db_session_fixture.expire_all()
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert bal.balance == 90
+
+    def test_estimate_page_count_handles_oversized_and_zero_padded_counts(self, app):
+        """_estimate_page_count must resist >4300-digit int() ValueError and handle leading zeros."""
+        from backend.services.pitchdeck_service import PitchdeckService
+
+        service = PitchdeckService()
+        # 4301-digit token after /Count 150 must not poison /Count 150
+        assert service._estimate_page_count(b"%PDF-1.4\n/Count 150\n/Count " + b"9" * 4301) == 150
+        # Order-independent: 4301-digit token before /Count 150 also preserves 150
+        assert service._estimate_page_count(b"%PDF-1.4\n/Count " + b"9" * 4301 + b"\n/Count 150") == 150
+        # Standalone 4301-digit token clamps to MAX_SLIDES_HARDCAP + 1 (101)
+        assert service._estimate_page_count(b"%PDF-1.4\n/Count " + b"9" * 4301) == 101
+        # 4301 leading zeros before 50 strips safely to 50
+        assert service._estimate_page_count(b"%PDF-1.4\n/Count " + b"0" * 4301 + b"50") == 50
+        # 4301 zeros strips to empty -> 0 -> clamped to 1
+        assert service._estimate_page_count(b"%PDF-1.4\n/Count " + b"0" * 4301) == 1
+
+    def test_analyze_pitch_deck_rejects_4301_digit_count_bypass(self, app):
+        """Service must reject 4301-digit /Count payloads with ValueError before invoking Gemini."""
+        from backend.services.pitchdeck_service import PitchdeckService
+
+        service = PitchdeckService()
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = json.dumps({
+            'company_name': 'BypassCorp',
+            'summary': 'Bypassed deck.',
+            'usp': 'None.',
+        })
+        mock_client.models.generate_content.return_value = mock_resp
+        mock_cache = MagicMock()
+        mock_cache.name = 'cachedContents/bypass-check'
+        mock_client.caches.create.return_value = mock_cache
+        service.client = mock_client
+
+        with pytest.raises(ValueError, match=r'exceeds maximum allowed size \(150 slides\)'):
+            service.analyze_pitch_deck(b"%PDF-1.4\n/Count 150\n/Count " + b"9" * 4301)
+
+        with pytest.raises(ValueError, match=r'exceeds maximum allowed size \(101 slides\)'):
+            service.analyze_pitch_deck(b"%PDF-1.4\n/Count " + b"9" * 4301)
+
+        mock_client.models.generate_content.assert_not_called()
+        mock_client.caches.create.assert_not_called()
+
+    @pytest.mark.parametrize(
+        'pdf_bytes',
+        [
+            b"%PDF-1.4\n/Count 150\n/Count " + b"9" * 4301,
+            b"%PDF-1.4\n/Count " + b"9" * 4301,
+        ],
+        ids=['explicit_150_plus_4301_nines', 'standalone_4301_nines'],
+    )
+    def test_endpoint_rejects_4301_digit_count_bypass_with_zero_deduction(
+        self, auth_client, test_user, db_session_fixture, pdf_bytes
+    ):
+        """POST /api/pitchdeck/analyze must return 400 and deduct 0 CP for 4301-digit /Count payloads."""
+        from backend.models import TokenBalance
+        from backend.services import get_gemini_service, get_pitchdeck_service
+
+        pitchdeck_svc = get_pitchdeck_service()
+        gemini_svc = get_gemini_service()
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = json.dumps({
+            'company_name': 'BypassCorp',
+            'summary': 'Bypassed deck.',
+            'usp': 'None.',
+        })
+        mock_client.models.generate_content.return_value = mock_resp
+        mock_cache = MagicMock()
+        mock_cache.name = 'cachedContents/bypass-check'
+        mock_client.caches.create.return_value = mock_cache
+        pdf_b64 = base64.b64encode(pdf_bytes).decode('utf-8')
+
+        with patch.object(pitchdeck_svc, 'client', mock_client), \
+             patch.object(gemini_svc, 'client', mock_client):
+            resp = auth_client.post('/api/pitchdeck/analyze', json={'pdf_data': pdf_b64})
+
+        assert resp.status_code == 400
+        assert resp.get_json()['error'] == (
+            'Pitch deck exceeds maximum allowed size (100 slides). Please upload core deck.'
+        )
+        mock_client.models.generate_content.assert_not_called()
+        mock_client.caches.create.assert_not_called()
+
+        db_session_fixture.expire_all()
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert bal.balance == 100
+
+    def test_endpoint_bills_50_pages_with_4301_leading_zeros(
+        self, auth_client, test_user, db_session_fixture
+    ):
+        """POST /api/pitchdeck/analyze must strip 4301 leading zeros on /Count 000...50 and bill 10 CP."""
+        from backend.models import TokenBalance
+        from backend.services import get_gemini_service, get_pitchdeck_service
+
+        pitchdeck_svc = get_pitchdeck_service()
+        gemini_svc = get_gemini_service()
+
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = json.dumps({
+            'company_name': 'ZeroPadCorp',
+            'summary': 'Fifty-slide deck with leading zeros.',
+            'usp': 'Verified zero-padding handling.',
+        })
+        mock_client.models.generate_content.return_value = mock_resp
+        mock_cache = MagicMock()
+        mock_cache.name = 'cachedContents/zero-pad-50'
+        mock_client.caches.create.return_value = mock_cache
+
+        pdf_bytes = b"%PDF-1.4\n/Count " + b"0" * 4301 + b"50"
+        pdf_b64 = base64.b64encode(pdf_bytes).decode('utf-8')
+
+        with patch.object(pitchdeck_svc, 'client', mock_client), \
+             patch.object(gemini_svc, 'client', mock_client):
+            resp = auth_client.post('/api/pitchdeck/analyze', json={'pdf_data': pdf_b64})
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['success'] is True
+        assert data['cost_incurred'] == 10
+        assert data['page_count'] == 50
+
+        mock_client.models.generate_content.assert_called_once()
+        assert mock_client.models.generate_content.call_args.kwargs['model'] == pitchdeck_svc.MODEL_MEDIA
+        mock_client.caches.create.assert_called_once()
+
+        db_session_fixture.expire_all()
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert bal.balance == 90
+
 
 
 
