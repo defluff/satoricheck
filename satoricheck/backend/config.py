@@ -117,7 +117,7 @@ class Config:
         'wizard': {
             'name': 'Wizard Energy Plantation',
             'tokens': 1000,  # Was 5000, now ÷5 (per month)
-            'price': 89000,  # 890 CHF ONE-TIME
+            'price': 99900,  # 999 CHF ONE-TIME
             'currency': 'chf',
             'is_subscription': False,
             'duration': 60,  # 5 years of monthly refills

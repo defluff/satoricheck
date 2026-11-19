@@ -395,6 +395,7 @@ class TestBillingPackagesAndRedirects:
         data = response.get_json()
         assert data['success'] is True
         assert set(data['packages'].keys()) == {'battery_small', 'battery_medium', 'battery_large', 'wizard'}
+        assert data['packages']['wizard']['price'] == 99900
         assert data['words_per_cp'] == Config.WORDS_PER_CP
 
     def test_payment_success_redirect_never_credits_tokens_directly(self, client, test_user, db_session_fixture):
