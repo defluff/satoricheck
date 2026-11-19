@@ -6,7 +6,9 @@ Flask-CORS==6.0.5
 Flask-Limiter==4.1.1
 google-genai==2.12.1
 gunicorn==26.2.0
+joserfc==1.8.0
 psycopg2-binary==2.9.13
+pyasn1==0.6.5
 PyJWT==2.15.1
 python-dotenv==1.2.2
 requests==2.34.2
