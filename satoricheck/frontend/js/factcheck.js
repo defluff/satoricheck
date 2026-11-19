@@ -232,9 +232,10 @@ class FactCheckManager {
                     this.checkedTexts.add(claim.trim()); // Optimistically mark as checked
                 });
 
-                // 2b. Pre-create context cache once (aligned with backend 16k-char / ~4,096-token floor)
+                // 2b. Pre-create context cache once ONLY for multi-batch texts (>8 claims, >=16k chars)
+                const MICRO_BATCH_SIZE = 8;
                 let cacheName = null;
-                if (text.length >= 16000) {
+                if (text.length >= 16000 && uncheckedClaims.length > MICRO_BATCH_SIZE) {
                     try {
                         const cacheResponse = await api.request('/factcheck/create-context-cache', {
                             method: 'POST',
@@ -251,7 +252,6 @@ class FactCheckManager {
 
                 // 2c. Progressive Batches: Process up to 8 claims at a time (matching backend MAX_CLAIMS_PER_PROMPT)
                 // to preserve cross-claim entity clustering and minimize LLM round-trips
-                const MICRO_BATCH_SIZE = 8;
                 let processedCount = 0;
 
                 for (let i = 0; i < uncheckedClaims.length; i += MICRO_BATCH_SIZE) {
@@ -267,14 +267,16 @@ class FactCheckManager {
 
                     try {
                         // Call batch API with pre-created cache_name and pre_triaged=true
-                        // since identifyClaims already filtered for falsifiability
+                        // since identifyClaims already filtered for falsifiability.
+                        // Skip re-sending full context text when cache_name is active.
                         const batchBody = {
                             claims: chunk,
-                            context: text,  // Pass original text as context
                             pre_triaged: true
                         };
                         if (cacheName) {
                             batchBody.cache_name = cacheName;
+                        } else {
+                            batchBody.context = text;
                         }
 
                         const response = await api.request('/factcheck/analyze-batch', {

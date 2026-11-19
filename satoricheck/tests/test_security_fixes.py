@@ -533,6 +533,15 @@ class TestWalletDrainProtections:
         assert resp.status_code == 400
         assert 'exceeds maximum limit' in resp.get_json().get('error', '')
 
+    def test_identify_claims_rejects_oversized_payload(self, auth_client):
+        """Identify-claims payloads exceeding 50,000 characters must be rejected before hitting Gemini."""
+        huge_text = "a" * 50001
+        resp = auth_client.post('/api/factcheck/identify-claims', json={
+            'text': huge_text
+        })
+        assert resp.status_code == 400
+        assert 'exceeds maximum limit' in resp.get_json().get('error', '')
+
     def test_tokens_committed_before_external_llm_call(self, auth_client, test_user, db_session_fixture):
         """Token reservation must be committed to DB BEFORE calling external Gemini API."""
         from backend.models import TokenBalance

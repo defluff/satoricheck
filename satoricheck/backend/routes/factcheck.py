@@ -452,6 +452,7 @@ def get_fact_check_history():
 
 @factcheck_bp.route('/identify-claims', methods=['POST'])
 @login_required
+@limiter.limit("10 per minute")
 def identify_claims():
     """Smart Agent: Identify distinct claims in text before fact-checking.
     
@@ -466,6 +467,8 @@ def identify_claims():
             raise APIError('No text provided')
         
         text = data['text'].strip()
+        if len(text) > MAX_TEXT_LENGTH:
+            raise APIError(f'Text exceeds maximum limit of {MAX_TEXT_LENGTH:,} characters.')
         user = request.current_user
         
         # Guard: User must have at least 1 CP to use Smart Agent pipeline

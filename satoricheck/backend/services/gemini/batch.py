@@ -180,35 +180,8 @@ class GeminiServiceBatch(GeminiServiceUtils):
         
         logger.info(f"Verifying {len(verify_items)} claims (skipped {len(skip_indices)})")
         
-        # STEP 2: Setup for verification
-        from backend.services.grok_service import get_grok_service, should_fire_grok
-        grok = get_grok_service()
+        # STEP 2: Sub-batching (computed first so ephemeral caches are only created for multi-batch runs)
         claims_to_verify = [v["claim"] for v in verify_items]
-        needs_social_cache = any(should_fire_grok(c) for c in claims_to_verify)
-        
-        inline_context = None
-        if cache_name:
-            logger.info(f"Reusing pre-created Context Cache: {cache_name}")
-        elif context:
-            if len(context) >= self.MIN_TEXT_CACHE_CHARS:
-                try:
-                    create_kwargs = {"ttl_minutes": 5, "include_agent_tools": True}
-                    if needs_social_cache:
-                        create_kwargs["include_social_tool"] = True
-                    cache_name = self.create_cache(context, **create_kwargs)
-                except Exception as e:
-                    logger.warning(f"Cache creation failed, using inline: {e}")
-                    cache_name = None
-                if cache_name:
-                    logger.info(f"Created Context Cache: {cache_name}")
-                else:
-                    logger.warning("Context cache returned None, falling back to inline context.")
-                    inline_context = context
-            else:
-                logger.info("Context below minimum cache threshold, injecting inline.")
-                inline_context = context
-        
-        # STEP 3: Sub-batching
         if len(claims_to_verify) <= self.MAX_CLAIMS_PER_PROMPT:
             sub_batches = [(verify_items, claims_to_verify)]
         else:
@@ -218,26 +191,59 @@ class GeminiServiceBatch(GeminiServiceUtils):
                 chunk_claims = [v["claim"] for v in chunk_items]
                 sub_batches.append((chunk_items, chunk_claims))
             logger.info(f"Split {len(claims_to_verify)} claims into {len(sub_batches)} sub-batches")
+
+        # STEP 3: Setup for verification & ephemeral cache gating
+        from backend.services.grok_service import get_grok_service, should_fire_grok
+        grok = get_grok_service()
+        needs_social_cache = any(should_fire_grok(c) for c in claims_to_verify)
         
-        # STEP 4: Process each sub-batch
-        for batch_items, batch_claims in sub_batches:
-            batch_strategy_hints = {i + 1: v["strategy"] for i, v in enumerate(batch_items)}
-            prompt = self._build_agentic_batch_prompt(batch_claims, inline_context, batch_strategy_hints)
-            batch_results = self._run_agentic_batch(
-                prompt, batch_claims, grok, cache_name
-            )
-            
-            for i, item in enumerate(batch_items):
-                original_idx = item["index"]
-                if i < len(batch_results):
-                    results[original_idx] = batch_results[i]
+        inline_context = None
+        ephemeral_cache = None
+        if cache_name:
+            logger.info(f"Reusing pre-created Context Cache: {cache_name}")
+        elif context:
+            if len(context) >= self.MIN_TEXT_CACHE_CHARS and len(sub_batches) > 1:
+                try:
+                    create_kwargs = {"ttl_minutes": 5, "include_agent_tools": True}
+                    if needs_social_cache:
+                        create_kwargs["include_social_tool"] = True
+                    cache_name = self.create_cache(context, **create_kwargs)
+                except Exception as e:
+                    logger.warning(f"Cache creation failed, using inline: {e}")
+                    cache_name = None
+                if cache_name:
+                    ephemeral_cache = cache_name
+                    logger.info(f"Created Context Cache: {cache_name}")
                 else:
-                    results[original_idx] = {
-                        "is_claim": True,
-                        "verdict": "COULD_NOT_VERIFY",
-                        "explanation": "Result missing from verification",
-                        "sources": []
-                    }
+                    logger.warning("Context cache returned None, falling back to inline context.")
+                    inline_context = context
+            else:
+                logger.info("Using inline context (single sub-batch or below minimum cache threshold).")
+                inline_context = context
+        
+        # STEP 4: Process each sub-batch and reclaim any ephemeral cache afterward
+        try:
+            for batch_items, batch_claims in sub_batches:
+                batch_strategy_hints = {i + 1: v["strategy"] for i, v in enumerate(batch_items)}
+                prompt = self._build_agentic_batch_prompt(batch_claims, inline_context, batch_strategy_hints)
+                batch_results = self._run_agentic_batch(
+                    prompt, batch_claims, grok, cache_name
+                )
+                
+                for i, item in enumerate(batch_items):
+                    original_idx = item["index"]
+                    if i < len(batch_results):
+                        results[original_idx] = batch_results[i]
+                    else:
+                        results[original_idx] = {
+                            "is_claim": True,
+                            "verdict": "COULD_NOT_VERIFY",
+                            "explanation": "Result missing from verification",
+                            "sources": []
+                        }
+        finally:
+            if ephemeral_cache:
+                self.delete_cache(ephemeral_cache)
         
         return results
 
@@ -347,7 +353,8 @@ For each claim, select the appropriate strategy from your guidelines, verify it,
 
             grounding_urls = self._extract_grounding_urls(candidate)
 
-            # Collect all unique candidate URLs across the batch and validate once in parallel
+            # Collect unique model-emitted candidate URLs across the batch and validate once in parallel;
+            # server-side Google Search grounding URLs are trusted without redundant HEAD probes.
             all_raw_urls = []
             seen_raw_urls = set()
             for r in results:
@@ -356,10 +363,6 @@ For each claim, select the appropriate strategy from your guidelines, verify it,
                         if isinstance(u, str) and u.strip() and u.strip() not in seen_raw_urls:
                             seen_raw_urls.add(u.strip())
                             all_raw_urls.append(u.strip())
-            for u in grounding_urls:
-                if u not in seen_raw_urls:
-                    seen_raw_urls.add(u)
-                    all_raw_urls.append(u)
 
             valid_url_set = set()
             if all_raw_urls:
@@ -373,7 +376,7 @@ For each claim, select the appropriate strategy from your guidelines, verify it,
                         validity_flags = list(executor.map(self._validate_url, all_raw_urls))
                     valid_url_set = {u for u, ok in zip(all_raw_urls, validity_flags) if ok}
 
-            valid_grounding_urls = [u for u in grounding_urls if u in valid_url_set]
+            valid_grounding_urls = list(grounding_urls)
             
             normalized = []
             used_indices = set()

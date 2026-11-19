@@ -85,15 +85,6 @@ class GeminiServiceUtils(GeminiServiceClient):
             elif not isinstance(result['sources'], list):
                 result['sources'] = [result['sources']]
 
-            # Merge server-side Google Search grounding URLs (prioritizing verified grounding chunks)
-            grounding_urls = self._extract_grounding_urls(candidate)
-            if grounding_urls:
-                combined_sources = list(grounding_urls)
-                for src in result['sources']:
-                    if isinstance(src, str) and src not in combined_sources:
-                        combined_sources.append(src)
-                result['sources'] = combined_sources
-            
             # Ensure fallacy is present
             if 'fallacy' not in result:
                 result['fallacy'] = None
@@ -114,9 +105,14 @@ class GeminiServiceUtils(GeminiServiceClient):
             if 'meta_truth_verdict' not in result:
                 result['meta_truth_verdict'] = result.get('verdict')
             
-            # Validate sources - filter out dead links
-            if result.get('sources'):
-                result['sources'] = self._validate_sources(result['sources'])
+            # Validate model-emitted URLs via HEAD, while trusting server-side Google Search grounding URLs
+            validated_model_sources = self._validate_sources(result['sources']) if result.get('sources') else []
+            grounding_urls = self._extract_grounding_urls(candidate)
+            combined_sources = list(grounding_urls)
+            for src in validated_model_sources:
+                if isinstance(src, str) and src not in combined_sources:
+                    combined_sources.append(src)
+            result['sources'] = combined_sources[:5]
             
             return result
             
@@ -134,7 +130,7 @@ class GeminiServiceUtils(GeminiServiceClient):
             logger.error(f"Error parsing Gemini response: {e}")
             raise
 
-    def _chunk_text(self, text, chunk_size=4000, overlap=500):
+    def _chunk_text(self, text, chunk_size=25000, overlap=500):
         """Split text into overlapping chunks to preserve context."""
         if len(text) <= chunk_size:
             return [text]
@@ -174,37 +170,6 @@ class GeminiServiceUtils(GeminiServiceClient):
             
         return chunks
 
-    def _generate_context_summary(self, text):
-        """Generate a short summary of the text for cross-chunk context."""
-        sample = text[:6000]
-        prompt = f"""Summarize this text in 2-3 sentences. Focus on: who is speaking/writing,
-what the main topic is, and any key entities (people, organizations, numbers) mentioned.
-
-TEXT:
-\"\"\"
-{sample}
-\"\"\"
-
-Respond with ONLY the summary, no JSON."""
-        
-        try:
-            if self.client:
-                response = self.client.models.generate_content(
-                    model=self.MODEL,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        thinking_config=types.ThinkingConfig(
-                            thinking_level="low"
-                        )
-                    )
-                )
-                summary = response.text.strip()
-                logger.info(f"Generated context summary: {summary[:80]}...")
-                return summary
-        except Exception as e:
-            logger.warning(f"Context summary generation failed: {e}")
-        return None
-
     @staticmethod
     def _extract_text_from_parts(parts) -> str:
         """Extract concatenated text from response parts, skipping thought parts."""
@@ -222,41 +187,25 @@ Respond with ONLY the summary, no JSON."""
         return normalized
 
     def identify_claims(self, text):
-        """Smart Agent: Identify distinct claims in text with full context using chunking."""
+        """Smart Agent: Identify distinct claims in text using bounded chunking."""
         chunks = self._chunk_text(text)
         logger.info(f"Smart Agent potentially processing {len(chunks)} chunks for text length {len(text)}")
         
-        context_summary = None
-        if len(chunks) > 1:
-            context_summary = self._generate_context_summary(text)
-        
         seen_normalized = {}
+        system_instruction = self._load_skill(
+            "claim_extraction",
+            fallback="You are a meticulous fact-checker assistant. Your job is to extract EVERY verifiable factual claim from this text."
+        )
+        config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            response_mime_type="application/json",
+            thinking_config=types.ThinkingConfig(
+                thinking_level="low"
+            )
+        )
         
         for i, chunk in enumerate(chunks):
-            preamble = ""
-            if context_summary:
-                preamble = f"""GLOBAL CONTEXT (this is part {i+1} of {len(chunks)} from a longer text):
-{context_summary}
-
-Use this context to resolve pronouns and references. For example, if the context
-mentions "Biden" and this chunk says "He", replace "He" with "Biden".
-
-"""
-            
-            system_instruction = self._load_skill(
-                "claim_extraction",
-                fallback="You are a meticulous fact-checker assistant. Your job is to extract EVERY verifiable factual claim from this text."
-            )
-                
-            config = types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                response_mime_type="application/json",
-                thinking_config=types.ThinkingConfig(
-                    thinking_level="low"
-                )
-            )
-            
-            prompt = f"""{preamble}TEXT TO ANALYZE (Part {i+1}/{len(chunks)}):
+            prompt = f"""TEXT TO ANALYZE (Part {i+1}/{len(chunks)}):
 \"\"\"
 {chunk}
 \"\"\"

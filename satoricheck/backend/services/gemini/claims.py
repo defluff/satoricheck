@@ -88,38 +88,16 @@ Verify the claim and respond with JSON matching the required schema."""
             if parsed is not None:
                 return parsed
 
-            raise Exception("Agent exceeded max turns without final answer")
- 
+            logger.warning("Agent exceeded max turns without final answer; falling back to standard check")
+            return self._analyze_claim_standard(text)
+
         except Exception as e:
             logger.error(f"Agentic loop error: {e}")
-            return self._analyze_claim_standard(text)
- 
+            raise
+
     def _analyze_claim_standard(self, text):
-        """Standard claim analysis using Gemini Pro with Google Search grounding."""
-        # 1. Check Cache (Exact Match)
-        try:
-            from backend.database import db_session
-            from backend.models import FactCheck
-            
-            cached = db_session.query(FactCheck).filter(
-                FactCheck.claim_text == text
-            ).order_by(FactCheck.timestamp.desc()).first()
-            
-            if cached:
-                logger.info(f"Cache hit for text: {text[:50]}...")
-                sources = json.loads(cached.sources) if cached.sources else []
-                return {
-                    "is_claim": cached.is_claim,
-                    "verdict": cached.verdict,
-                    "explanation": cached.explanation,
-                    "fallacy": cached.fallacy,
-                    "sources": sources,
-                    "source_reliability": cached.source_reliability
-                }
-        except Exception as e:
-            logger.warning(f"Cache lookup failed: {e}")
- 
-        # 2. Call API with bounded transient retries
+        """Standard claim analysis using Gemini with Google Search grounding."""
+        # Call API with bounded transient retries
         max_retries = 2
         retry_delay = 1
         last_exception = None

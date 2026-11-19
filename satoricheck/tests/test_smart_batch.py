@@ -48,25 +48,48 @@ def test_analyze_claims_batch_no_context(gemini_service):
     assert gemini_service.client.models.generate_content.call_count == 1
 
 def test_analyze_claims_batch_with_context_cache(gemini_service):
-    """Verify batch analysis with context creates cache when large enough."""
+    """Verify multi-batch analysis with large context creates an ephemeral cache and deletes it after."""
     gemini_service.client.models.generate_content.return_value = make_mock_response(
         '{"results": [{"claim_index": 1, "verdict": "TRUE", "strategy_used": "CONTEXT_CHECK", "sources": ["http://example.com"]}]}'
     )
     
-    # Mock Cache Creation
+    # Mock Cache Creation & Cleanup
     gemini_service.create_cache = MagicMock(return_value="cachedContents/12345")
+    gemini_service.delete_cache = MagicMock(return_value=True)
     
-    claims = ["The consulate opened in Nuuk."]
+    claims = [f"The consulate opened in Nuuk ({i})." for i in range(9)]
     context = "Reference text about Nuuk consulate..." * 450  # >=16000 chars (~4,096 token cache floor)
     
-    results = gemini_service.analyze_claims_batch(claims, context=context)
+    results = gemini_service.analyze_claims_batch(claims, context=context, pre_triaged=True)
     
-    # Verify Cache created
+    # Verify ephemeral Cache created and reclaimed after sub-batches finish
     gemini_service.create_cache.assert_called_once_with(context, ttl_minutes=5, include_agent_tools=True)
+    gemini_service.delete_cache.assert_called_once_with("cachedContents/12345")
     
-    # Verify result returned
+    # Verify results returned
+    assert len(results) == 9
+    assert results[0]["verdict"] == "TRUE"
+
+
+def test_analyze_claims_batch_single_sub_batch_uses_inline_context_without_cache(gemini_service):
+    """Single sub-batch (<= 8 claims) must inject large context inline instead of paying cache overhead."""
+    gemini_service.client.models.generate_content.return_value = make_mock_response(
+        '{"results": [{"claim_index": 1, "verdict": "TRUE", "sources": ["http://example.com"]}]}'
+    )
+    gemini_service.create_cache = MagicMock()
+    gemini_service.delete_cache = MagicMock()
+
+    claims = ["The consulate opened in Nuuk."]
+    context = "INLINE_ONLY_MARKER " + ("Reference text about Nuuk consulate..." * 450)
+
+    results = gemini_service.analyze_claims_batch(claims, context=context, pre_triaged=True)
+
+    gemini_service.create_cache.assert_not_called()
+    gemini_service.delete_cache.assert_not_called()
     assert len(results) == 1
     assert results[0]["verdict"] == "TRUE"
+    sent_prompt = gemini_service.client.models.generate_content.call_args.kwargs['contents'][0].parts[0].text
+    assert "INLINE_ONLY_MARKER" in sent_prompt
 
 def test_analyze_claims_batch_reuses_precreated_cache(gemini_service):
     """Verify batch analysis reuses a pre-created cache_name instead of creating a new one."""

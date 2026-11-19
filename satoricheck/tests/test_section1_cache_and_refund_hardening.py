@@ -407,11 +407,12 @@ class TestContextCacheLifecycleAndSecurity:
 
         long_context = 'UNIQUE_SENTINEL_CONTEXT ' + ('Reference details. ' * 900)
         results = service.analyze_claims_batch(
-            ['Water boils at 100C.'],
+            [f'Water boils at 100C ({i}).' for i in range(9)],
             context=long_context,
             pre_triaged=True,
         )
 
+        assert len(results) == 9
         assert results[0]['verdict'] == 'TRUE'
         sent_prompt = mock_client.models.generate_content.call_args.kwargs['contents'][0].parts[0].text
         assert 'UNIQUE_SENTINEL_CONTEXT' in sent_prompt
@@ -597,6 +598,7 @@ class TestUpstreamFailureRefundsAndCacheIntegrity:
 
         assert resp.status_code == 503
         assert resp.get_json()['success'] is False
+        assert mock_client.models.generate_content.call_count == 1
 
         db_session_fixture.expire_all()
         refreshed = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
