@@ -1936,8 +1936,8 @@ class PitchdeckModule {
     }
 
     renderArchiveListUI() {
-        if (this.elements.archiveCount) {
-            this.elements.archiveCount.textContent = String(this.archivedDeals.length);
+        if (this.elements.archiveCountBadge) {
+            this.elements.archiveCountBadge.textContent = String(this.archivedDeals.length);
         }
         const listEl = this.elements.archiveList;
         if (!listEl) return;
