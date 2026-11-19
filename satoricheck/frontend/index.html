@@ -25,17 +25,17 @@
 
             <!-- Module Navigation -->
             <nav class="module-nav-container" aria-label="Module Navigation">
+                <div class="module-nav-toggle module-nav-single">
+                    <button class="module-nav-btn active" id="nav-pitchdeck-btn" title="Pitch Deck Analysis">
+                        Pitch Deck
+                    </button>
+                </div>
                 <div class="module-nav-toggle">
-                    <button class="module-nav-btn active" id="nav-factcheck-btn" title="Fact Check Mode">
+                    <button class="module-nav-btn" id="nav-factcheck-btn" title="Fact Check Mode">
                         Fact Check
                     </button>
                     <button class="module-nav-btn" id="nav-media-btn" title="Media Authenticity Check">
                         Media
-                    </button>
-                </div>
-                <div class="module-nav-toggle module-nav-single">
-                    <button class="module-nav-btn" id="nav-pitchdeck-btn" title="Pitch Deck Analysis">
-                        Pitch Deck
                     </button>
                 </div>
             </nav>
@@ -83,7 +83,7 @@
     </header>
 
     <!-- Main Content -->
-    <div id="factcheck-view">
+    <div id="factcheck-view" class="hidden">
         <main class="main-content">
             <!-- Editor Section -->
             <section class="editor-section">
@@ -172,8 +172,8 @@
         </footer>
     </div>
 
-    <!-- Pitchdeck Workspace (hidden by default) -->
-    <div id="pitchdeck-view" class="hidden">
+    <!-- Pitchdeck Workspace (default view) -->
+    <div id="pitchdeck-view">
         <main class="pitchdeck-workspace">
             <!-- Feature A: Persistent Thesis Configuration Gate -->
             <section class="pd-card pd-thesis-gate" id="pd-thesis-gate">

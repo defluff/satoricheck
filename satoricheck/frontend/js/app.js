@@ -42,6 +42,9 @@ class App {
         // Initialize Media Authenticity & Stream module
         media.init();
 
+        // Default landing view is Pitch Deck
+        this.switchView('pitchdeck');
+
         // Set up audio result handler for auto-check (Standard mode)
         audio.onResult((transcript) => {
             factcheck.handleAutoCheck(transcript);
