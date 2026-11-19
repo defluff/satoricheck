@@ -247,13 +247,12 @@ class TestAnalyzeUrlHeadProbe:
     def test_probe_redirect_to_private_host_is_not_followed_and_no_tokens_charged(
         self, auth_client, test_user, db_session_fixture, fake_dns
     ):
-        """TOCTOU: the reachability check sees 200, the MIME probe then gets a redirect
-        to an internal host. The probe must not follow it, and the user is not charged."""
+        """A single HEAD MIME probe receiving a redirect to an internal host must block it
+        without a second HEAD call and without charging tokens."""
         from backend.models import TokenBalance
 
         responses = [
-            _response(200),  # _validate_url reachability check
-            _response(302, {'Location': 'http://internal.example.com/admin'}),  # MIME probe
+            _response(302, {'Location': 'http://internal.example.com/admin'}),
         ]
         with patch('backend.services.safe_http.requests.head', side_effect=responses) as mock_head:
             response = auth_client.post(
@@ -261,11 +260,30 @@ class TestAnalyzeUrlHeadProbe:
             )
 
         assert response.status_code == 400
-        assert response.get_json()['error'].startswith('This URL type is not supported.')
-        assert mock_head.call_count == 2
+        assert response.get_json()['error'].startswith('Invalid or restricted URL.')
+        assert mock_head.call_count == 1
         assert all(c.kwargs['allow_redirects'] is False for c in mock_head.call_args_list)
         assert [c.args[0] for c in fake_dns.call_args_list] == [
-            'public.example.com', 'public.example.com', 'internal.example.com',
+            'public.example.com', 'internal.example.com',
         ]
         balance = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
         assert balance.balance == 100
+
+    def test_zero_balance_does_not_issue_head_probe(
+        self, auth_client, test_user, db_session_fixture, fake_dns
+    ):
+        """Underfunded users must fail fast with 403 before outbound HEAD probing."""
+        from backend.models import TokenBalance
+
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        bal.balance = 0
+        db_session_fixture.commit()
+
+        with patch('backend.services.safe_http.requests.head') as mock_head:
+            response = auth_client.post(
+                '/api/media/analyze-url', json={'url': 'https://public.example.com/asset'}
+            )
+
+        assert response.status_code == 403
+        assert 'Insufficient tokens' in response.get_json()['error']
+        mock_head.assert_not_called()

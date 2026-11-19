@@ -387,10 +387,6 @@ class TestPersonaUserJourneys:
             'backend.services.gemini.media.GeminiServiceMedia.analyze_media_authenticity',
             return_value=mock_forensic_analysis
         )
-        mocker.patch(
-            'backend.services.gemini.media.GeminiServiceMedia.get_media_embedding',
-            return_value=[0.12, -0.45, 0.78, 0.01]
-        )
         
         # Upload mock video file
         mock_video_bytes = io.BytesIO(b"FAKE_MP4_VIDEO_HEADER_AND_STREAM")

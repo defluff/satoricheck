@@ -1,23 +1,25 @@
 """
 Media authenticity analysis routes.
 """
-from flask import Blueprint, request, jsonify
-import logging
-import time
 import json
-import re
+import logging
 import mimetypes
-from urllib.parse import urlparse
 import os
-from werkzeug.utils import secure_filename
+import re
 import tempfile
+import time
+from urllib.parse import urlparse
+
+from flask import Blueprint, request, jsonify
+from werkzeug.utils import secure_filename
 
 from backend.database import db_session
-from backend.models import MediaCheck
+from backend.models import MediaCheck, TokenBalance
 from backend.routes.auth import login_required
 from backend.routes.tokens import reserve_flat_tokens, refund_flat_tokens
 from backend.error_handlers import APIError
 from backend.services import get_gemini_service, safe_http
+from backend.services.gemini.media import GeminiServiceMedia
 from backend.config import Config
 from backend.extensions import limiter
 
@@ -29,7 +31,7 @@ media_bp = Blueprint('media', __name__, url_prefix='/api/media')
 ALLOWED_MIME_TYPES = {
     'image/jpeg', 'image/png', 'image/webp', 'image/gif',
     'video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska',
-    'video/m4v', 'video/x-m4v', 'video/avi', 'video/x-msvideo', 'video/3gpp', 'video/ogg',
+    'video/m4v', 'video/x-m4v', 'video/avi', 'video/x-msvideo', 'video/3gpp',
     'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/webm', 'audio/ogg',
     'audio/x-m4a', 'audio/aac', 'audio/m4a'
 }
@@ -42,8 +44,6 @@ URL_REGEX = re.compile(
     r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # ...or ip
     r'(?::\d+)?'  # optional port
     r'(?:/?|[/?]\S+)$', re.IGNORECASE)
-
-from backend.services.gemini.media import GeminiServiceMedia
 
 # Hostnames of platforms that serve HTML pages (not direct media files).
 # Maps hostname substrings to human-readable names for error messages.
@@ -70,19 +70,41 @@ def _detect_platform(hostname: str) -> str | None:
     return None
 
 
+VIDEO_SHORT_MAX_BYTES = GeminiServiceMedia.VIDEO_HIGH_FPS_MAX_BYTES  # 5 MB
+VIDEO_MEDIUM_MAX_BYTES = GeminiServiceMedia.MAX_INLINE_MEDIA_BYTES   # 14 MB
+
+
+def _calculate_media_cp_cost(mime_type: str, file_size_bytes: int | None = None) -> int:
+    """Compute Check Point (CP) cost from MIME type and file byte size."""
+    mime = (mime_type or '').lower()
+    if mime.startswith('audio/'):
+        return Config.MEDIA_CP_AUDIO
+    if mime.startswith('video/'):
+        if file_size_bytes is None or file_size_bytes > VIDEO_MEDIUM_MAX_BYTES:
+            return Config.MEDIA_CP_VIDEO_LONG
+        if file_size_bytes <= VIDEO_SHORT_MAX_BYTES:
+            return Config.MEDIA_CP_VIDEO_SHORT
+        return Config.MEDIA_CP_VIDEO_MEDIUM
+    return Config.MEDIA_CP_IMAGE
+
+
 def _analyze_media(
-    source: str,
+    source: str | bytes,
     input_type: str,
     mime_type: str,
     user,
     display_name: str,
+    *,
+    file_size_bytes: int | None = None,
+    start_seconds: int = 0,
+    record_url: str | None = None,
 ) -> dict:
     """Shared media analysis pipeline used by both URL and upload routes.
 
-    Handles: token reservation, cache flush, Gemini analysis, embedding,
-    DB persistence, and auto-refund on failure.
+    Handles: file-size tiered cost calculation, token reservation, Gemini forensic
+    analysis, DB persistence, and auto-refund on failure.
     """
-    cost = getattr(Config, 'MEDIA_ANALYSIS_COST', 1)
+    cost = _calculate_media_cp_cost(mime_type, file_size_bytes)
 
     token_balance = reserve_flat_tokens(
         user.id,
@@ -99,33 +121,18 @@ def _analyze_media(
     gemini_service = get_gemini_service()
 
     try:
-        # Flush previous volatile cache
-        if user.current_media_cache:
-            gemini_service.delete_cache(user.current_media_cache)
-            user.current_media_cache = None
-            db_session.commit()
+        analysis_kwargs = {'input_type': input_type, 'mime_type': mime_type}
+        if start_seconds > 0:
+            analysis_kwargs['start_seconds'] = start_seconds
 
-        # Perform analysis
-        result = gemini_service.analyze_media_authenticity(
-            source, input_type=input_type, mime_type=mime_type
-        )
-
-        # Capture volatile cache if created
-        if result.get('cache_name'):
-            user.current_media_cache = result['cache_name']
-            db_session.commit()
-
-        # Get multimodal embedding (fingerprint)
-        embedding = gemini_service.get_media_embedding(
-            source, mime_type, input_type=input_type
-        )
+        result = gemini_service.analyze_media_authenticity(source, **analysis_kwargs)
 
         processing_time = time.time() - start_time
 
         claims = result.get('claims', [])
 
         # Persist to database
-        url_value = source if input_type == 'url' else f"upload://{display_name}"
+        url_value = record_url or (source if input_type == 'url' else f"upload://{display_name}")
         media_check = MediaCheck(
             user_id=user.id,
             url=url_value,
@@ -135,7 +142,7 @@ def _analyze_media(
             reasoning=result.get('explanation'),
             criteria_json=json.dumps(result.get('criteria')),
             claims_json=json.dumps(claims) if claims else None,
-            embedding_json=json.dumps(embedding),
+            embedding_json=None,
             processing_time=processing_time,
         )
         db_session.add(media_check)
@@ -151,6 +158,7 @@ def _analyze_media(
                 'claims': claims,
                 'processing_time': processing_time,
             },
+            'cost_incurred': cost,
             'new_balance': token_balance.balance,
         }
     except Exception:
@@ -168,9 +176,9 @@ def analyze_url() -> tuple:
         data = request.get_json()
         if not data or 'url' not in data:
             raise APIError('No URL provided', status_code=400)
-        
+
         url = data['url'].strip()
-        
+
         # Early regex validation
         if not URL_REGEX.match(url):
             raise APIError('Invalid URL format. Must start with http:// or https://', status_code=400)
@@ -187,10 +195,33 @@ def analyze_url() -> tuple:
                     status_code=400
                 )
             canonical_url = f"https://www.youtube.com/watch?v={yt_id}"
+            yt_start = GeminiServiceMedia.extract_youtube_start_seconds(url)
+
+            # Duration is unknown before Gemini fetches the URI, so YouTube bills the full window.
+            yt_cost = Config.MEDIA_CP_VIDEO_LONG
+            bal = db_session.query(TokenBalance).filter_by(user_id=request.current_user.id).first()
+            if not bal or bal.balance < yt_cost:
+                raise APIError(
+                    f'Insufficient tokens. Media analysis costs {yt_cost} CP.',
+                    status_code=403,
+                )
+
+            gemini_service = get_gemini_service()
+            gemini_service.validate_youtube_video(canonical_url)
+
+            record_url = f"{canonical_url}&t={yt_start}s" if yt_start > 0 else canonical_url
             return jsonify(
-                _analyze_media(canonical_url, 'url', 'video/mp4', request.current_user, f"YouTube ({yt_id})")
+                _analyze_media(
+                    canonical_url,
+                    'url',
+                    'video/mp4',
+                    request.current_user,
+                    f"YouTube ({yt_id})",
+                    start_seconds=yt_start,
+                    record_url=record_url,
+                )
             )
-            
+
         # Determine MIME type: try URL extension first, then HEAD request
         parsed_path = parsed_url.path
         mime_type, _ = mimetypes.guess_type(parsed_path)
@@ -211,14 +242,16 @@ def analyze_url() -> tuple:
 
         # Fallback: probe Content-Type via HEAD (handles CDN/API URLs with no extension)
         if not mime_type:
-            # SSRF check: ensure URL points to a public, non-private IP before issuing HEAD request
-            gemini_service = get_gemini_service()
-            if not gemini_service._validate_url(url):
-                raise APIError('Invalid or restricted URL. The address cannot be resolved or is not accessible.', status_code=400)
+            # Fail fast before making outbound network probes for zero-balance accounts
+            bal = db_session.query(TokenBalance).filter_by(user_id=request.current_user.id).first()
+            if not bal or bal.balance < Config.MEDIA_CP_IMAGE:
+                raise APIError(
+                    f'Insufficient tokens. Media analysis costs at least {Config.MEDIA_CP_IMAGE} CP.',
+                    status_code=403,
+                )
 
             try:
-                # safe_request re-validates every redirect hop; a blanket
-                # allow_redirects=True here would let a public URL bounce to a private one.
+                # safe_request validates every redirect hop and pins DNS against rebinding.
                 head_resp = safe_http.safe_request('HEAD', url, timeout=5)
                 head_resp.close()
                 ct = head_resp.headers.get('Content-Type', '')
@@ -226,6 +259,11 @@ def analyze_url() -> tuple:
                 ct_base = ct.split(';')[0].strip().lower()
                 if ct_base in ALLOWED_MIME_TYPES:
                     mime_type = ct_base
+            except safe_http.UnsafeURLError:
+                raise APIError(
+                    'Invalid or restricted URL. The address cannot be resolved or is not accessible.',
+                    status_code=400,
+                )
             except Exception as head_err:
                 logger.warning(f"HEAD probe failed for {url[:100]}: {head_err}")
 
@@ -246,6 +284,37 @@ def analyze_url() -> tuple:
                 '(e.g. right-click media → "Copy link address"). '
                 'Supported formats: JPEG, PNG, WebP, MP4, MOV, WebM, MP3, WAV, OGG, M4A.',
                 status_code=400
+            )
+
+        if mime_type.startswith(('video/', 'audio/')):
+            min_cost = (
+                Config.MEDIA_CP_VIDEO_SHORT
+                if mime_type.startswith('video/')
+                else Config.MEDIA_CP_AUDIO
+            )
+            bal = db_session.query(TokenBalance).filter_by(user_id=request.current_user.id).first()
+            if not bal or bal.balance < min_cost:
+                raise APIError(
+                    f'Insufficient tokens. Media analysis costs {min_cost} CP.',
+                    status_code=403,
+                )
+
+            media_bytes = safe_http.download_bounded(
+                url,
+                max_bytes=GeminiServiceMedia.MAX_REMOTE_MEDIA_BYTES,
+                timeout=30,
+                total_timeout=GeminiServiceMedia.REMOTE_MEDIA_TOTAL_TIMEOUT_S,
+            )
+            return jsonify(
+                _analyze_media(
+                    media_bytes,
+                    'bytes',
+                    mime_type,
+                    request.current_user,
+                    url[:100],
+                    file_size_bytes=len(media_bytes),
+                    record_url=url,
+                )
             )
 
         return jsonify(
@@ -271,11 +340,11 @@ def analyze_upload() -> tuple:
     try:
         if 'file' not in request.files:
             raise APIError('No file uploaded', status_code=400)
-        
+
         file = request.files['file']
         if file.filename == '':
             raise APIError('No file selected', status_code=400)
-        
+
         # MIME type normalization & filename-based fallback
         mime_type = file.content_type
         if mime_type:
@@ -315,14 +384,35 @@ def analyze_upload() -> tuple:
                 status_code=400
             )
 
+        # Fail fast before writing up to 50 MB to disk for underfunded accounts
+        min_upload_cost = (
+            Config.MEDIA_CP_VIDEO_SHORT
+            if mime_type.startswith('video/')
+            else (Config.MEDIA_CP_AUDIO if mime_type.startswith('audio/') else Config.MEDIA_CP_IMAGE)
+        )
+        bal = db_session.query(TokenBalance).filter_by(user_id=request.current_user.id).first()
+        if not bal or bal.balance < min_upload_cost:
+            raise APIError(
+                f'Insufficient tokens. Media analysis costs {min_upload_cost} CP.',
+                status_code=403,
+            )
+
         # Secure temporary storage
         filename = secure_filename(file.filename) or 'uploaded_media'
         fd, temp_path = tempfile.mkstemp(suffix=f"_{filename}")
         os.close(fd)
         file.save(temp_path)
+        file_size_bytes = os.path.getsize(temp_path)
 
         return jsonify(
-            _analyze_media(temp_path, 'file', mime_type, request.current_user, filename)
+            _analyze_media(
+                temp_path,
+                'file',
+                mime_type,
+                request.current_user,
+                filename,
+                file_size_bytes=file_size_bytes,
+            )
         )
 
     except APIError:
@@ -334,11 +424,12 @@ def analyze_upload() -> tuple:
     except Exception as e:
         db_session.rollback()
         logger.error(f"Media upload error: {e}", exc_info=True)
-        err_msg = str(e)
-        if 'codec' in err_msg.lower() or 'decode' in err_msg.lower():
+        # Never echo raw exception text: it can leak temp paths, SDK internals, or upstream URLs.
+        err_msg = str(e).lower()
+        if 'codec' in err_msg or 'decode' in err_msg:
             user_msg = 'The video could not be decoded. Please verify the file is encoded in standard H.264 MP4, MOV, or WebM format.'
         else:
-            user_msg = f'Failed to process uploaded media: {err_msg}'
+            user_msg = 'Failed to process uploaded media. Please try again or use a different file.'
         raise APIError(user_msg, status_code=400)
     finally:
         if temp_path and os.path.exists(temp_path):
