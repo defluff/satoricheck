@@ -89,34 +89,33 @@ class Config:
     GROK_MODEL = os.getenv('GROK_MODEL', 'grok-4.7')
     GROK_ENABLED = os.getenv('GROK_ENABLED', 'true').lower() == 'true'
     GROK_TIMEOUT = int(os.getenv('GROK_TIMEOUT', '10'))  # seconds (tightened to guard worker threads in agentic loops)
-    GROK_MAX_CALLS_PER_DAY = 1000
     
-    # Token pricing (batteries) - NEW: Reduced by 5x for Live Pro margins
+    # Token pricing (batteries)
     TOKEN_PACKAGES = {
         'battery_small': {
             'name': 'Small Battery',
-            'tokens': 86,  # Was 432, now ÷5
+            'tokens': 86,
             'price': 450,  # 4.50 CHF
             'currency': 'chf',
             'stripe_price_id': 'price_1SiEx8DnKgm8pOxQ6XL616H1'
         },
         'battery_medium': {
             'name': 'Medium Battery',
-            'tokens': 486,  # Was 2432, now ÷5
+            'tokens': 486,
             'price': 2400,  # 24 CHF
             'currency': 'chf',
             'stripe_price_id': 'price_1SiExTDnKgm8pOxQIx7ONzbb'
         },
         'battery_large': {
             'name': 'Large Battery',
-            'tokens': 2222,  # Was 11111, now ÷5
+            'tokens': 2222,
             'price': 9900,  # 99 CHF
             'currency': 'chf',
             'stripe_price_id': 'price_1SiEy2DnKgm8pOxQ0heRz08W'
         },
         'wizard': {
             'name': 'Wizard Energy Plantation',
-            'tokens': 1000,  # Was 5000, now ÷5 (per month)
+            'tokens': 1000,  # per month
             'price': 99900,  # 999 CHF ONE-TIME
             'currency': 'chf',
             'is_subscription': False,
@@ -125,12 +124,16 @@ class Config:
         }
     }
     
-    WIZARD_REFILL_AMOUNT = 1000  # Was 5000, now ÷5
+    WIZARD_REFILL_AMOUNT = 1000
     
     # Token costs
-    WORDS_PER_CP = 1250
-    TOKENS_PER_CP_UNIT = 1
-    MEDIA_ANALYSIS_COST = 1  # 1 CP per media analysis
+    MEDIA_CP_IMAGE = 4
+    MEDIA_CP_AUDIO = 5
+    # Video CP tiers follow payload byte size (<= 5 MB @ 4 FPS, 5-14 MB @ 2 FPS, > 14 MB or YouTube @ 2 FPS)
+    MEDIA_CP_VIDEO_SHORT = 15   # <= 5 MB (4.0 FPS inline)
+    MEDIA_CP_VIDEO_MEDIUM = 25  # 5 MB - 14 MB (2.0 FPS inline)
+    MEDIA_CP_VIDEO_LONG = 40    # > 14 MB (Files API) or YouTube URI (2.0 FPS)
+    MAX_VIDEO_DURATION_SECONDS = 30  # Gemini ingestion window; longer clips analyze first 30s
     
     # Signup bonus
     SIGNUP_BONUS_TOKENS = 3  # Freemium: 3 free CP to test the app

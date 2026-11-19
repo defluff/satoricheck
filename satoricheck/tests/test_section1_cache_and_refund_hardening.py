@@ -519,7 +519,6 @@ class TestUpstreamFailureRefundsAndCacheIntegrity:
 
         bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
         bal.balance = 50
-        bal.unbilled_words = 1200
         db_session_fixture.commit()
 
         mock_client = MagicMock()
@@ -539,7 +538,6 @@ class TestUpstreamFailureRefundsAndCacheIntegrity:
         db_session_fixture.expire_all()
         refreshed = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
         assert refreshed.balance == 50
-        assert refreshed.unbilled_words == 1200
         assert db_session_fixture.query(FactCheck).filter_by(user_id=test_user.id).count() == 0
 
     def test_pitchdeck_verify_market_refunds_1_cp_on_gemini_outage(
@@ -583,7 +581,6 @@ class TestUpstreamFailureRefundsAndCacheIntegrity:
 
         bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
         bal.balance = 20
-        bal.unbilled_words = 1240
         db_session_fixture.commit()
 
         mock_client = MagicMock()
@@ -603,7 +600,6 @@ class TestUpstreamFailureRefundsAndCacheIntegrity:
         db_session_fixture.expire_all()
         refreshed = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
         assert refreshed.balance == 20
-        assert refreshed.unbilled_words == 1240
         assert db_session_fixture.query(FactCheck).filter_by(user_id=test_user.id).count() == 0
 
     def test_media_upload_refunds_cp_and_does_not_persist_on_empty_gemini_response(

@@ -295,50 +295,45 @@ RESPOND WITH JSON ONLY:
     "explanation": "2-3 sentence verdict summarizing findings and register calibration"
 }}"""
 
+        if not self.client:
+            raise Exception("Gemini client not initialized")
+
         try:
-            if self.client:
-                response = self.client.models.generate_content(
-                    model=self.MODEL,
-                    contents=prompt,
-                    config=config
-                )
-                content_res = response.text.strip()
-                content_res = self._extract_json(content_res)
-                result = json.loads(content_res.strip())
-                
-                if 'ai_probability' not in result:
-                    result['ai_probability'] = 50
-                if 'confidence' not in result:
-                    result['confidence'] = 'LOW' if is_short_text_flag else 'MEDIUM'
-                if 'detected_register' not in result:
-                    result['detected_register'] = 'general'
-                result['is_short_text'] = bool(result.get('is_short_text', is_short_text_flag))
-                if 'ai_indicators' not in result:
-                    result['ai_indicators'] = []
-                if 'human_indicators' not in result:
-                    result['human_indicators'] = []
-                if 'explanation' not in result:
-                    result['explanation'] = 'Unable to fully analyze text.'
-                
-                def sanitize_indicators(items):
-                    if not isinstance(items, list):
-                        return []
-                    return [str(item) if not isinstance(item, str) else item for item in items]
-                
-                result['ai_indicators'] = sanitize_indicators(result['ai_indicators'])
-                result['human_indicators'] = sanitize_indicators(result['human_indicators'])
-                
-                logger.info(f"AI Detection result: {result['ai_probability']}% AI probability (Register: {result.get('detected_register')}, Short: {result['is_short_text']})")
-                return result
+            response = self.client.models.generate_content(
+                model=self.MODEL,
+                contents=prompt,
+                config=config
+            )
+            content_res = (response.text or "").strip()
+            if not content_res:
+                raise ValueError("AI detection returned an empty response")
+            content_res = self._extract_json(content_res)
+            result = json.loads(content_res.strip())
+
+            if 'ai_probability' not in result:
+                result['ai_probability'] = 50
+            if 'confidence' not in result:
+                result['confidence'] = 'LOW' if is_short_text_flag else 'MEDIUM'
+            if 'detected_register' not in result:
+                result['detected_register'] = 'general'
+            result['is_short_text'] = bool(result.get('is_short_text', is_short_text_flag))
+            if 'ai_indicators' not in result:
+                result['ai_indicators'] = []
+            if 'human_indicators' not in result:
+                result['human_indicators'] = []
+            if 'explanation' not in result:
+                result['explanation'] = 'Unable to fully analyze text.'
+
+            def sanitize_indicators(items):
+                if not isinstance(items, list):
+                    return []
+                return [str(item) if not isinstance(item, str) else item for item in items]
+
+            result['ai_indicators'] = sanitize_indicators(result['ai_indicators'])
+            result['human_indicators'] = sanitize_indicators(result['human_indicators'])
+
+            logger.info(f"AI Detection result: {result['ai_probability']}% AI probability (Register: {result.get('detected_register')}, Short: {result['is_short_text']})")
+            return result
         except Exception as e:
             logger.error(f"AI detection failed: {e}", exc_info=True)
-            
-        return {
-            'ai_probability': 50,
-            'confidence': 'LOW',
-            'detected_register': 'general',
-            'is_short_text': is_short_text_flag,
-            'ai_indicators': [],
-            'human_indicators': [],
-            'explanation': 'Analysis failed.'
-        }
+            raise

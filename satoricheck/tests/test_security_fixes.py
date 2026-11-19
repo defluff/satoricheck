@@ -490,12 +490,11 @@ class TestWalletDrainProtections:
     """Ensure zero-balance accounts cannot trigger LLM calls for free."""
 
     def test_zero_balance_cannot_execute_small_claim(self, auth_client, test_user, db_session_fixture):
-        """User with 0 CP must be blocked from running even <250 word snippets."""
+        """User with 0 CP must be blocked from running short standalone claims."""
         from backend.models import TokenBalance
 
         tb = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).first()
         tb.balance = 0
-        tb.unbilled_words = 0
         db_session_fixture.commit()
 
         # Submit a small 10-word claim
@@ -513,7 +512,6 @@ class TestWalletDrainProtections:
 
         tb = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).first()
         tb.balance = 0
-        tb.unbilled_words = 0
         db_session_fixture.commit()
 
         resp = auth_client.post('/api/factcheck/analyze-ai', json={
@@ -548,7 +546,6 @@ class TestWalletDrainProtections:
 
         tb = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).first()
         tb.balance = 10
-        tb.unbilled_words = 1245  # +10 words = 1255 words -> costs 1 CP
         db_session_fixture.commit()
 
         balance_during_llm_call = []

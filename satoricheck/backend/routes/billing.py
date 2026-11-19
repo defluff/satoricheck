@@ -73,9 +73,7 @@ def get_packages():
     """Get available token packages."""
     return jsonify({
         'success': True,
-        'packages': Config.TOKEN_PACKAGES,
-        'tokens_per_cp_unit': Config.TOKENS_PER_CP_UNIT,
-        'words_per_cp': Config.WORDS_PER_CP
+        'packages': Config.TOKEN_PACKAGES
     })
 
 

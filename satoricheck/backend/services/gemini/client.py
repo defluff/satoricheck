@@ -66,17 +66,6 @@ class GeminiServiceClient:
                 logger.error(f"Failed to configure Gemini SDK Client: {e}")
                 self.client = None
 
-    def _get_api_url(self, model: str, action: str = "generateContent") -> str:
-        """Get legacy API URL for REST fallback calls."""
-        return f"https://generativelanguage.googleapis.com/v1beta/models/{model}:{action}"
-
-    def _get_headers(self) -> dict:
-        """Get standard legacy headers for REST fallback calls."""
-        return {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': self.api_key
-        }
-
     def _load_skill(self, skill_name: str, fallback: str = "") -> str:
         """Load an agent skill markdown file as a system instruction string.
 

@@ -6,6 +6,7 @@ from flask import Blueprint, request, jsonify
 import hmac
 import json
 import logging
+import math
 import threading
 import time
 from datetime import datetime, UTC, timedelta
@@ -13,7 +14,10 @@ from datetime import datetime, UTC, timedelta
 from backend.database import db_session
 from backend.models import FactCheck, MediaCheck, TokenBalance
 from backend.routes.auth import login_required, scheduler_secret_required
-from backend.routes.tokens import reserve_word_tokens, refund_word_tokens
+from backend.routes.tokens import (
+    reserve_flat_tokens,
+    refund_flat_tokens,
+)
 from backend.error_handlers import APIError
 from backend.services import get_gemini_service
 from backend.services.grok_service import should_fire_grok
@@ -108,8 +112,14 @@ def analyze_claim():
         # Get global Gemini service (needed for pre-analysis)
         gemini_service = get_gemini_service()
 
-        # Atomically reserve and commit tokens BEFORE calling external AI APIs
-        token_balance, token_cost, current_unbilled = reserve_word_tokens(user.id, word_count)
+        # Atomically reserve 1 CP flat BEFORE calling external AI APIs
+        # (standalone claims always trigger Flash + Google Search grounding)
+        token_cost = 1
+        token_balance = reserve_flat_tokens(
+            user.id,
+            token_cost,
+            error_message='Insufficient tokens. Fact-check analysis requires 1 CP.'
+        )
         
         logger.info(f"Analyzing claim for user {user.email}: {text[:100]}... (Cost: {token_cost} CP)")
         
@@ -129,7 +139,7 @@ def analyze_claim():
         except Exception as e:
             # Refund tokens if analysis fails
             logger.error(f"Gemini analysis failed: {e}", exc_info=True)
-            refund_word_tokens(user.id, token_cost, current_unbilled)
+            refund_flat_tokens(user.id, token_cost)
             raise APIError('Analysis temporarily unavailable. Please try again.', status_code=503)
         
         # Calculate processing time
@@ -268,6 +278,12 @@ def analyze_batch_claims():
             
         user = request.current_user
         context = data.get('context')
+        if context is not None:
+            if not isinstance(context, str):
+                raise APIError('Context must be a string')
+            if len(context) > MAX_TEXT_LENGTH:
+                raise APIError(f'Context exceeds maximum limit of {MAX_TEXT_LENGTH:,} characters.')
+
         cache_name = _resolve_owned_factcheck_cache(user, data.get('cache_name'))
         pre_triaged = bool(data.get('pre_triaged', False))
         
@@ -282,11 +298,14 @@ def analyze_batch_claims():
         from sqlalchemy import and_
         
         for i, claim_text in enumerate(claims):
-            if not claim_text or not claim_text.strip():
+            if claim_text is None:
+                continue
+            if not isinstance(claim_text, str):
+                raise APIError('Each claim must be a string')
+            clean_text = claim_text.strip()
+            if not clean_text:
                 continue
                 
-            clean_text = claim_text.strip()
-            
             # Check cache (skip COULD_NOT_VERIFY so transient/unverified results are never frozen)
             cached = db_session.query(FactCheck).filter(
                 and_(
@@ -316,20 +335,30 @@ def analyze_batch_claims():
                 claims_to_process.append((i, clean_text))
         
         # 2. Process New Claims
+        token_cost = 0
         if claims_to_process:
+            total_claim_chars = sum(len(c[1]) for c in claims_to_process)
+            if total_claim_chars > MAX_TEXT_LENGTH:
+                raise APIError(
+                    f'Batch claims text exceeds maximum limit of {MAX_TEXT_LENGTH:,} characters.'
+                )
+
             logger.info(f"Batch processing {len(claims_to_process)} new claims")
-            
-            # Calculate cost ONLY for new claims
-            texts_to_analyze = [c[1] for c in claims_to_process]
-            total_word_count = sum(len(t.split()) for t in texts_to_analyze)
-            
-            # Atomically reserve and commit tokens BEFORE calling external AI APIs
-            token_balance, token_cost, current_unbilled = reserve_word_tokens(
-                user.id, total_word_count, min_cost=1
-            )
-            
-            # Call API with Context; _run_verification_loop handles cache fallback recovery in-place.
+
+            # Charge 1 CP per backend sub-batch of up to MAX_CLAIMS_PER_PROMPT (8) uncached claims
             gemini_service = get_gemini_service()
+            texts_to_analyze = [c[1] for c in claims_to_process]
+            sub_batch_size = max(1, getattr(gemini_service, 'MAX_CLAIMS_PER_PROMPT', 8))
+            token_cost = max(1, math.ceil(len(claims_to_process) / sub_batch_size))
+
+            # Atomically reserve and commit tokens BEFORE calling external AI APIs
+            token_balance = reserve_flat_tokens(
+                user.id,
+                token_cost,
+                error_message=f'Insufficient tokens. Batch verification requires {token_cost} CP.',
+            )
+
+            # Call API with Context; _run_verification_loop handles cache fallback recovery in-place.
             try:
                 api_results = gemini_service.analyze_claims_batch(
                     texts_to_analyze, context=context, cache_name=cache_name, pre_triaged=pre_triaged
@@ -337,16 +366,16 @@ def analyze_batch_claims():
                 
             except Exception as e:
                 # Refund committed reservation
-                refund_word_tokens(user.id, token_cost, current_unbilled)
+                refund_flat_tokens(user.id, token_cost)
                 logger.error(f"Batch analysis failed: {e}")
                 raise APIError("Batch analysis service unavailable", status_code=503)
 
-            # Process API Results
-            # Distribute cost roughly evenly for recording purposes? 
-            # Or just assign to the batch. We store individual records.
-            # We'll assign cost proportional to word count or just split evenly? 
-            # Let's split evenly for simplicity, it's metadata only.
-            cost_per_item = token_cost / len(api_results) if api_results else 0
+            # Distribute integer CP across FactCheck rows (column is INTEGER in PostgreSQL)
+            # so sum(tokens_used) == token_cost without writing fractional floats.
+            num_results = len(api_results)
+            base_tokens, remainder_tokens = (
+                divmod(token_cost, num_results) if num_results else (0, 0)
+            )
             
             # Extract metadata for tracking
             source = data.get('source', 'factcheck')
@@ -355,13 +384,14 @@ def analyze_batch_claims():
             for idx, res in enumerate(api_results):
                 original_index = claims_to_process[idx][0]
                 text = claims_to_process[idx][1]
+                item_tokens = base_tokens + (1 if idx < remainder_tokens else 0)
                 
                 # Save to DB
                 fact_check = FactCheck(
                     user_id=user.id,
                     claim_text=text,
                     word_count=len(text.split()),
-                    tokens_used=cost_per_item, 
+                    tokens_used=item_tokens, 
                     is_claim=res.get('is_claim', True),
                     verdict=res.get('verdict', 'COULD_NOT_VERIFY'),
                     explanation=res.get('explanation', ''),
@@ -391,7 +421,7 @@ def analyze_batch_claims():
                         'explanation': fact_check.explanation,
                         'fallacy': fact_check.fallacy,
                         'sources': res.get('sources', []),
-                        'tokens_used': cost_per_item,
+                        'tokens_used': item_tokens,
                         # Meta-Truth fields
                         'is_quote_claim': res.get('is_quote_claim', False),
                         'quote_attribution': res.get('quote_attribution'),
@@ -411,11 +441,13 @@ def analyze_batch_claims():
         
         # Extract just the result objects
         final_results = [r['result'] for r in results]
+        bal = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
         
         return jsonify({
             'success': True,
             'results': final_results,
-            'new_balance': db_session.query(TokenBalance).filter_by(user_id=user.id).first().balance
+            'cost_incurred': token_cost,
+            'new_balance': bal.balance if bal else 0,
         })
 
     except APIError:
@@ -455,10 +487,10 @@ def get_fact_check_history():
 @limiter.limit("10 per minute")
 def identify_claims():
     """Smart Agent: Identify distinct claims in text before fact-checking.
-    
-    Note: This endpoint is unmetered because the 2x Smart Agent multiplier
-    on /analyze-batch covers the extra API calls. A balance guard prevents
-    abuse by users who call identify without ever proceeding to batch.
+
+    Note: This endpoint is unmetered because downstream /analyze-batch charges
+    1 CP per micro-batch of up to 8 uncached claims. A balance >= 1 CP guard
+    and 10/min rate limit prevent abuse without proceeding to batch.
     """
     try:
         data = request.get_json()
@@ -525,9 +557,12 @@ def analyze_ai():
         if word_count < 20:
             raise APIError('Text too short. Please provide at least 20 words for accurate AI detection.')
         
-        # Atomically reserve and commit tokens BEFORE calling external AI APIs
-        token_balance, token_cost, current_unbilled = reserve_word_tokens(
-            user.id, word_count, error_status=402
+        # Atomically reserve 1 CP flat BEFORE calling external AI APIs
+        token_cost = 1
+        token_balance = reserve_flat_tokens(
+            user.id,
+            token_cost,
+            error_status=402,
         )
         
         # Get Gemini service and analyze
@@ -535,7 +570,7 @@ def analyze_ai():
         try:
             result = gemini_service.analyze_ai_content(text)
         except Exception:
-            refund_word_tokens(user.id, token_cost, current_unbilled)
+            refund_flat_tokens(user.id, token_cost)
             raise
         
         if token_cost > 0:
@@ -561,7 +596,7 @@ def analyze_ai():
         raise
     except Exception as e:
         logger.error(f"AI Detection error: {e}", exc_info=True)
-        raise APIError('AI detection service unavailable')
+        raise APIError('AI detection service unavailable', status_code=503)
 
 
 @factcheck_bp.route('/cleanup-expired', methods=['POST'])

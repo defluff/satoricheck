@@ -50,7 +50,7 @@ class TokenBalance(Base):
     wizard_start_date = Column(DateTime)
     wizard_months_remaining = Column(Integer, default=0)
     
-    # Usage tracking for fairness (1 CP / 250 words)
+    # Legacy column retained for Cloud SQL PostgreSQL schema compatibility (word-accumulation billing retired)
     unbilled_words = Column(Integer, default=0)
     
     user = relationship('User', back_populates='token_balance')

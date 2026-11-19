@@ -396,7 +396,8 @@ class TestBillingPackagesAndRedirects:
         assert data['success'] is True
         assert set(data['packages'].keys()) == {'battery_small', 'battery_medium', 'battery_large', 'wizard'}
         assert data['packages']['wizard']['price'] == 99900
-        assert data['words_per_cp'] == Config.WORDS_PER_CP
+        assert 'words_per_cp' not in data
+        assert 'tokens_per_cp_unit' not in data
 
     def test_payment_success_redirect_never_credits_tokens_directly(self, client, test_user, db_session_fixture):
         """
@@ -420,3 +421,24 @@ class TestBillingPackagesAndRedirects:
         response = client.get('/api/billing/success')
         assert response.status_code == 302
         assert response.location.endswith('/?error=no_session')
+
+    def test_extension_sidepanel_recharge_modal_matches_flat_cp_packages(self):
+        """Extension recharge modal must reflect v2.0 flat-CP and Smart Batch (8x) pricing."""
+        import pathlib
+
+        html_path = pathlib.Path(__file__).resolve().parents[1] / 'extension' / 'sidepanel' / 'sidepanel.html'
+        html_src = html_path.read_text(encoding='utf-8')
+
+        assert '1 CP = 1 Fact-Check (or up to 8 claims in Smart Batch)' in html_src
+        assert '1,250 words' not in html_src
+        assert '107k words' not in html_src
+        assert '607k words' not in html_src
+        assert '2.7M words' not in html_src
+
+        small_cp = Config.TOKEN_PACKAGES['battery_small']['tokens']
+        med_cp = Config.TOKEN_PACKAGES['battery_medium']['tokens']
+        large_cp = Config.TOKEN_PACKAGES['battery_large']['tokens']
+
+        assert f'{small_cp} verification checks (up to {small_cp * 8:,} batch claims)' in html_src
+        assert f'{med_cp} verification checks (up to {med_cp * 8:,} batch claims)' in html_src
+        assert f'{large_cp:,} verification checks (up to {large_cp * 8:,} batch claims)' in html_src
