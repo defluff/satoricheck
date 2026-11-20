@@ -86,6 +86,13 @@ month's `git log` and confirm they scope queries by `request.current_user.id`.
 Confirm every route calling Gemini/Grok checks `TokenBalance` first and enforces payload caps and a
 `@limiter.limit(...)` (see `tests/test_security_fixes.py::TestWalletDrainProtections`).
 
+### 3d. Automated TTP lead hunt (`ttp-security-audit`)
+Invoke the `ttp-security-audit` skill and run the full-repo TTP scanner from repository root:
+```bash
+.venv/bin/python .agents/skills/ttp-security-audit/scripts/ttp_hunt.py
+```
+Triage every surfaced lead through the 5 TTP hunting lenses in `.agents/skills/ttp-security-audit/SKILL.md` (Input & Wallet Bounds, Tenant & Cache Isolation, SSRF Bypass, Output & Header Sinks, Exception & Resource Hygiene) and add regression tests in `satoricheck/tests/test_security_fixes.py` for any confirmed vulnerability.
+
 ---
 
 ## Phase 4 — Live Production Verification

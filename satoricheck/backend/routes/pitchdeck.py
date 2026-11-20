@@ -49,22 +49,39 @@ def analyze_pitch_deck():
         
         if not data:
             raise APIError('No data provided', status_code=400)
+        if not isinstance(data, dict):
+            raise APIError('Invalid request payload', status_code=400)
         
         pdf_data_base64 = data.get('pdf_data')
-        
+
         if not pdf_data_base64:
             raise APIError('pdf_data is required', status_code=400)
-        
-        # Decode base64
+        if not isinstance(pdf_data_base64, str):
+            raise APIError('Invalid base64-encoded PDF data', status_code=400)
+
+        # --- PRICING & INPUT VALIDATION (pre-decode guards) ---
+        user = request.current_user
+        service = _resolve_pitchdeck_service()
+
+        max_b64_len = (service.MAX_FILE_SIZE * 4 // 3) + 4
+        if len(pdf_data_base64) > max_b64_len:
+            raise APIError(
+                f'File too large. Maximum size is {service.MAX_FILE_SIZE // (1024 * 1024)}MB',
+                status_code=400,
+            )
+
+        from backend.database import db_session
+        from backend.models import TokenBalance
+        bal = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
+        if not bal or bal.balance < 2:
+            raise APIError('Insufficient tokens. Analysis requires 2 CP.', status_code=403)
+
+        # Decode base64 strictly before inspecting PDF bytes
         try:
-            pdf_bytes = base64.b64decode(pdf_data_base64)
+            pdf_bytes = base64.b64decode(pdf_data_base64, validate=True)
         except Exception as e:
             logger.warning(f"Invalid base64 data: {e}")
             raise APIError('Invalid base64-encoded PDF data', status_code=400)
-        
-        # --- PRICING & INPUT VALIDATION ---
-        user = request.current_user
-        service = _resolve_pitchdeck_service()
 
         if not service._is_valid_pdf(pdf_bytes):
             raise APIError('Invalid PDF - not a valid PDF file', status_code=400)
@@ -86,7 +103,6 @@ def analyze_pitch_deck():
         logger.info(f"[Pitchdeck] Pricing: {page_count} pages (effective {effective_pages}) -> {cost} CP")
 
         # Atomically Reserve Tokens (Optimistic Reservation)
-        from backend.database import db_session
         reserve_flat_tokens(
             user.id,
             cost,
@@ -163,17 +179,93 @@ def verify_market_claims():
         
         if not data:
             raise APIError('No data provided', status_code=400)
+        if not isinstance(data, dict):
+            raise APIError('Invalid request payload', status_code=400)
         
         verifiable_claims = data.get('verifiable_claims', [])
         industry = data.get('industry')
         requested_cache = data.get('cache_name')
-        company = data.get('company') or data.get('company_name')
+        company = data.get('company') if data.get('company') is not None else data.get('company_name')
         summary = data.get('summary')
-        
-        # Validate at least one claim to verify
+
+        service = _resolve_pitchdeck_service()
+        max_company_len = getattr(service, 'MAX_COMPANY_NAME_LENGTH', 200)
+        max_field_len = getattr(service, 'MAX_FIELD_LENGTH', 5000)
+
+        # Validate top-level optional string bounds before reserving tokens
+        if company is not None:
+            if not isinstance(company, str):
+                raise APIError('company must be a string', status_code=400)
+            if len(company) > max_company_len:
+                raise APIError(
+                    f'company exceeds maximum length of {max_company_len} characters',
+                    status_code=400,
+                )
+
+        if industry is not None:
+            if not isinstance(industry, str):
+                raise APIError('industry must be a string', status_code=400)
+            if len(industry) > max_field_len:
+                raise APIError(
+                    f'industry exceeds maximum length of {max_field_len} characters',
+                    status_code=400,
+                )
+
+        if summary is not None:
+            if not isinstance(summary, str):
+                raise APIError('summary must be a string', status_code=400)
+            if len(summary) > max_field_len:
+                raise APIError(
+                    f'summary exceeds maximum length of {max_field_len} characters',
+                    status_code=400,
+                )
+
+        # Validate claim list bounds, item schemas, and non-empty valid claims
         if not verifiable_claims or not isinstance(verifiable_claims, list):
             raise APIError('No claims to verify', status_code=400)
-        
+        if len(verifiable_claims) > 10:
+            raise APIError('Too many claims. Maximum 10 claims per request.', status_code=400)
+
+        valid_claims = []
+        for item in verifiable_claims:
+            if not isinstance(item, dict):
+                raise APIError('Each claim entry must be an object', status_code=400)
+
+            claim_val = item.get('claim')
+            if claim_val is not None:
+                if not isinstance(claim_val, str):
+                    raise APIError('Claim text must be a string', status_code=400)
+                if len(claim_val) > 1000:
+                    raise APIError('Claim exceeds maximum length of 1000 characters', status_code=400)
+
+            for field_name in ('context', 'source_cited', 'suggested_question'):
+                field_val = item.get(field_name)
+                if field_val is not None:
+                    if not isinstance(field_val, str):
+                        raise APIError(f'{field_name} must be a string', status_code=400)
+                    if len(field_val) > 500:
+                        raise APIError(
+                            f'{field_name} exceeds maximum length of 500 characters',
+                            status_code=400,
+                        )
+
+            for field_name in ('category', 'verifiability'):
+                field_val = item.get(field_name)
+                if field_val is not None:
+                    if not isinstance(field_val, str):
+                        raise APIError(f'{field_name} must be a string', status_code=400)
+                    if len(field_val) > 50:
+                        raise APIError(
+                            f'{field_name} exceeds maximum length of 50 characters',
+                            status_code=400,
+                        )
+
+            if isinstance(claim_val, str) and len(claim_val.strip()) >= 5:
+                valid_claims.append(item)
+
+        if not valid_claims:
+            raise APIError('No valid claims to verify', status_code=400)
+
         user = request.current_user
         # Enforce cache ownership: all users share one GEMINI_API_KEY, so never forward
         # an unverified client-supplied cachedContents ID that could belong to another tenant.
@@ -187,8 +279,8 @@ def verify_market_claims():
                     f"[Pitchdeck] Ignoring unauthorized or stale cache_name for user {user.id}"
                 )
 
-        logger.info(f"[Pitchdeck] Verify request - claims: {len(verifiable_claims)}, company: {company}, cache: {bool(cache_name)}")
-        
+        logger.info(f"[Pitchdeck] Verify request - claims: {len(valid_claims)}, company: {company}, cache: {bool(cache_name)}")
+
         # --- PRICING: 1 CP flat per market verification ---
         cost = 1  # Flat rate: 1 CP per verification call
         token_balance = reserve_flat_tokens(
@@ -196,12 +288,11 @@ def verify_market_claims():
             cost,
             error_message=f'Insufficient tokens. Verification requires {cost} CP.'
         )
-        
+
         # Verify claims using service
         try:
-            service = _resolve_pitchdeck_service()
             findings = service.verify_market_claims(
-                verifiable_claims=verifiable_claims,
+                verifiable_claims=valid_claims,
                 industry=industry,
                 cache_name=cache_name,
                 company=company,

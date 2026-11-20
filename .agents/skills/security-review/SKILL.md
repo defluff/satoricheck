@@ -9,6 +9,13 @@ Apply this checklist when auditing pull requests, authentication handlers, payme
 
 ---
 
+## 0. Automated TTP Lead Hunt (`ttp-security-audit`)
+- [ ] Invoke the `ttp-security-audit` skill and run the diff-scoped scanner from repository root:
+  ```bash
+  .venv/bin/python .agents/skills/ttp-security-audit/scripts/ttp_hunt.py --diff
+  ```
+- [ ] Walk any surfaced leads (and changed files) through the 5 Authenix TTP hunting lenses in `.agents/skills/ttp-security-audit/SKILL.md`, and add regression tests in `satoricheck/tests/test_security_fixes.py` for any confirmed bug.
+
 ## 1. Authentication & Route Scoping
 - [ ] Every data or mutation endpoint is protected with `@login_required`.
 - [ ] Any edit to the `PUBLIC` / `SCHEDULER` / `WEBHOOK` allowlists in `tests/test_route_auth_coverage.py` is justified in the PR description (these are the only auth exemptions).

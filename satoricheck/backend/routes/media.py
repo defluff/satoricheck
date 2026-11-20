@@ -73,6 +73,13 @@ def _detect_platform(hostname: str) -> str | None:
 VIDEO_SHORT_MAX_BYTES = GeminiServiceMedia.VIDEO_HIGH_FPS_MAX_BYTES  # 5 MB
 VIDEO_MEDIUM_MAX_BYTES = GeminiServiceMedia.MAX_INLINE_MEDIA_BYTES   # 14 MB
 
+_SAFE_MEDIA_VALUE_ERRORS = frozenset({
+    'YouTube video is unavailable, private, or does not exist.',
+    'Invalid or restricted URL',
+    'Media analysis returned an empty response',
+    'Media analysis returned an incomplete response',
+})
+
 
 def _calculate_media_cp_cost(mime_type: str, file_size_bytes: int | None = None) -> int:
     """Compute Check Point (CP) cost from MIME type and file byte size."""
@@ -174,10 +181,18 @@ def analyze_url() -> tuple:
     """Analyze a public media URL for authenticity."""
     try:
         data = request.get_json()
-        if not data or 'url' not in data:
+        if not data:
+            raise APIError('No URL provided', status_code=400)
+        if not isinstance(data, dict):
+            raise APIError('Invalid request payload', status_code=400)
+        if 'url' not in data:
             raise APIError('No URL provided', status_code=400)
 
-        url = data['url'].strip()
+        raw_url = data['url']
+        if not isinstance(raw_url, str):
+            raise APIError('URL must be a string', status_code=400)
+
+        url = raw_url.strip()
 
         # Early regex validation
         if not URL_REGEX.match(url):
@@ -323,8 +338,30 @@ def analyze_url() -> tuple:
 
     except APIError:
         raise
+    except safe_http.UnsafeURLError as e:
+        db_session.rollback()
+        logger.warning(f"Blocked unsafe media URL: {e}")
+        raise APIError(
+            'Invalid or restricted URL. The address cannot be resolved or is not accessible.',
+            status_code=400,
+        )
+    except safe_http.ResponseTooLargeError as e:
+        db_session.rollback()
+        logger.warning(f"Media URL download limit exceeded: {e}")
+        raise APIError(
+            'Remote media file exceeds the maximum allowed size or download time limit.',
+            status_code=400,
+        )
     except ValueError as e:
-        raise APIError(str(e), status_code=400)
+        db_session.rollback()
+        msg = str(e)
+        logger.warning(f"Media URL validation error: {msg}")
+        if msg in _SAFE_MEDIA_VALUE_ERRORS:
+            raise APIError(msg, status_code=400)
+        raise APIError(
+            'Media URL could not be processed. Please verify the URL and try again.',
+            status_code=400,
+        )
     except Exception as e:
         db_session.rollback()
         logger.error(f"Media route error: {e}", exc_info=True)
@@ -417,10 +454,30 @@ def analyze_upload() -> tuple:
 
     except APIError:
         raise
+    except safe_http.UnsafeURLError as e:
+        db_session.rollback()
+        logger.warning(f"Blocked unsafe media reference in upload: {e}")
+        raise APIError(
+            'Invalid or restricted URL. The address cannot be resolved or is not accessible.',
+            status_code=400,
+        )
+    except safe_http.ResponseTooLargeError as e:
+        db_session.rollback()
+        logger.warning(f"Media upload size/time limit exceeded: {e}")
+        raise APIError(
+            'Media file exceeds the maximum allowed size or processing time limit.',
+            status_code=400,
+        )
     except ValueError as e:
         db_session.rollback()
-        logger.error(f"Media validation error: {e}")
-        raise APIError(str(e), status_code=400)
+        msg = str(e)
+        logger.error(f"Media validation error: {msg}")
+        if msg in _SAFE_MEDIA_VALUE_ERRORS:
+            raise APIError(msg, status_code=400)
+        raise APIError(
+            'Failed to process uploaded media. Please try again or use a different file.',
+            status_code=400,
+        )
     except Exception as e:
         db_session.rollback()
         logger.error(f"Media upload error: {e}", exc_info=True)

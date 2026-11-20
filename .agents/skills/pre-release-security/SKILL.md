@@ -80,6 +80,21 @@ Review every line printed by the `innerHTML` check by hand; the grep cannot prov
 
 ---
 
+## 4b. TTP Vulnerability Lead Scan (`ttp-security-audit`)
+
+Invoke the `ttp-security-audit` skill to hunt structural TTP leads across `backend/routes/`, `backend/services/`, `frontend/js/`, and `extension/` before release:
+
+```bash
+cd satoricheck
+../.venv/bin/python ../.agents/skills/ttp-security-audit/scripts/ttp_hunt.py --diff
+# Or run full-repo scan before major releases:
+# ../.venv/bin/python ../.agents/skills/ttp-security-audit/scripts/ttp_hunt.py
+```
+
+Triage every lead using the 5 hunting lenses in `.agents/skills/ttp-security-audit/SKILL.md` and add regression tests in `satoricheck/tests/test_security_fixes.py` for any confirmed vulnerability.
+
+---
+
 ## 5. Dockerfile Hardening
 
 ```bash

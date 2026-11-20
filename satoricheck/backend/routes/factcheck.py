@@ -102,7 +102,13 @@ def analyze_claim():
         
         # Get optional context
         context = data.get('context')
-        
+        if context is not None:
+            if not isinstance(context, str):
+                raise APIError('Context must be a string')
+            if len(context) > MAX_TEXT_LENGTH:
+                raise APIError(f'Context exceeds maximum limit of {MAX_TEXT_LENGTH:,} characters.')
+            context = context.strip()
+
         # Calculate effective text for analysis
         analysis_text = text
         if context:
@@ -467,7 +473,7 @@ def get_fact_check_history():
     
     # Get limit from query params
     limit = request.args.get('limit', 50, type=int)
-    limit = min(limit, 100)  # Cap at 100
+    limit = max(1, min(limit, 100))  # Clamp between 1 and 100
     
     # Get fact checks
     fact_checks = db_session.query(FactCheck).filter_by(

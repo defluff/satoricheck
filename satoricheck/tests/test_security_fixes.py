@@ -740,4 +740,459 @@ class TestMultiInstanceHardening:
         mock_run.assert_called_once()
 
 
+# =============================================================================
+# Fix 9: Phase 1 Route Hardening (Input Bounds, Pre-Decode, Export, Media Errors)
+# =============================================================================
+
+class TestPhase1RouteHardening:
+    """Regression tests for Phase 1 TTP route hardening and error sanitization."""
+
+    def test_factcheck_analyze_rejects_non_string_and_oversized_context_without_billing(
+        self, auth_client, test_user, db_session_fixture
+    ):
+        """POST /api/factcheck/analyze must reject invalid/oversized context before token deduction or Gemini call."""
+        from backend.models import TokenBalance
+        from backend.services import get_gemini_service
+
+        gemini_svc = get_gemini_service()
+        mock_client = MagicMock()
+
+        with patch.object(gemini_svc, 'client', mock_client):
+            resp_non_str = auth_client.post('/api/factcheck/analyze', json={
+                'text': 'Earth orbits the Sun.',
+                'context': 12345,
+            })
+            assert resp_non_str.status_code == 400
+            assert resp_non_str.get_json()['error'] == 'Context must be a string'
+
+            resp_oversized = auth_client.post('/api/factcheck/analyze', json={
+                'text': 'Earth orbits the Sun.',
+                'context': 'x' * 50001,
+            })
+            assert resp_oversized.status_code == 400
+            assert 'exceeds maximum limit' in resp_oversized.get_json()['error']
+
+        mock_client.models.generate_content.assert_not_called()
+        db_session_fixture.expire_all()
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert bal.balance == 100
+
+    def test_factcheck_history_clamps_negative_and_zero_limit(
+        self, auth_client, test_user, db_session_fixture
+    ):
+        """GET /api/factcheck/history must clamp limit<=0 to 1 while capping >100 cleanly."""
+        import json
+        from backend.models import FactCheck
+
+        for idx in range(3):
+            db_session_fixture.add(FactCheck(
+                user_id=test_user.id,
+                claim_text=f'History claim {idx}',
+                word_count=3,
+                tokens_used=1,
+                is_claim=True,
+                verdict='TRUE',
+                explanation=f'Explanation {idx}',
+                sources=json.dumps([]),
+                source_reliability='HIGH',
+                source='factcheck',
+                timestamp=datetime.now(UTC),
+            ))
+        db_session_fixture.commit()
+
+        resp_neg = auth_client.get('/api/factcheck/history?limit=-1')
+        assert resp_neg.status_code == 200
+        assert len(resp_neg.get_json()['fact_checks']) == 1
+
+        resp_zero = auth_client.get('/api/factcheck/history?limit=0')
+        assert resp_zero.status_code == 200
+        assert len(resp_zero.get_json()['fact_checks']) == 1
+
+        resp_cap = auth_client.get('/api/factcheck/history?limit=9999')
+        assert resp_cap.status_code == 200
+        assert len(resp_cap.get_json()['fact_checks']) == 3
+
+    def test_pitchdeck_analyze_rejects_oversized_base64_and_low_balance_before_b64decode(
+        self, auth_client, test_user, db_session_fixture
+    ):
+        """POST /api/pitchdeck/analyze must enforce type, max length, and balance >= 2 before b64decode."""
+        import backend.routes.pitchdeck as pitchdeck_mod
+        from backend.models import TokenBalance
+        from backend.services import get_pitchdeck_service
+
+        svc = get_pitchdeck_service()
+        oversized_b64 = 'A' * ((svc.MAX_FILE_SIZE * 4 // 3) + 10)
+
+        with patch.object(pitchdeck_mod, 'base64') as mock_b64_mod:
+            resp_non_str = auth_client.post('/api/pitchdeck/analyze', json={
+                'pdf_data': 12345,
+            })
+            assert resp_non_str.status_code == 400
+            assert resp_non_str.get_json()['error'] == 'Invalid base64-encoded PDF data'
+
+            resp_oversized = auth_client.post('/api/pitchdeck/analyze', json={
+                'pdf_data': oversized_b64,
+            })
+            assert resp_oversized.status_code == 400
+            assert 'File too large' in resp_oversized.get_json()['error']
+
+            bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+            bal.balance = 1
+            db_session_fixture.commit()
+
+            resp_low_bal = auth_client.post('/api/pitchdeck/analyze', json={
+                'pdf_data': 'JVBERi0xLjQK',
+            })
+            assert resp_low_bal.status_code == 403
+            assert resp_low_bal.get_json()['error'] == 'Insufficient tokens. Analysis requires 2 CP.'
+            mock_b64_mod.b64decode.assert_not_called()
+
+        db_session_fixture.expire_all()
+        refreshed = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert refreshed.balance == 1
+
+    def test_pitchdeck_analyze_rejects_non_canonical_base64_strictly(
+        self, auth_client, test_user, db_session_fixture
+    ):
+        """POST /api/pitchdeck/analyze must reject non-base64 characters via validate=True."""
+        from backend.models import TokenBalance
+
+        resp = auth_client.post('/api/pitchdeck/analyze', json={
+            'pdf_data': 'JVBERi0xLjQK!!!',
+        })
+        assert resp.status_code == 400
+        assert resp.get_json()['error'] == 'Invalid base64-encoded PDF data'
+
+        db_session_fixture.expire_all()
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert bal.balance == 100
+
+    def test_pitchdeck_verify_market_validates_bounds_and_empty_claims_before_billing(
+        self, auth_client, test_user, db_session_fixture
+    ):
+        """POST /api/pitchdeck/verify-market must reject empty valid_claims and oversized fields at 0 CP."""
+        from backend.models import TokenBalance
+        from backend.services import get_gemini_service, get_pitchdeck_service
+
+        gemini_svc = get_gemini_service()
+        pitchdeck_svc = get_pitchdeck_service()
+        mock_client = MagicMock()
+
+        with patch.object(gemini_svc, 'client', mock_client), \
+             patch.object(pitchdeck_svc, 'client', mock_client):
+            resp_short = auth_client.post('/api/pitchdeck/verify-market', json={
+                'company': 'AcmeCo',
+                'verifiable_claims': [{'claim': 'tiny'}],
+            })
+            assert resp_short.status_code == 400
+            assert resp_short.get_json()['error'] == 'No valid claims to verify'
+
+            resp_company = auth_client.post('/api/pitchdeck/verify-market', json={
+                'company': 'A' * 201,
+                'verifiable_claims': [{'claim': 'Global TAM exceeds $100B.'}],
+            })
+            assert resp_company.status_code == 400
+            assert 'company exceeds maximum length' in resp_company.get_json()['error']
+
+            resp_industry = auth_client.post('/api/pitchdeck/verify-market', json={
+                'company': 'AcmeCo',
+                'industry': 'I' * 5001,
+                'verifiable_claims': [{'claim': 'Global TAM exceeds $100B.'}],
+            })
+            assert resp_industry.status_code == 400
+            assert 'industry exceeds maximum length' in resp_industry.get_json()['error']
+
+            resp_summary = auth_client.post('/api/pitchdeck/verify-market', json={
+                'company': 'AcmeCo',
+                'summary': 'S' * 5001,
+                'verifiable_claims': [{'claim': 'Global TAM exceeds $100B.'}],
+            })
+            assert resp_summary.status_code == 400
+            assert 'summary exceeds maximum length' in resp_summary.get_json()['error']
+
+            resp_claim_len = auth_client.post('/api/pitchdeck/verify-market', json={
+                'company': 'AcmeCo',
+                'verifiable_claims': [{'claim': 'C' * 1001}],
+            })
+            assert resp_claim_len.status_code == 400
+            assert 'Claim exceeds maximum length' in resp_claim_len.get_json()['error']
+
+            resp_ctx_len = auth_client.post('/api/pitchdeck/verify-market', json={
+                'company': 'AcmeCo',
+                'verifiable_claims': [{'claim': 'Global TAM exceeds $100B.', 'context': 'X' * 501}],
+            })
+            assert resp_ctx_len.status_code == 400
+            assert 'context exceeds maximum length' in resp_ctx_len.get_json()['error']
+
+        mock_client.models.generate_content.assert_not_called()
+        db_session_fixture.expire_all()
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert bal.balance == 100
+
+    def test_export_factchecks_escapes_csv_formulas_validates_source_and_caps_rows(
+        self, auth_client, test_user, db_session_fixture
+    ):
+        """GET /api/export/factchecks must escape CSV formulas, allowlist source, and bound row count."""
+        import csv
+        import io
+        import json
+        from backend.models import FactCheck
+
+        rows_data = [
+            ('=CMD|"/C calc"!A0', '+1+1', '-2+3', ['https://example.com', '@SUM(1,1)'], 'factcheck', '=id'),
+            ('\t=HYPERLINK("http://evil")', '\r=1+1', 'None', [], 'factcheck', 'id2'),
+            ('Normal claim', 'Normal explanation', '', [], 'factcheck', 'id3'),
+        ]
+        for claim, expl, fallacy, srcs, src, src_id in rows_data:
+            db_session_fixture.add(FactCheck(
+                user_id=test_user.id,
+                claim_text=claim,
+                word_count=2,
+                tokens_used=1,
+                is_claim=True,
+                verdict='FALSE',
+                explanation=expl,
+                fallacy=fallacy,
+                sources=json.dumps(srcs),
+                source_reliability='LOW',
+                source=src,
+                source_id=src_id,
+                timestamp=datetime.now(UTC),
+            ))
+        db_session_fixture.commit()
+
+        resp = auth_client.get('/api/export/factchecks?source=factcheck')
+        assert resp.status_code == 200
+        assert resp.headers['Content-Type'] == 'text/csv'
+        assert resp.headers['Content-Disposition'].startswith('attachment; filename="authenix_factcheck_')
+        assert resp.headers['Content-Disposition'].endswith('.csv"')
+
+        parsed_rows = list(csv.reader(io.StringIO(resp.get_data(as_text=True))))
+        assert len(parsed_rows) == 4
+        data_cells = {row[4]: row for row in parsed_rows[1:]}
+        assert "'=CMD|\"/C calc\"!A0" in data_cells
+        formula_row = data_cells["'=CMD|\"/C calc\"!A0"]
+        assert formula_row[3] == "'=id"
+        assert formula_row[6] == "'+1+1"
+        assert formula_row[7] == "'-2+3"
+        assert "'\t=HYPERLINK(\"http://evil\")" in data_cells
+        tab_row = data_cells["'\t=HYPERLINK(\"http://evil\")"]
+        assert tab_row[6] == "'\r=1+1"
+
+        bad_header = auth_client.get('/api/export/factchecks?source=bad;filename=evil.exe')
+        assert bad_header.status_code == 400
+        assert bad_header.get_json()['error'] == 'Invalid source filter'
+
+        bad_path = auth_client.get('/api/export/factchecks?source=../../etc')
+        assert bad_path.status_code == 400
+        assert bad_path.get_json()['error'] == 'Invalid source filter'
+
+        with patch('backend.routes.export.MAX_EXPORT_ROWS', 2):
+            capped_resp = auth_client.get('/api/export/factchecks')
+        assert capped_resp.status_code == 200
+        capped_rows = list(csv.reader(io.StringIO(capped_resp.get_data(as_text=True))))
+        assert len(capped_rows) == 3
+
+    def test_export_factchecks_enforces_rate_limit(self, auth_client):
+        """GET /api/export/factchecks must enforce 10 per minute rate limit."""
+        for _ in range(10):
+            resp = auth_client.get('/api/export/factchecks')
+            assert resp.status_code == 200
+
+        throttled = auth_client.get('/api/export/factchecks')
+        assert throttled.status_code == 429
+
+    def test_media_upload_sanitizes_internal_value_error_details(
+        self, auth_client, test_user, db_session_fixture
+    ):
+        """POST /api/media/analyze-upload must not echo raw ValueError/SDK internals on 400."""
+        import io
+        from backend.models import TokenBalance
+        from backend.services import get_gemini_service
+
+        svc = get_gemini_service()
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = 'not-json-internal-trace'
+        mock_client.models.generate_content.return_value = mock_resp
+
+        with patch.object(svc, 'client', mock_client):
+            resp = auth_client.post(
+                '/api/media/analyze-upload',
+                data={'file': (io.BytesIO(b'\xff\xd8\xff\xe0test-jpeg'), 'photo.jpg', 'image/jpeg')},
+                content_type='multipart/form-data',
+            )
+
+        assert resp.status_code == 400
+        err = resp.get_json()['error']
+        assert err == 'Failed to process uploaded media. Please try again or use a different file.'
+        assert 'Expecting value' not in err
+
+        db_session_fixture.expire_all()
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert bal.balance == 100
+
+    def test_media_url_sanitizes_ssrf_and_size_errors_while_preserving_youtube_unavailable(
+        self, auth_client, test_user, db_session_fixture
+    ):
+        """POST /api/media/analyze-url must sanitize download_bounded ValueErrors and keep YouTube 404 wording."""
+        import socket
+        from backend.models import TokenBalance
+        from backend.services import get_gemini_service
+
+        public_dns = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('93.184.216.34', 443))]
+
+        # 1. ResponseTooLargeError from download_bounded must not leak byte numbers
+        oversized_resp = MagicMock()
+        oversized_resp.status_code = 200
+        oversized_resp.headers = {'Content-Length': '999999999'}
+        oversized_resp.close = MagicMock()
+
+        with patch('backend.services.safe_http.socket.getaddrinfo', return_value=public_dns), \
+             patch('backend.services.safe_http.requests.get', return_value=oversized_resp):
+            resp_large = auth_client.post('/api/media/analyze-url', json={
+                'url': 'https://cdn.example.com/clip.mp4',
+            })
+
+        assert resp_large.status_code == 400
+        err_large = resp_large.get_json()['error']
+        assert err_large == 'Remote media file exceeds the maximum allowed size or download time limit.'
+        assert '999999999' not in err_large
+
+        # 2. UnsafeURLError redirect inside download_bounded must not leak internal hostname
+        redirect_resp = MagicMock()
+        redirect_resp.status_code = 302
+        redirect_resp.headers = {'Location': 'http://127.0.0.1/internal-secret'}
+        redirect_resp.close = MagicMock()
+
+        with patch('backend.services.safe_http.socket.getaddrinfo', return_value=public_dns), \
+             patch('backend.services.safe_http.requests.get', return_value=redirect_resp):
+            resp_ssrf = auth_client.post('/api/media/analyze-url', json={
+                'url': 'https://cdn.example.com/clip.mp4',
+            })
+
+        assert resp_ssrf.status_code == 400
+        err_ssrf = resp_ssrf.get_json()['error']
+        assert err_ssrf == 'Invalid or restricted URL. The address cannot be resolved or is not accessible.'
+        assert '127.0.0.1' not in err_ssrf
+        assert 'internal-secret' not in err_ssrf
+
+        # 3. YouTube oEmbed 404 still returns user-facing 'unavailable' 400
+        svc = get_gemini_service()
+        mock_client = MagicMock()
+        with patch.object(svc, 'client', mock_client), \
+             patch('backend.services.safe_http.socket.getaddrinfo', return_value=public_dns), \
+             patch('backend.services.safe_http.requests.get', return_value=MagicMock(status_code=404, headers={})):
+            resp_yt = auth_client.post('/api/media/analyze-url', json={
+                'url': 'https://www.youtube.com/watch?v=privatevid1',
+            })
+
+        assert resp_yt.status_code == 400
+        assert 'unavailable' in resp_yt.get_json()['error'].lower()
+
+        db_session_fixture.expire_all()
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert bal.balance == 100
+
+    def test_pitchdeck_analyze_rejects_missing_token_balance_row_before_b64decode(
+        self, auth_client, test_user, db_session_fixture
+    ):
+        """POST /api/pitchdeck/analyze must return 403 before b64decode and not create a TokenBalance row."""
+        import backend.routes.pitchdeck as pitchdeck_mod
+        from backend.models import TokenBalance
+
+        db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).delete()
+        db_session_fixture.commit()
+
+        with patch.object(pitchdeck_mod, 'base64') as mock_b64_mod:
+            resp = auth_client.post('/api/pitchdeck/analyze', json={
+                'pdf_data': 'JVBERi0xLjQK',
+            })
+
+        assert resp.status_code == 403
+        assert resp.get_json()['error'] == 'Insufficient tokens. Analysis requires 2 CP.'
+        mock_b64_mod.b64decode.assert_not_called()
+
+        db_session_fixture.expire_all()
+        assert db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).first() is None
+
+    def test_pitchdeck_and_media_reject_type_confused_json_payloads_at_zero_cost(
+        self, auth_client, test_user, db_session_fixture
+    ):
+        """Non-dict JSON bodies and non-string URLs must return 400 (never 500/503) at 0 CP."""
+        import backend.routes.pitchdeck as pitchdeck_mod
+        from backend.models import TokenBalance
+        from backend.services import get_gemini_service, get_pitchdeck_service
+
+        gemini_svc = get_gemini_service()
+        pitchdeck_svc = get_pitchdeck_service()
+        mock_client = MagicMock()
+
+        with patch.object(gemini_svc, 'client', mock_client), \
+             patch.object(pitchdeck_svc, 'client', mock_client), \
+             patch.object(pitchdeck_mod, 'base64') as mock_b64_mod, \
+             patch('backend.services.safe_http.requests.get') as mock_get:
+            resp_analyze_list = auth_client.post('/api/pitchdeck/analyze', json=[1, 2, 3])
+            assert resp_analyze_list.status_code == 400
+            assert resp_analyze_list.get_json()['error'] == 'Invalid request payload'
+
+            resp_verify_list = auth_client.post('/api/pitchdeck/verify-market', json=[1, 2, 3])
+            assert resp_verify_list.status_code == 400
+            assert resp_verify_list.get_json()['error'] == 'Invalid request payload'
+
+            resp_media_int_url = auth_client.post('/api/media/analyze-url', json={'url': 123})
+            assert resp_media_int_url.status_code == 400
+            assert resp_media_int_url.get_json()['error'] == 'URL must be a string'
+
+        mock_b64_mod.b64decode.assert_not_called()
+        mock_client.models.generate_content.assert_not_called()
+        mock_get.assert_not_called()
+
+        db_session_fixture.expire_all()
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert bal.balance == 100
+
+    def test_export_factchecks_escapes_leading_whitespace_newline_and_at_formulas(
+        self, auth_client, test_user, db_session_fixture
+    ):
+        """GET /api/export/factchecks must prefix leading whitespace, newline, and @ formula cells."""
+        import csv
+        import io
+        import json
+        from backend.models import FactCheck
+
+        rows_data = [
+            (' =1+1', '  +1+1', '@SUM(1,1)', [], 'factcheck', '\n=1+1'),
+        ]
+        for claim, expl, fallacy, srcs, src, src_id in rows_data:
+            db_session_fixture.add(FactCheck(
+                user_id=test_user.id,
+                claim_text=claim,
+                word_count=2,
+                tokens_used=1,
+                is_claim=True,
+                verdict='FALSE',
+                explanation=expl,
+                fallacy=fallacy,
+                sources=json.dumps(srcs),
+                source_reliability='LOW',
+                source=src,
+                source_id=src_id,
+                timestamp=datetime.now(UTC),
+            ))
+        db_session_fixture.commit()
+
+        resp = auth_client.get('/api/export/factchecks')
+        assert resp.status_code == 200
+        parsed_rows = list(csv.reader(io.StringIO(resp.get_data(as_text=True))))
+        assert len(parsed_rows) == 2
+        row = parsed_rows[1]
+        assert row[3] == "'\n=1+1"
+        assert row[4] == "' =1+1"
+        assert row[6] == "'  +1+1"
+        assert row[7] == "'@SUM(1,1)"
+
+
+
+
 
