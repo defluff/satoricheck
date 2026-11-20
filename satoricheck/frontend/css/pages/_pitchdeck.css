@@ -248,6 +248,14 @@
     line-height: 1.5;
 }
 
+/* Company name + neutral copy-style marker (div, so the span color rule above can't override the badge) */
+.pd-company-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
 /* Two-Column Card Layout */
 .pd-card-columns {
     display: flex;

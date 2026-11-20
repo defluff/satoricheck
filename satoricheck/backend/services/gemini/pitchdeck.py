@@ -35,7 +35,7 @@ class GeminiServicePitchdeck(GeminiServiceMedia):
     ALLOWED_TOP_LEVEL_KEYS = {
         'company_name', 'summary', 'usp', 'industry', 'sector', 'startup_profile',
         'market_size', 'competition', 'team_highlights', 'funding_ask',
-        'verifiable_claims', 'vc_metrics', 'red_flags', 'page_count', 'cache_name'
+        'verifiable_claims', 'vc_metrics', 'red_flags', 'copy_style', 'page_count', 'cache_name'
     }
 
     ALLOWED_CLAIM_CATEGORIES = {
@@ -43,6 +43,9 @@ class GeminiServicePitchdeck(GeminiServiceMedia):
         'cost_savings', 'competitor', 'technology', 'clinical', 'product_feature',
         'other'
     }
+
+    # Neutral style descriptor only — never feeds red_flags, risk levels, or metrics.
+    ALLOWED_COPY_STYLES = {'distinctive', 'generic_ai', 'inconclusive'}
 
     ALLOWED_RISK_LEVELS = {'high', 'low', 'medium', 'undefined'}
 
@@ -112,7 +115,8 @@ class GeminiServicePitchdeck(GeminiServiceMedia):
                 "</pitchdeck_data_boundary>\n\n"
                 "INSTRUCTION: Analyze this pitch deck PDF and return a JSON object with: "
                 "company_name, summary, usp, industry, sector, startup_profile, market_size, competition, "
-                "team_highlights, funding_ask, verifiable_claims, vc_metrics, red_flags. "
+                "team_highlights, funding_ask, verifiable_claims, vc_metrics, red_flags, "
+                "copy_style (generic_ai | distinctive | inconclusive). "
                 "Respond ONLY with valid JSON."
             )
         else:
@@ -533,6 +537,9 @@ class GeminiServicePitchdeck(GeminiServiceMedia):
                         sanitized_flags.append(cleaned_flag)
         sanitized['red_flags'] = sanitized_flags
 
+        # 6b. Copy Style Marker (enum-whitelisted; unknown/missing collapses to 'inconclusive')
+        raw_style = str(result.get('copy_style') or '').strip().lower()
+        sanitized['copy_style'] = raw_style if raw_style in self.ALLOWED_COPY_STYLES else 'inconclusive'
         # 7. Safe Metadata Passthrough
         if 'page_count' in result:
             sanitized['page_count'] = result['page_count']

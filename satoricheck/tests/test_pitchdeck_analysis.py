@@ -1680,3 +1680,114 @@ class TestPitchdeckPageCountHardening:
 
 
 
+class TestPitchdeckCopyStyleMarker:
+    """Neutral `copy_style` marker: enum-whitelisted and fully isolated from flags/risk/metrics."""
+
+    MINIMAL_PDF = b'%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF'
+
+    @staticmethod
+    def _wire_client(payload: dict) -> MagicMock:
+        """Mock only the public genai SDK boundary (generate_content + caches.create)."""
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = json.dumps(payload)
+        mock_client.models.generate_content.return_value = mock_resp
+        mock_cache = MagicMock()
+        mock_cache.name = 'cachedContents/copy-style-cache'
+        mock_client.caches.create.return_value = mock_cache
+        return mock_client
+
+    def _analyze(self, payload: dict) -> dict:
+        from backend.services.pitchdeck_service import PitchdeckService
+
+        service = PitchdeckService()
+        service.client = self._wire_client(payload)
+        return service.analyze_pitch_deck(self.MINIMAL_PDF)
+
+    def test_analysis_prompt_requests_isolated_copy_style_field(self, app):
+        from backend.services.pitchdeck_service import PitchdeckService
+
+        system_instruction, _ = PitchdeckService()._build_analysis_prompt()
+
+        assert '"copy_style": "generic_ai | distinctive | inconclusive"' in system_instruction
+        assert 'MUST NOT add or alter any' in system_instruction
+
+    @pytest.mark.parametrize('raw_label, expected', [
+        ('distinctive', 'distinctive'),
+        ('generic_ai', 'generic_ai'),
+        ('inconclusive', 'inconclusive'),
+        ('  Generic_AI ', 'generic_ai'),
+    ])
+    def test_valid_copy_style_label_is_normalized_and_preserved(self, app, raw_label, expected):
+        result = self._analyze({'company_name': 'StyleCo', 'copy_style': raw_label})
+
+        assert result['copy_style'] == expected
+
+    @pytest.mark.parametrize('raw_label', [
+        None,
+        '',
+        'human_written',
+        '<script>alert(1)</script>',
+        ['generic_ai'],
+        {'label': 'generic_ai'},
+    ])
+    def test_invalid_or_missing_copy_style_collapses_to_inconclusive(self, app, raw_label):
+        payload = {'company_name': 'StyleCo'}
+        if raw_label is not None:
+            payload['copy_style'] = raw_label
+
+        result = self._analyze(payload)
+
+        assert result['copy_style'] == 'inconclusive'
+
+    def test_generic_ai_marker_adds_no_red_flags_and_keeps_claim_risk(self, app):
+        result = self._analyze({
+            'company_name': 'BuzzwordCo',
+            'summary': 'We leverage cutting-edge AI to seamlessly revolutionize synergy.',
+            'verifiable_claims': [{
+                'claim': 'Cited TAM of $4B (Gartner 2025)',
+                'category': 'market_size',
+                'verifiability': 'public',
+                'risk_level': 'low',
+            }],
+            'red_flags': [],
+            'copy_style': 'generic_ai',
+        })
+
+        assert result['copy_style'] == 'generic_ai'
+        assert result['red_flags'] == []
+        assert result['verifiable_claims'][0]['risk_level'] == 'low'
+
+    def test_endpoint_returns_copy_style_without_extra_cost_or_flags(
+        self, auth_client, test_user, db_session_fixture
+    ):
+        from backend.models import TokenBalance
+        from backend.services import get_gemini_service, get_pitchdeck_service
+
+        pitchdeck_svc = get_pitchdeck_service()
+        gemini_svc = get_gemini_service()
+        mock_client = self._wire_client({
+            'company_name': 'MarkerCorp',
+            'summary': 'Single-slide deck.',
+            'usp': 'Neutral marker.',
+            'red_flags': [],
+            'copy_style': 'generic_ai',
+        })
+        pdf_b64 = base64.b64encode(self.MINIMAL_PDF).decode('utf-8')
+
+        with patch.object(pitchdeck_svc, 'client', mock_client), \
+             patch.object(gemini_svc, 'client', mock_client):
+            resp = auth_client.post('/api/pitchdeck/analyze', json={'pdf_data': pdf_b64})
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['copy_style'] == 'generic_ai'
+        assert data['red_flags'] == []
+        assert data['cost_incurred'] == 2
+
+        mock_client.models.generate_content.assert_called_once()
+        assert mock_client.models.generate_content.call_args.kwargs['model'] == pitchdeck_svc.MODEL_MEDIA
+
+        db_session_fixture.expire_all()
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert bal.balance == 98

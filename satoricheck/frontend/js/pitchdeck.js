@@ -1101,6 +1101,7 @@ class PitchdeckModule {
 
         // Company & Summary
         document.getElementById('pd-company-name').innerHTML = DOMPurify.sanitize(result.company_name || '—');
+        this._displayCopyStyle(result.copy_style);
         document.getElementById('pd-summary-text').innerHTML = DOMPurify.sanitize(result.summary || '—');
         document.getElementById('pd-usp-text').innerHTML = DOMPurify.sanitize(result.usp || '—');
 
@@ -1496,6 +1497,30 @@ class PitchdeckModule {
             'Pre-Revenue': 'badge-purple',
         };
         return map[assessment] || 'badge-neutral';
+    }
+
+    /**
+     * Render the neutral copy-style marker. Informational only: 'inconclusive',
+     * unknown, or missing values (e.g. legacy archive entries) hide the pill.
+     */
+    _displayCopyStyle(copyStyle) {
+        const el = document.getElementById('pd-copy-style');
+        if (!el) return;
+
+        const styles = {
+            distinctive: { label: 'Copy: Distinctive', badge: 'badge-neutral' },
+            generic_ai: { label: 'Copy: Generic / AI-like', badge: 'badge-purple' },
+        };
+        const style = styles[copyStyle];
+        el.classList.remove('badge-neutral', 'badge-purple');
+        if (!style) {
+            el.textContent = '';
+            el.classList.add('hidden');
+            return;
+        }
+        el.textContent = style.label;
+        el.classList.add(style.badge);
+        el.classList.remove('hidden');
     }
 
     _displayRedFlags(analysisResult) {
@@ -1913,6 +1938,7 @@ class PitchdeckModule {
             startup_profile: r.startup_profile || {},
             vc_metrics: r.vc_metrics || {},
             red_flags: r.red_flags || [],
+            copy_style: r.copy_style || 'inconclusive',
             retained_claims: retainedClaims
         };
 
@@ -2013,6 +2039,7 @@ class PitchdeckModule {
             },
             vc_metrics: entry.vc_metrics || {},
             red_flags: entry.red_flags || [],
+            copy_style: entry.copy_style || 'inconclusive',
             verifiable_claims: (entry.retained_claims || []).map(c => ({
                 claim: c.claim_text || c.claim || '',
                 category: c.category || 'other',
