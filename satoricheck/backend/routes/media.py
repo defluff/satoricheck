@@ -16,7 +16,12 @@ from werkzeug.utils import secure_filename
 from backend.database import db_session
 from backend.models import MediaCheck, TokenBalance
 from backend.routes.auth import login_required
-from backend.routes.tokens import reserve_flat_tokens, refund_flat_tokens
+from backend.routes.tokens import (
+    ensure_sufficient_tokens,
+    refund_flat_tokens,
+    reserve_flat_tokens,
+    trigger_post_action_refill_if_empty,
+)
 from backend.error_handlers import APIError
 from backend.services import get_gemini_service, safe_http
 from backend.services.gemini.media import GeminiServiceMedia
@@ -155,7 +160,9 @@ def _analyze_media(
         db_session.add(media_check)
         db_session.commit()
 
-        return {
+        new_balance, refill_failed = trigger_post_action_refill_if_empty(user.id)
+
+        payload = {
             'success': True,
             'result': {
                 'verdict': result.get('verdict'),
@@ -166,8 +173,11 @@ def _analyze_media(
                 'processing_time': processing_time,
             },
             'cost_incurred': cost,
-            'new_balance': token_balance.balance,
+            'new_balance': new_balance,
         }
+        if refill_failed:
+            payload['auto_refill_failed'] = True
+        return payload
     except Exception:
         refund_flat_tokens(user.id, cost)
         logger.info(f"Refunded {cost} CP to user {user.email} due to analysis failure")
@@ -214,12 +224,12 @@ def analyze_url() -> tuple:
 
             # Duration is unknown before Gemini fetches the URI, so YouTube bills the full window.
             yt_cost = Config.MEDIA_CP_VIDEO_LONG
-            bal = db_session.query(TokenBalance).filter_by(user_id=request.current_user.id).first()
-            if not bal or bal.balance < yt_cost:
-                raise APIError(
-                    f'Insufficient tokens. Media analysis costs {yt_cost} CP.',
-                    status_code=403,
-                )
+            ensure_sufficient_tokens(
+                request.current_user.id,
+                yt_cost,
+                f'Insufficient tokens. Media analysis costs {yt_cost} CP.',
+                error_status=403,
+            )
 
             gemini_service = get_gemini_service()
             gemini_service.validate_youtube_video(canonical_url)
@@ -258,12 +268,12 @@ def analyze_url() -> tuple:
         # Fallback: probe Content-Type via HEAD (handles CDN/API URLs with no extension)
         if not mime_type:
             # Fail fast before making outbound network probes for zero-balance accounts
-            bal = db_session.query(TokenBalance).filter_by(user_id=request.current_user.id).first()
-            if not bal or bal.balance < Config.MEDIA_CP_IMAGE:
-                raise APIError(
-                    f'Insufficient tokens. Media analysis costs at least {Config.MEDIA_CP_IMAGE} CP.',
-                    status_code=403,
-                )
+            ensure_sufficient_tokens(
+                request.current_user.id,
+                Config.MEDIA_CP_IMAGE,
+                f'Insufficient tokens. Media analysis costs at least {Config.MEDIA_CP_IMAGE} CP.',
+                error_status=403,
+            )
 
             try:
                 # safe_request validates every redirect hop and pins DNS against rebinding.
@@ -307,12 +317,12 @@ def analyze_url() -> tuple:
                 if mime_type.startswith('video/')
                 else Config.MEDIA_CP_AUDIO
             )
-            bal = db_session.query(TokenBalance).filter_by(user_id=request.current_user.id).first()
-            if not bal or bal.balance < min_cost:
-                raise APIError(
-                    f'Insufficient tokens. Media analysis costs {min_cost} CP.',
-                    status_code=403,
-                )
+            ensure_sufficient_tokens(
+                request.current_user.id,
+                min_cost,
+                f'Insufficient tokens. Media analysis costs {min_cost} CP.',
+                error_status=403,
+            )
 
             media_bytes = safe_http.download_bounded(
                 url,
@@ -427,12 +437,12 @@ def analyze_upload() -> tuple:
             if mime_type.startswith('video/')
             else (Config.MEDIA_CP_AUDIO if mime_type.startswith('audio/') else Config.MEDIA_CP_IMAGE)
         )
-        bal = db_session.query(TokenBalance).filter_by(user_id=request.current_user.id).first()
-        if not bal or bal.balance < min_upload_cost:
-            raise APIError(
-                f'Insufficient tokens. Media analysis costs {min_upload_cost} CP.',
-                status_code=403,
-            )
+        ensure_sufficient_tokens(
+            request.current_user.id,
+            min_upload_cost,
+            f'Insufficient tokens. Media analysis costs {min_upload_cost} CP.',
+            error_status=403,
+        )
 
         # Secure temporary storage
         filename = secure_filename(file.filename) or 'uploaded_media'

@@ -16,6 +16,12 @@
         ⚠️ TEST MODE - Authentication Bypassed
     </div>
 
+    <!-- Auto-Refill Failure Banner -->
+    <div id="auto-refill-failure-banner" class="auto-refill-failure-banner hidden" role="alert">
+        <span>⚠️ Automatic refill failed. Check billing.</span>
+        <a href="#billing-account-modal" id="auto-refill-banner-link" class="auto-refill-banner-link">Open Billing Account</a>
+    </div>
+
     <!-- Header -->
     <header class="app-header">
         <div class="header-content">
@@ -1006,14 +1012,38 @@
             <button class="modal-close" id="close-billing-modal">×</button>
             <h2>💳 Billing Account</h2>
 
-            <!-- Active Subscriptions Section -->
-            <div class="billing-section subscriptions-section disabled-section">
-                <h3>Active Subscriptions</h3>
-                <div class="coming-soon-box">
-                    <span class="coming-soon-icon">🚀</span>
-                    <p>Subscriptions coming soon!</p>
-                    <p class="coming-soon-subtext">Save more with monthly plans</p>
+            <!-- Automatic Refill Section -->
+            <div class="billing-section auto-refill-section" id="auto-refill-section">
+                <h3>⚡ Automatic Refill</h3>
+                <p class="auto-refill-description">Automatically top up your Check Points only when your balance runs out (0 CP or insufficient for an action).</p>
+
+                <div class="auto-refill-control-row">
+                    <label class="toggle-switch" for="auto-refill-toggle">
+                        <input type="checkbox" id="auto-refill-toggle">
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">Enable Automatic Refill</span>
+                    </label>
                 </div>
+
+                <div class="form-group auto-refill-package-group">
+                    <label for="auto-refill-package">Refill Package</label>
+                    <select id="auto-refill-package" class="auto-refill-select">
+                        <option value="battery_medium">Medium Battery — 450 CP (49.00 CHF)</option>
+                        <option value="battery_large">Large Battery — 1,000 CP (99.00 CHF)</option>
+                    </select>
+                </div>
+
+                <div class="auto-refill-card-row">
+                    <div class="auto-refill-card-info">
+                        <span class="auto-refill-card-label">Payment Method:</span>
+                        <span id="auto-refill-card-status" class="auto-refill-card-status">No card saved</span>
+                    </div>
+                    <button type="button" class="btn-secondary btn-sm" id="auto-refill-card-btn">Add Card</button>
+                </div>
+
+                <p id="auto-refill-error-note" class="auto-refill-error-note hidden">
+                    Automatic refill failed. Please update your saved card and re-enable automatic refill.
+                </p>
             </div>
 
             <!-- Transaction History Section -->

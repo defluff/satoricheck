@@ -9,7 +9,12 @@ import logging
 import math
 
 from backend.routes.auth import login_required
-from backend.routes.tokens import reserve_flat_tokens, refund_flat_tokens
+from backend.routes.tokens import (
+    ensure_sufficient_tokens,
+    refund_flat_tokens,
+    reserve_flat_tokens,
+    trigger_post_action_refill_if_empty,
+)
 from backend.error_handlers import APIError
 from backend.services import get_pitchdeck_service
 from backend.services.pitchdeck_service import PitchdeckService
@@ -71,10 +76,12 @@ def analyze_pitch_deck():
             )
 
         from backend.database import db_session
-        from backend.models import TokenBalance
-        bal = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
-        if not bal or bal.balance < 2:
-            raise APIError('Insufficient tokens. Analysis requires 2 CP.', status_code=403)
+        ensure_sufficient_tokens(
+            user.id,
+            2,
+            'Insufficient tokens. Analysis requires 2 CP.',
+            error_status=403,
+        )
 
         # Decode base64 strictly before inspecting PDF bytes
         try:
@@ -131,12 +138,17 @@ def analyze_pitch_deck():
             
             # Privacy: Log ID instead of email
             logger.info(f"[Pitchdeck] Analysis complete for user {user.id}. Cost: {cost} CP")
-            
-            return jsonify({
+            new_balance, refill_failed = trigger_post_action_refill_if_empty(user.id)
+
+            resp_payload = {
                 'success': True,
-                'cost_incurred': cost, 
-                **result
-            })
+                'cost_incurred': cost,
+                'new_balance': new_balance,
+                **result,
+            }
+            if refill_failed:
+                resp_payload['auto_refill_failed'] = True
+            return jsonify(resp_payload)
             
         except (ValueError, TimeoutError) as e:
             # Revert deduction on known failures
@@ -305,12 +317,16 @@ def verify_market_claims():
             raise APIError('Verification temporarily unavailable. Please try again.', status_code=503)
         
         logger.info(f"[Pitchdeck] Verification complete for user {user.id}: {len(findings)} findings. Cost: {cost} CP")
-        
-        return jsonify({
+        new_balance, refill_failed = trigger_post_action_refill_if_empty(user.id)
+
+        resp_payload = {
             'success': True,
             'findings': findings,
-            'new_balance': token_balance.balance
-        })
+            'new_balance': new_balance,
+        }
+        if refill_failed:
+            resp_payload['auto_refill_failed'] = True
+        return jsonify(resp_payload)
         
     except APIError:
         raise

@@ -33,20 +33,74 @@ def reserve_flat_tokens(
             raise APIError(error_message or 'No token balance found', status_code=403)
 
     if token_balance.balance < cost:
-        default_message = (
-            f'Insufficient tokens. Need {cost} CP, have {token_balance.balance} CP'
-            if error_status == 402
-            else f'Insufficient tokens. Analysis requires {cost} CP.'
-        )
-        raise APIError(
-            error_message or default_message,
-            status_code=error_status
-        )
+        if token_balance.auto_refill_enabled:
+            from backend.routes.billing import maybe_trigger_auto_refill
+            maybe_trigger_auto_refill(user_id, db_session, required_cost=cost)
+            token_balance = db_session.query(TokenBalance).filter_by(user_id=user_id).with_for_update().first()
+
+        if not token_balance or token_balance.balance < cost:
+            default_message = (
+                f'Insufficient tokens. Need {cost} CP, have {token_balance.balance if token_balance else 0} CP'
+                if error_status == 402
+                else f'Insufficient tokens. Analysis requires {cost} CP.'
+            )
+            payload = {'auto_refill_failed': True} if (token_balance and token_balance.auto_refill_failed) else None
+            raise APIError(
+                error_message or default_message,
+                status_code=error_status,
+                payload=payload,
+            )
 
     token_balance.balance -= cost
     token_balance.last_updated = datetime.now(UTC)
     db_session.commit()
     return token_balance
+
+
+def ensure_sufficient_tokens(
+    user_id: int,
+    required_cp: int,
+    error_message: str,
+    error_status: int = 403,
+) -> TokenBalance:
+    """Pre-check balance guard with off-session auto-refill when balance is insufficient.
+
+    Never creates a missing TokenBalance row so callers preserve missing-row 403 guards.
+    """
+    token_balance = db_session.query(TokenBalance).filter_by(user_id=user_id).first()
+    if not token_balance:
+        raise APIError(error_message, status_code=error_status)
+
+    if token_balance.balance < required_cp:
+        if token_balance.auto_refill_enabled:
+            from backend.routes.billing import maybe_trigger_auto_refill
+            maybe_trigger_auto_refill(user_id, db_session, required_cost=required_cp)
+            token_balance = db_session.query(TokenBalance).filter_by(user_id=user_id).first()
+
+        if not token_balance or token_balance.balance < required_cp:
+            payload = {'auto_refill_failed': True} if (token_balance and token_balance.auto_refill_failed) else None
+            raise APIError(error_message, status_code=error_status, payload=payload)
+
+    return token_balance
+
+
+def trigger_post_action_refill_if_empty(user_id: int) -> tuple[int, bool]:
+    """Trigger off-session auto-refill if a successful action drained balance to 0 CP.
+
+    Returns (current_balance, auto_refill_failed).
+    """
+    token_balance = db_session.query(TokenBalance).filter_by(user_id=user_id).first()
+    if not token_balance:
+        return 0, False
+
+    if (token_balance.balance or 0) <= 0 and token_balance.auto_refill_enabled:
+        from backend.routes.billing import maybe_trigger_auto_refill
+        maybe_trigger_auto_refill(user_id, db_session, required_cost=0)
+        token_balance = db_session.query(TokenBalance).filter_by(user_id=user_id).first()
+
+    if not token_balance:
+        return 0, False
+    return token_balance.balance, bool(token_balance.auto_refill_failed)
 
 
 def refund_flat_tokens(user_id: int, cost: int) -> None:
@@ -104,6 +158,7 @@ def get_balance():
         'success': True,
         'balance': token_balance.balance,
         'is_wizard': token_balance.is_wizard,
+        'auto_refill_failed': bool(token_balance.auto_refill_failed),
         'streak': streak_info,
         'today_reward': today_reward
     })

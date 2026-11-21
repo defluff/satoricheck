@@ -52,6 +52,14 @@ class TokenBalance(Base):
     
     # Legacy column retained for Cloud SQL PostgreSQL schema compatibility (word-accumulation billing retired)
     unbilled_words = Column(Integer, default=0)
+
+    # Automated off-session CP refill configuration
+    auto_refill_enabled = Column(Boolean, default=False)
+    auto_refill_package = Column(String(32), nullable=True)  # 'battery_medium' or 'battery_large'
+    auto_refill_threshold = Column(Integer, default=0)
+    stripe_customer_id = Column(String(128), nullable=True)
+    stripe_payment_method_id = Column(String(128), nullable=True)
+    auto_refill_failed = Column(Boolean, default=False)
     
     user = relationship('User', back_populates='token_balance')
     

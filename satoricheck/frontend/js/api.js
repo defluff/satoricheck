@@ -32,10 +32,17 @@ class APIClient {
                 throw new Error(response.statusText || 'Request failed');
             }
 
+            if (data && data.auto_refill_failed === true) {
+                window.dispatchEvent(new CustomEvent('authenix:auto-refill-failed'));
+            } else if (response.ok && data && data.auto_refill_failed === false) {
+                window.dispatchEvent(new CustomEvent('authenix:auto-refill-cleared'));
+            }
+
             if (!response.ok) {
-                // Attach status code to error object for retry logic
+                // Attach status code and parsed body to error object for retry & billing UI logic
                 const error = new Error(data.error || 'Request failed');
                 error.status = response.status;
+                error.data = data;
                 throw error;
             }
 
@@ -99,6 +106,25 @@ class APIClient {
 
     async getPackages() {
         return this.request('/billing/packages');
+    }
+
+    async getAutoRefill() {
+        return this.request('/billing/auto-refill');
+    }
+
+    async updateAutoRefill(payload) {
+        return this.request('/billing/auto-refill', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+    }
+
+    async createAutoRefillSetup(packageType = null) {
+        const payload = packageType ? { package_type: packageType } : {};
+        return this.request('/billing/auto-refill/setup', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
     }
 
 

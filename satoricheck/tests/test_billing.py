@@ -442,3 +442,651 @@ class TestBillingPackagesAndRedirects:
         assert f'{small_cp} verification checks (up to {small_cp * 8:,} batch claims)' in html_src
         assert f'{med_cp} verification checks (up to {med_cp * 8:,} batch claims)' in html_src
         assert f'{large_cp:,} verification checks (up to {large_cp * 8:,} batch claims)' in html_src
+
+
+def _build_signed_stripe_event(event_type: str, obj: dict, secret: str = 'whsec_test_fake', event_id: str = 'evt_test_auto') -> tuple[bytes, str]:
+    """Build a raw Stripe webhook event JSON payload and real HMAC-SHA256 Stripe-Signature header."""
+    payload_str = json.dumps({
+        'id': event_id,
+        'object': 'event',
+        'type': event_type,
+        'data': {'object': obj},
+    })
+    ts = int(time.time())
+    signed_payload = f'{ts}.{payload_str}'.encode('utf-8')
+    signature = hmac.new(secret.encode('utf-8'), signed_payload, hashlib.sha256).hexdigest()
+    return payload_str.encode('utf-8'), f't={ts},v1={signature}'
+
+
+class TestAutoRefillConfigAndSetup:
+    """Test GET/POST /api/billing/auto-refill, /setup, package validation, and customer reuse."""
+
+    def test_auto_refill_endpoints_require_auth(self, client):
+        """All auto-refill configuration and setup routes must reject unauthenticated callers with 401."""
+        assert client.get('/api/billing/auto-refill').status_code == 401
+        assert client.post('/api/billing/auto-refill', json={'enabled': True}).status_code == 401
+        assert client.post('/api/billing/auto-refill/setup', json={}).status_code == 401
+
+    def test_get_auto_refill_defaults_without_live_stripe_calls(self, auth_client, test_user, db_session_fixture):
+        """GET /api/billing/auto-refill returns DB-only defaults (threshold=0) with zero live Stripe calls."""
+        from backend.models import TokenBalance
+
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        bal.stripe_payment_method_id = 'pm_saved_123'
+        db_session_fixture.commit()
+
+        with patch('stripe.PaymentMethod.retrieve') as mock_pm_retrieve:
+            response = auth_client.get('/api/billing/auto-refill')
+
+        assert response.status_code == 200
+        mock_pm_retrieve.assert_not_called()
+        data = response.get_json()
+        assert data['success'] is True
+        assert data['enabled'] is False
+        assert data['package_type'] == 'battery_medium'
+        assert data['threshold'] == 0
+        assert data['has_payment_method'] is True
+        assert data['failed'] is False
+        assert data['is_wizard'] is False
+        assert [p['id'] for p in data['eligible_packages']] == ['battery_medium', 'battery_large']
+
+    def test_get_auto_refill_wizard_defaults_to_battery_large(self, auth_client, test_user, db_session_fixture):
+        """Wizard users without an explicit package must default to battery_large."""
+        from backend.models import TokenBalance
+
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        bal.is_wizard = True
+        bal.auto_refill_package = None
+        db_session_fixture.commit()
+
+        response = auth_client.get('/api/billing/auto-refill')
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['is_wizard'] is True
+        assert data['package_type'] == 'battery_large'
+
+    def test_post_auto_refill_requires_payment_method_when_enabling(self, auth_client, test_user, db_session_fixture):
+        """Enabling auto-refill without a saved payment method must return 400 with requires_payment_method=True."""
+        from backend.models import TokenBalance
+
+        resp_enable = auth_client.post('/api/billing/auto-refill', json={
+            'enabled': True,
+            'package_type': 'battery_medium',
+        })
+        assert resp_enable.status_code == 400
+        err_data = resp_enable.get_json()
+        assert err_data['success'] is False
+        assert err_data['requires_payment_method'] is True
+
+        db_session_fixture.expire_all()
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert bal.auto_refill_enabled is False
+
+        # Disabling without a saved PM must succeed
+        resp_disable = auth_client.post('/api/billing/auto-refill', json={
+            'enabled': False,
+            'package_type': 'battery_large',
+        })
+        assert resp_disable.status_code == 200
+        assert resp_disable.get_json()['package_type'] == 'battery_large'
+
+    @pytest.mark.parametrize('invalid_pkg', ['battery_small', 'wizard', 'enterprise', ''])
+    def test_post_auto_refill_rejects_ineligible_packages(self, auth_client, test_user, db_session_fixture, invalid_pkg):
+        """Only battery_medium and battery_large are eligible for auto-refill."""
+        from backend.models import TokenBalance
+
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        bal.stripe_payment_method_id = 'pm_valid_1'
+        db_session_fixture.commit()
+
+        response = auth_client.post('/api/billing/auto-refill', json={
+            'enabled': True,
+            'package_type': invalid_pkg,
+        })
+        assert response.status_code == 400
+        assert response.get_json()['success'] is False
+
+        db_session_fixture.expire_all()
+        refreshed = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert refreshed.auto_refill_enabled is False
+        assert refreshed.auto_refill_package is None
+
+    def test_post_auto_refill_enables_and_persists_valid_package(self, auth_client, test_user, db_session_fixture):
+        """With a saved payment method, POST /api/billing/auto-refill persists enabled=True and package."""
+        from backend.models import TokenBalance
+
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        bal.stripe_payment_method_id = 'pm_valid_2'
+        bal.auto_refill_failed = True
+        db_session_fixture.commit()
+
+        response = auth_client.post('/api/billing/auto-refill', json={
+            'enabled': True,
+            'package_type': 'battery_large',
+        })
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['success'] is True
+        assert data['enabled'] is True
+        assert data['package_type'] == 'battery_large'
+        assert data['threshold'] == 0
+        assert data['failed'] is False
+
+        db_session_fixture.expire_all()
+        refreshed = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert refreshed.auto_refill_enabled is True
+        assert refreshed.auto_refill_package == 'battery_large'
+        assert refreshed.auto_refill_threshold == 0
+        assert refreshed.auto_refill_failed is False
+
+    def test_setup_session_uses_setup_mode_chf_and_omits_payment_method_types(
+        self, auth_client, test_user, db_session_fixture
+    ):
+        """POST /api/billing/auto-refill/setup creates a Stripe setup Checkout Session in CHF without payment_method_types."""
+        from backend.models import TokenBalance
+
+        with patch('stripe.Customer.create', return_value=MagicMock(id='cus_setup_new')) as mock_cust, \
+             patch('stripe.checkout.Session.create') as mock_session:
+            mock_session.return_value = MagicMock(
+                id='cs_setup_123',
+                url='https://checkout.stripe.com/c/pay/cs_setup_123',
+            )
+
+            response = auth_client.post('/api/billing/auto-refill/setup', json={
+                'package_type': 'battery_large',
+            })
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['success'] is True
+        assert data['session_id'] == 'cs_setup_123'
+        assert data['url'] == 'https://checkout.stripe.com/c/pay/cs_setup_123'
+
+        mock_cust.assert_called_once()
+        session_kwargs = mock_session.call_args.kwargs
+        assert session_kwargs['mode'] == 'setup'
+        assert session_kwargs['currency'] == 'chf'
+        assert session_kwargs['customer'] == 'cus_setup_new'
+        assert 'payment_method_types' not in session_kwargs
+        assert session_kwargs['metadata']['purpose'] == 'auto_refill_setup'
+        assert session_kwargs['metadata']['user_id'] == str(test_user.id)
+
+        db_session_fixture.expire_all()
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert bal.stripe_customer_id == 'cus_setup_new'
+        assert bal.auto_refill_package == 'battery_large'
+
+    def test_checkout_and_portal_reuse_token_balance_customer_id(self, auth_client, test_user, db_session_fixture):
+        """Checkout and Portal reuse TokenBalance.stripe_customer_id even with zero prior Transactions."""
+        from backend.models import TokenBalance
+
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        bal.stripe_customer_id = 'cus_from_setup_only'
+        db_session_fixture.commit()
+
+        with patch('stripe.Customer.create') as mock_cust, \
+             patch('stripe.checkout.Session.create') as mock_checkout, \
+             patch('stripe.billing_portal.Session.create') as mock_portal:
+            mock_checkout.return_value = MagicMock(id='cs_reuse', url='https://checkout.stripe.com/reuse')
+            mock_portal.return_value = MagicMock(url='https://billing.stripe.com/reuse')
+
+            resp_checkout = auth_client.post('/api/billing/checkout', json={'package_type': 'battery_medium'})
+            resp_portal = auth_client.post('/api/billing/create-portal')
+
+        assert resp_checkout.status_code == 200
+        assert resp_portal.status_code == 200
+        mock_cust.assert_not_called()
+        assert mock_checkout.call_args.kwargs['customer'] == 'cus_from_setup_only'
+        assert mock_portal.call_args.kwargs['customer'] == 'cus_from_setup_only'
+
+
+class TestAutoRefillWebhooks:
+    """Test signed Stripe webhook handlers for setup sessions and off-session auto-refill PaymentIntents."""
+
+    def test_setup_webhook_persists_customer_and_pm_with_zero_transactions(
+        self, client, test_user, db_session_fixture
+    ):
+        """checkout.session.completed (mode='setup') saves customer & PM IDs and creates 0 transactions."""
+        from backend.models import TokenBalance, Transaction
+
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        initial_balance = bal.balance
+        bal.auto_refill_failed = True
+        db_session_fixture.commit()
+
+        body, sig = _build_signed_stripe_event(
+            'checkout.session.completed',
+            {
+                'id': 'cs_setup_done_1',
+                'object': 'checkout.session',
+                'mode': 'setup',
+                'customer': 'cus_webhook_setup_1',
+                'setup_intent': 'seti_webhook_1',
+                'metadata': {
+                    'user_id': str(test_user.id),
+                    'purpose': 'auto_refill_setup',
+                    'package_type': 'battery_medium',
+                },
+            },
+            event_id='evt_setup_1',
+        )
+
+        with patch('stripe.SetupIntent.retrieve') as mock_si:
+            mock_si.return_value = MagicMock(
+                id='seti_webhook_1',
+                customer='cus_webhook_setup_1',
+                payment_method='pm_webhook_saved_1',
+            )
+            response = client.post(
+                '/api/billing/webhook',
+                data=body,
+                content_type='application/json',
+                headers={'Stripe-Signature': sig},
+            )
+
+        assert response.status_code == 200
+        assert response.get_json() == {'success': True}
+        mock_si.assert_called_once_with('seti_webhook_1')
+
+        db_session_fixture.expire_all()
+        refreshed = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert refreshed.stripe_customer_id == 'cus_webhook_setup_1'
+        assert refreshed.stripe_payment_method_id == 'pm_webhook_saved_1'
+        assert refreshed.auto_refill_failed is False
+        assert refreshed.balance == initial_balance
+        assert db_session_fixture.query(Transaction).filter_by(user_id=test_user.id).count() == 0
+
+    def test_payment_intent_succeeded_auto_refill_fulfills_idempotently(
+        self, client, test_user, db_session_fixture
+    ):
+        """payment_intent.succeeded with metadata.auto_refill=='true' credits CP exactly once."""
+        from backend.models import TokenBalance, Transaction
+
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        bal.balance = 0
+        bal.auto_refill_failed = True
+        db_session_fixture.commit()
+
+        expected_cp = Config.TOKEN_PACKAGES['battery_medium']['tokens']
+        body, sig = _build_signed_stripe_event(
+            'payment_intent.succeeded',
+            {
+                'id': 'pi_auto_webhook_1',
+                'object': 'payment_intent',
+                'customer': 'cus_auto_1',
+                'metadata': {
+                    'user_id': str(test_user.id),
+                    'package_type': 'battery_medium',
+                    'tokens': str(expected_cp),
+                    'auto_refill': 'true',
+                },
+            },
+            event_id='evt_pi_auto_1',
+        )
+
+        resp1 = client.post('/api/billing/webhook', data=body, content_type='application/json', headers={'Stripe-Signature': sig})
+        resp2 = client.post('/api/billing/webhook', data=body, content_type='application/json', headers={'Stripe-Signature': sig})
+
+        assert resp1.status_code == 200
+        assert resp2.status_code == 200
+
+        db_session_fixture.expire_all()
+        refreshed = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert refreshed.balance == expected_cp
+        assert refreshed.auto_refill_failed is False
+
+        txs = db_session_fixture.query(Transaction).filter_by(stripe_session_id='pi_auto_webhook_1').all()
+        assert len(txs) == 1
+        assert txs[0].amount == expected_cp
+        assert txs[0].package_type == 'battery_medium'
+
+    def test_payment_intent_succeeded_without_auto_refill_metadata_is_ignored(
+        self, client, test_user, db_session_fixture
+    ):
+        """Regular payment_intent.succeeded without auto_refill=='true' must not double-credit."""
+        from backend.models import TokenBalance, Transaction
+
+        initial_balance = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one().balance
+        body, sig = _build_signed_stripe_event(
+            'payment_intent.succeeded',
+            {
+                'id': 'pi_regular_checkout_1',
+                'object': 'payment_intent',
+                'customer': 'cus_reg_1',
+                'metadata': {
+                    'user_id': str(test_user.id),
+                    'package_type': 'battery_medium',
+                },
+            },
+            event_id='evt_pi_reg_1',
+        )
+
+        response = client.post('/api/billing/webhook', data=body, content_type='application/json', headers={'Stripe-Signature': sig})
+        assert response.status_code == 200
+
+        db_session_fixture.expire_all()
+        assert db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one().balance == initial_balance
+        assert db_session_fixture.query(Transaction).filter_by(stripe_session_id='pi_regular_checkout_1').count() == 0
+
+    def test_payment_intent_failed_disables_auto_refill_and_marks_failed(
+        self, client, test_user, db_session_fixture
+    ):
+        """payment_intent.payment_failed for auto-refill disables auto_refill_enabled and sets auto_refill_failed."""
+        from backend.models import TokenBalance
+
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        bal.auto_refill_enabled = True
+        bal.auto_refill_failed = False
+        db_session_fixture.commit()
+
+        body, sig = _build_signed_stripe_event(
+            'payment_intent.payment_failed',
+            {
+                'id': 'pi_auto_fail_1',
+                'object': 'payment_intent',
+                'customer': 'cus_auto_1',
+                'metadata': {
+                    'user_id': str(test_user.id),
+                    'package_type': 'battery_medium',
+                    'auto_refill': 'true',
+                },
+            },
+            event_id='evt_pi_fail_1',
+        )
+
+        response = client.post('/api/billing/webhook', data=body, content_type='application/json', headers={'Stripe-Signature': sig})
+        assert response.status_code == 200
+
+        db_session_fixture.expire_all()
+        refreshed = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert refreshed.auto_refill_enabled is False
+        assert refreshed.auto_refill_failed is True
+
+
+class TestAutoRefillTriggerEngineAndRoutes:
+    """Test maybe_trigger_auto_refill() strict 0-CP / insufficient-balance rules and route integration."""
+
+    def test_maybe_trigger_never_fires_while_sufficient_nonzero_cp_remain(
+        self, app, test_user, db_session_fixture
+    ):
+        """Auto-refill must NOT trigger while sufficient non-zero CP remain."""
+        from backend.models import TokenBalance
+        from backend.routes.billing import maybe_trigger_auto_refill
+
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        bal.balance = 5
+        bal.auto_refill_enabled = True
+        bal.auto_refill_package = 'battery_medium'
+        bal.stripe_customer_id = 'cus_no_trigger'
+        bal.stripe_payment_method_id = 'pm_no_trigger'
+        db_session_fixture.commit()
+
+        with patch('stripe.PaymentIntent.create') as mock_pi:
+            assert maybe_trigger_auto_refill(test_user.id, db_session_fixture, required_cost=0) is False
+            assert maybe_trigger_auto_refill(test_user.id, db_session_fixture, required_cost=1) is False
+            assert maybe_trigger_auto_refill(test_user.id, db_session_fixture, required_cost=5) is False
+
+        mock_pi.assert_not_called()
+        db_session_fixture.expire_all()
+        assert db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one().balance == 5
+
+    def test_factcheck_analyze_triggers_auto_refill_only_when_balance_reaches_zero(
+        self, auth_client, test_user, db_session_fixture, mock_gemini
+    ):
+        """Draining balance to 0 CP on /api/factcheck/analyze triggers off-session refill; non-zero remainder does not."""
+        from backend.models import TokenBalance, Transaction
+
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        bal.balance = 5
+        bal.auto_refill_enabled = True
+        bal.auto_refill_package = 'battery_medium'
+        bal.stripe_customer_id = 'cus_fc_1'
+        bal.stripe_payment_method_id = 'pm_fc_1'
+        db_session_fixture.commit()
+
+        # 1. With 5 CP -> 4 CP remaining -> must NOT call PaymentIntent.create
+        with patch('stripe.PaymentIntent.create') as mock_pi_nonzero:
+            resp_ok = auth_client.post('/api/factcheck/analyze', json={'text': 'Water boils at 100C.'})
+        assert resp_ok.status_code == 200
+        assert resp_ok.get_json()['new_balance'] == 4
+        mock_pi_nonzero.assert_not_called()
+
+        # 2. Drain to 1 CP -> post-action balance hits 0 CP -> triggers off-session battery_medium refill
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        bal.balance = 1
+        db_session_fixture.commit()
+
+        expected_pkg = Config.TOKEN_PACKAGES['battery_medium']
+        with patch('stripe.PaymentIntent.create') as mock_pi_zero:
+            mock_pi_zero.return_value = MagicMock(id='pi_fc_zero_1', status='succeeded')
+            resp_zero = auth_client.post('/api/factcheck/analyze', json={'text': 'The Earth orbits the Sun.'})
+
+        assert resp_zero.status_code == 200
+        data_zero = resp_zero.get_json()
+        assert data_zero['new_balance'] == expected_pkg['tokens']
+
+        pi_kwargs = mock_pi_zero.call_args.kwargs
+        assert pi_kwargs['amount'] == expected_pkg['price']
+        assert pi_kwargs['currency'] == expected_pkg['currency']
+        assert pi_kwargs['customer'] == 'cus_fc_1'
+        assert pi_kwargs['payment_method'] == 'pm_fc_1'
+        assert pi_kwargs['off_session'] is True
+        assert pi_kwargs['confirm'] is True
+        assert pi_kwargs['metadata']['auto_refill'] == 'true'
+        assert pi_kwargs['metadata']['package_type'] == 'battery_medium'
+
+        db_session_fixture.expire_all()
+        refreshed = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert refreshed.balance == expected_pkg['tokens']
+        tx = db_session_fixture.query(Transaction).filter_by(stripe_session_id='pi_fc_zero_1').one()
+        assert tx.amount == expected_pkg['tokens']
+
+    def test_insufficient_nonzero_balance_triggers_refill_before_media_upload(
+        self, auth_client, test_user, db_session_fixture
+    ):
+        """If balance=2 CP is insufficient for a 4 CP image check, auto-refill runs first and action succeeds."""
+        import io
+        from backend.models import TokenBalance
+        from backend.services import get_gemini_service
+
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        bal.balance = 2
+        bal.auto_refill_enabled = True
+        bal.auto_refill_package = 'battery_medium'
+        bal.stripe_customer_id = 'cus_media_1'
+        bal.stripe_payment_method_id = 'pm_media_1'
+        db_session_fixture.commit()
+
+        gemini_svc = get_gemini_service()
+        mock_gemini_client = MagicMock()
+        mock_gemini_client.models.generate_content.return_value = MagicMock(
+            text=json.dumps({
+                'verdict': 'authentic',
+                'confidence': 95,
+                'explanation': 'No manipulation artifacts detected.',
+                'criteria': {},
+                'claims': [],
+            })
+        )
+
+        with patch.object(gemini_svc, 'client', mock_gemini_client), \
+             patch('stripe.PaymentIntent.create') as mock_pi:
+            mock_pi.return_value = MagicMock(id='pi_media_refill_1', status='succeeded')
+            response = auth_client.post(
+                '/api/media/analyze-upload',
+                data={'file': (io.BytesIO(b'\x89PNG\r\n\x1a\nfake'), 'photo.png')},
+                content_type='multipart/form-data',
+            )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['success'] is True
+        assert data['cost_incurred'] == 4
+        assert data['new_balance'] == 2 + Config.TOKEN_PACKAGES['battery_medium']['tokens'] - 4
+        mock_pi.assert_called_once()
+
+        db_session_fixture.expire_all()
+        assert db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one().balance == 448
+
+    def test_wizard_user_auto_refill_falls_back_to_battery_large(self, app, test_user, db_session_fixture):
+        """Wizard users with unset auto_refill_package must charge battery_large (1,000 CP / 9900 CHF cents)."""
+        from backend.models import TokenBalance
+        from backend.routes.billing import maybe_trigger_auto_refill
+
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        bal.balance = 0
+        bal.is_wizard = True
+        bal.auto_refill_enabled = True
+        bal.auto_refill_package = None
+        bal.stripe_customer_id = 'cus_wiz_1'
+        bal.stripe_payment_method_id = 'pm_wiz_1'
+        db_session_fixture.commit()
+
+        large_pkg = Config.TOKEN_PACKAGES['battery_large']
+        with patch('stripe.PaymentIntent.create') as mock_pi:
+            mock_pi.return_value = MagicMock(id='pi_wiz_large_1', status='succeeded')
+            triggered = maybe_trigger_auto_refill(test_user.id, db_session_fixture, required_cost=1)
+
+        assert triggered is True
+        pi_kwargs = mock_pi.call_args.kwargs
+        assert pi_kwargs['amount'] == large_pkg['price']
+        assert pi_kwargs['currency'] == large_pkg['currency']
+        assert pi_kwargs['metadata']['package_type'] == 'battery_large'
+
+        db_session_fixture.expire_all()
+        assert db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one().balance == large_pkg['tokens']
+
+    def test_card_error_disables_auto_refill_sets_failed_flag_and_surfaces_on_balance(
+        self, auth_client, test_user, db_session_fixture, mock_gemini
+    ):
+        """Off-session CardError disables auto_refill_enabled, sets auto_refill_failed=True, and exposes it on /tokens/balance."""
+        from backend.models import TokenBalance
+
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        bal.balance = 0
+        bal.auto_refill_enabled = True
+        bal.auto_refill_package = 'battery_medium'
+        bal.stripe_customer_id = 'cus_fail_1'
+        bal.stripe_payment_method_id = 'pm_fail_1'
+        db_session_fixture.commit()
+
+        with patch('stripe.PaymentIntent.create') as mock_pi:
+            mock_pi.side_effect = stripe.error.CardError('Your card was declined.', 'card', 'card_declined')
+            resp_analyze = auth_client.post('/api/factcheck/analyze', json={'text': 'Mars is a planet.'})
+
+        assert resp_analyze.status_code == 403
+        err_json = resp_analyze.get_json()
+        assert err_json['success'] is False
+        assert err_json['auto_refill_failed'] is True
+
+        db_session_fixture.expire_all()
+        refreshed = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        assert refreshed.auto_refill_enabled is False
+        assert refreshed.auto_refill_failed is True
+        assert refreshed.balance == 0
+
+        resp_balance = auth_client.get('/api/tokens/balance')
+        assert resp_balance.status_code == 200
+        assert resp_balance.get_json()['auto_refill_failed'] is True
+
+    def test_webhook_after_sync_auto_refill_does_not_double_credit(
+        self, client, test_user, db_session_fixture
+    ):
+        """Subsequent payment_intent.succeeded webhook for an already synchronously fulfilled PI must be idempotent."""
+        from backend.models import TokenBalance, Transaction
+        from backend.routes.billing import maybe_trigger_auto_refill
+
+        bal = db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one()
+        bal.balance = 0
+        bal.auto_refill_enabled = True
+        bal.auto_refill_package = 'battery_medium'
+        bal.stripe_customer_id = 'cus_sync_1'
+        bal.stripe_payment_method_id = 'pm_sync_1'
+        db_session_fixture.commit()
+
+        with patch('stripe.PaymentIntent.create', return_value=MagicMock(id='pi_sync_dup_1', status='succeeded')):
+            assert maybe_trigger_auto_refill(test_user.id, db_session_fixture, required_cost=1) is True
+
+        expected_cp = Config.TOKEN_PACKAGES['battery_medium']['tokens']
+        body, sig = _build_signed_stripe_event(
+            'payment_intent.succeeded',
+            {
+                'id': 'pi_sync_dup_1',
+                'object': 'payment_intent',
+                'customer': 'cus_sync_1',
+                'metadata': {
+                    'user_id': str(test_user.id),
+                    'package_type': 'battery_medium',
+                    'tokens': str(expected_cp),
+                    'auto_refill': 'true',
+                },
+            },
+            event_id='evt_sync_dup_1',
+        )
+        resp_wh = client.post('/api/billing/webhook', data=body, content_type='application/json', headers={'Stripe-Signature': sig})
+        assert resp_wh.status_code == 200
+
+        db_session_fixture.expire_all()
+        assert db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).one().balance == expected_cp
+        assert db_session_fixture.query(Transaction).filter_by(stripe_session_id='pi_sync_dup_1').count() == 1
+
+    def test_missing_token_balance_row_is_never_created_by_maybe_trigger(self, app, test_user, db_session_fixture):
+        """maybe_trigger_auto_refill must return False without creating a missing TokenBalance row."""
+        from backend.models import TokenBalance
+        from backend.routes.billing import maybe_trigger_auto_refill
+
+        db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).delete()
+        db_session_fixture.commit()
+
+        with patch('stripe.PaymentIntent.create') as mock_pi:
+            assert maybe_trigger_auto_refill(test_user.id, db_session_fixture, required_cost=2) is False
+
+        mock_pi.assert_not_called()
+        assert db_session_fixture.query(TokenBalance).filter_by(user_id=test_user.id).first() is None
+
+
+class TestAutoRefillFrontendUI:
+    """Verify #billing-account-modal controls and #auto-refill-failure-banner placement."""
+
+    def test_billing_modal_replaces_coming_soon_and_surfaces_banner(self):
+        """Controls must live in #billing-account-modal only (never #buy-tokens-modal or extension)."""
+        import pathlib
+        import re
+
+        frontend_dir = pathlib.Path(__file__).resolve().parents[1] / 'frontend'
+        index_html = (frontend_dir / 'index.html').read_text(encoding='utf-8')
+        ext_html = (
+            pathlib.Path(__file__).resolve().parents[1] / 'extension' / 'sidepanel' / 'sidepanel.html'
+        ).read_text(encoding='utf-8')
+
+        assert 'Subscriptions coming soon!' not in index_html
+        assert 'id="auto-refill-failure-banner"' in index_html
+        assert 'Automatic refill failed. Check billing.' in index_html
+        assert 'id="auto-refill-banner-link"' in index_html
+        assert 'href="#billing-account-modal"' in index_html
+
+        billing_modal_match = re.search(
+            r'id="billing-account-modal"(.*?)id="streak-modal"',
+            index_html,
+            re.DOTALL,
+        )
+        assert billing_modal_match is not None
+        billing_modal_html = billing_modal_match.group(1)
+
+        assert 'id="auto-refill-toggle"' in billing_modal_html
+        assert 'id="auto-refill-package"' in billing_modal_html
+        assert 'value="battery_medium"' in billing_modal_html
+        assert 'value="battery_large"' in billing_modal_html
+        assert 'value="battery_small"' not in billing_modal_html
+        assert 'value="wizard"' not in billing_modal_html
+        assert 'id="auto-refill-card-status"' in billing_modal_html
+        assert 'id="auto-refill-card-btn"' in billing_modal_html
+
+        buy_modal_match = re.search(
+            r'id="buy-tokens-modal"(.*?)id="settings-modal"',
+            index_html,
+            re.DOTALL,
+        )
+        assert buy_modal_match is not None
+        assert 'auto-refill-toggle' not in buy_modal_match.group(1)
+        assert 'auto-refill-toggle' not in ext_html

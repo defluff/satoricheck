@@ -15,8 +15,10 @@ from backend.database import db_session
 from backend.models import FactCheck, MediaCheck, TokenBalance
 from backend.routes.auth import login_required, scheduler_secret_required
 from backend.routes.tokens import (
-    reserve_flat_tokens,
+    ensure_sufficient_tokens,
     refund_flat_tokens,
+    reserve_flat_tokens,
+    trigger_post_action_refill_if_empty,
 )
 from backend.error_handlers import APIError
 from backend.services import get_gemini_service
@@ -174,10 +176,11 @@ def analyze_claim():
         db_session.add(fact_check)
         
         db_session.commit()
+        new_balance, refill_failed = trigger_post_action_refill_if_empty(user.id)
         
         logger.info(f"Fact check completed. Verdict: {result['verdict']}, Cost: {token_cost} CP, Time: {processing_time:.2f}s")
         
-        return jsonify({
+        resp_payload = {
             'success': True,
             'result': {
                 'id': fact_check.id,
@@ -201,8 +204,11 @@ def analyze_claim():
                 'word_count': word_count,
                 'processing_time': processing_time
             },
-            'new_balance': token_balance.balance
-        })
+            'new_balance': new_balance
+        }
+        if refill_failed:
+            resp_payload['auto_refill_failed'] = True
+        return jsonify(resp_payload)
         
     except APIError:
         db_session.rollback()
@@ -229,9 +235,12 @@ def create_context_cache():
             raise APIError(f'Text exceeds maximum limit of {MAX_TEXT_LENGTH:,} characters.')
 
         user = request.current_user
-        token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
-        if not token_balance or token_balance.balance < 1:
-            raise APIError('Insufficient tokens to create context cache', status_code=403)
+        ensure_sufficient_tokens(
+            user.id,
+            1,
+            'Insufficient tokens to create context cache',
+            error_status=403,
+        )
         
         gemini_service = get_gemini_service()
 
@@ -447,14 +456,22 @@ def analyze_batch_claims():
         
         # Extract just the result objects
         final_results = [r['result'] for r in results]
-        bal = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
+        if token_cost > 0:
+            new_balance, refill_failed = trigger_post_action_refill_if_empty(user.id)
+        else:
+            bal = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
+            new_balance = bal.balance if bal else 0
+            refill_failed = bool(bal and bal.auto_refill_failed)
         
-        return jsonify({
+        resp_payload = {
             'success': True,
             'results': final_results,
             'cost_incurred': token_cost,
-            'new_balance': bal.balance if bal else 0,
-        })
+            'new_balance': new_balance,
+        }
+        if refill_failed:
+            resp_payload['auto_refill_failed'] = True
+        return jsonify(resp_payload)
 
     except APIError:
         db_session.rollback()
@@ -510,9 +527,12 @@ def identify_claims():
         user = request.current_user
         
         # Guard: User must have at least 1 CP to use Smart Agent pipeline
-        token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
-        if not token_balance or token_balance.balance < 1:
-            raise APIError('Insufficient tokens to use Smart Agent', status_code=403)
+        ensure_sufficient_tokens(
+            user.id,
+            1,
+            'Insufficient tokens to use Smart Agent',
+            error_status=403,
+        )
         
         # Get global Gemini service
         gemini_service = get_gemini_service()
@@ -581,11 +601,13 @@ def analyze_ai():
         
         if token_cost > 0:
             logger.info(f"AI Detection deducted {token_cost} CP from user {user.email}")
+
+        new_balance, refill_failed = trigger_post_action_refill_if_empty(user.id)
         
         elapsed = time.time() - start_time
         logger.info(f"AI Detection completed for user {user.email}: {result['ai_probability']}% in {elapsed:.2f}s")
         
-        return jsonify({
+        resp_payload = {
             'success': True,
             'ai_probability': result['ai_probability'],
             'confidence': result['confidence'],
@@ -595,8 +617,11 @@ def analyze_ai():
             'human_indicators': result['human_indicators'],
             'explanation': result['explanation'],
             'tokens_used': token_cost,
-            'new_balance': token_balance.balance
-        })
+            'new_balance': new_balance
+        }
+        if refill_failed:
+            resp_payload['auto_refill_failed'] = True
+        return jsonify(resp_payload)
         
     except APIError:
         raise

@@ -103,18 +103,18 @@ def _apply_migrations():
             if col_name in existing_columns:
                 continue
 
+            is_postgres = engine.dialect.name in ('postgresql', 'postgres')
             ddl_type = _sa_type_to_ddl(col_obj)
             default_clause = ''
             if col_obj.default is not None and col_obj.default.is_scalar:
                 default_val = col_obj.default.arg
-                if isinstance(default_val, str):
+                if isinstance(default_val, bool):
+                    default_clause = f" DEFAULT {'TRUE' if default_val else 'FALSE'}"
+                elif isinstance(default_val, str):
                     default_clause = f" DEFAULT '{default_val}'"
-                elif isinstance(default_val, bool):
-                    default_clause = f" DEFAULT {int(default_val)}"
                 elif isinstance(default_val, (int, float)):
                     default_clause = f" DEFAULT {default_val}"
 
-            is_postgres = engine.dialect.name in ('postgresql', 'postgres')
             if_not_exists = 'IF NOT EXISTS ' if is_postgres else ''
             stmt = f'ALTER TABLE {table.name} ADD COLUMN {if_not_exists}{col_name} {ddl_type}{default_clause}'
             logger.info(f"↗ Auto-migrating: {stmt}")

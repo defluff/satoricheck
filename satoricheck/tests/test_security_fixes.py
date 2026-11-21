@@ -621,6 +621,38 @@ class TestMultiInstanceHardening:
             db_mod._apply_migrations()
             assert mock_conn.execute.call_count == 4
 
+    def test_apply_migrations_emits_boolean_default_false_for_postgresql(self):
+        """PostgreSQL ALTER TABLE migrations must emit BOOLEAN DEFAULT FALSE (never DEFAULT 0)."""
+        import backend.database as db_mod
+
+        mock_inspector = MagicMock()
+        mock_inspector.get_table_names.return_value = ['token_balances']
+        mock_inspector.get_columns.return_value = [
+            {'name': 'id'}, {'name': 'user_id'}, {'name': 'balance'},
+            {'name': 'last_updated'}, {'name': 'is_wizard'},
+            {'name': 'wizard_start_date'}, {'name': 'wizard_months_remaining'},
+            {'name': 'unbilled_words'},
+        ]
+
+        executed_sqls = []
+        mock_conn = MagicMock()
+        mock_conn.execute.side_effect = lambda stmt: executed_sqls.append(str(stmt))
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = mock_conn
+        mock_ctx.__exit__.return_value = False
+
+        with patch('backend.database.inspect', return_value=mock_inspector), \
+             patch.object(db_mod.engine, 'begin', return_value=mock_ctx), \
+             patch.object(db_mod.engine.dialect, 'name', 'postgresql'):
+            db_mod._apply_migrations()
+
+        assert len(executed_sqls) == 6
+        joined = '\n'.join(executed_sqls)
+        assert 'ALTER TABLE token_balances ADD COLUMN IF NOT EXISTS auto_refill_enabled BOOLEAN DEFAULT FALSE' in joined
+        assert 'ALTER TABLE token_balances ADD COLUMN IF NOT EXISTS auto_refill_failed BOOLEAN DEFAULT FALSE' in joined
+        assert 'ALTER TABLE token_balances ADD COLUMN IF NOT EXISTS auto_refill_threshold INTEGER DEFAULT 0' in joined
+        assert 'BOOLEAN DEFAULT 0' not in joined
+
     def test_normalize_database_url_maps_postgresql_to_psycopg2_driver(self):
         """Bare postgresql:// and postgres:// URLs must resolve to psycopg2 under SQLAlchemy 2.1+."""
         from sqlalchemy import create_engine

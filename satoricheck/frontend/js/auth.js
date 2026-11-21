@@ -63,6 +63,11 @@ class AuthManager {
                 ui.showTestModeBanner();
             }
 
+            const failureBanner = document.getElementById('auto-refill-failure-banner');
+            if (failureBanner) {
+                failureBanner.classList.toggle('hidden', !response.user.auto_refill_failed);
+            }
+
             this.onAuthSuccess();
         } catch (error) {
             // Not logged in, show auth modal
@@ -174,6 +179,11 @@ class AuthManager {
             const response = await api.getBalance();
             ui.updateBalance(response.balance);
             ui.updateStreak(response.streak);
+
+            const failureBanner = document.getElementById('auto-refill-failure-banner');
+            if (failureBanner) {
+                failureBanner.classList.toggle('hidden', !response.auto_refill_failed);
+            }
 
             // Show toast if a streak reward was granted today (only once per session)
             if (response.today_reward && !sessionStorage.getItem('streak_reward_shown')) {

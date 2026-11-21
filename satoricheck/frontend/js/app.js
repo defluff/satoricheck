@@ -254,6 +254,44 @@ class App {
             });
         }
 
+        // Auto-refill failure banner direct link -> open Billing Account modal
+        const autoRefillBannerLink = document.getElementById('auto-refill-banner-link');
+        if (autoRefillBannerLink) {
+            autoRefillBannerLink.addEventListener('click', async (e) => {
+                e.preventDefault();
+                await this.handleManageBilling();
+            });
+        }
+
+        window.addEventListener('authenix:auto-refill-failed', () => {
+            this.setAutoRefillFailureBanner(true);
+        });
+        window.addEventListener('authenix:auto-refill-cleared', () => {
+            this.setAutoRefillFailureBanner(false);
+        });
+
+        // Auto-refill controls inside #billing-account-modal
+        const autoRefillToggle = document.getElementById('auto-refill-toggle');
+        if (autoRefillToggle) {
+            autoRefillToggle.addEventListener('change', async () => {
+                await this.handleAutoRefillToggleChange();
+            });
+        }
+
+        const autoRefillPackage = document.getElementById('auto-refill-package');
+        if (autoRefillPackage) {
+            autoRefillPackage.addEventListener('change', async () => {
+                await this.handleAutoRefillPackageChange();
+            });
+        }
+
+        const autoRefillCardBtn = document.getElementById('auto-refill-card-btn');
+        if (autoRefillCardBtn) {
+            autoRefillCardBtn.addEventListener('click', async () => {
+                await this.handleAutoRefillCardSetup();
+            });
+        }
+
         // Chrome Extension: Settings button
         const chromeExtBtn = document.getElementById('chrome-extension-btn');
         if (chromeExtBtn) {
@@ -363,6 +401,9 @@ class App {
         // Open the billing account modal
         ui.showModal('billing-account-modal');
 
+        // Load automatic refill settings in parallel with transaction history
+        this.loadAutoRefillSettings();
+
         // Fetch and render transaction history
         const transactionList = document.getElementById('transaction-list');
         if (!transactionList) return;
@@ -441,6 +482,103 @@ class App {
         `;
     }
 
+    setAutoRefillFailureBanner(failed) {
+        const banner = document.getElementById('auto-refill-failure-banner');
+        if (banner) {
+            banner.classList.toggle('hidden', !failed);
+        }
+    }
+
+    renderAutoRefillState(config) {
+        const toggle = document.getElementById('auto-refill-toggle');
+        const pkgSelect = document.getElementById('auto-refill-package');
+        const cardStatus = document.getElementById('auto-refill-card-status');
+        const cardBtn = document.getElementById('auto-refill-card-btn');
+        const errorNote = document.getElementById('auto-refill-error-note');
+
+        if (toggle) {
+            toggle.checked = Boolean(config.enabled);
+        }
+        if (pkgSelect && config.package_type) {
+            pkgSelect.value = config.package_type;
+        }
+        if (cardStatus) {
+            cardStatus.textContent = config.has_payment_method ? 'Card saved' : 'No card saved';
+        }
+        if (cardBtn) {
+            cardBtn.textContent = config.has_payment_method ? 'Update Card' : 'Add Card';
+        }
+        if (errorNote) {
+            errorNote.classList.toggle('hidden', !config.failed);
+        }
+        this.setAutoRefillFailureBanner(Boolean(config.failed));
+    }
+
+    async loadAutoRefillSettings() {
+        try {
+            const config = await api.getAutoRefill();
+            if (config && config.success) {
+                this.renderAutoRefillState(config);
+            }
+        } catch (error) {
+            console.error('Failed to load auto-refill settings:', error);
+        }
+    }
+
+    async handleAutoRefillToggleChange() {
+        const toggle = document.getElementById('auto-refill-toggle');
+        const pkgSelect = document.getElementById('auto-refill-package');
+        if (!toggle) return;
+
+        const desiredEnabled = toggle.checked;
+        const payload = { enabled: desiredEnabled };
+        if (pkgSelect && pkgSelect.value) {
+            payload.package_type = pkgSelect.value;
+        }
+
+        try {
+            const response = await api.updateAutoRefill(payload);
+            this.renderAutoRefillState(response);
+            ui.showToast(
+                response.enabled ? 'Automatic refill enabled' : 'Automatic refill disabled',
+                'success'
+            );
+        } catch (error) {
+            toggle.checked = !desiredEnabled;
+            if (error.data && error.data.requires_payment_method) {
+                ui.showToast('Please save a payment card to enable automatic refill.', 'info');
+                await this.handleAutoRefillCardSetup();
+            } else {
+                ui.showToast('Failed to update automatic refill: ' + error.message, 'error');
+            }
+        }
+    }
+
+    async handleAutoRefillPackageChange() {
+        const pkgSelect = document.getElementById('auto-refill-package');
+        if (!pkgSelect) return;
+
+        try {
+            const response = await api.updateAutoRefill({ package_type: pkgSelect.value });
+            this.renderAutoRefillState(response);
+            ui.showToast('Automatic refill package updated', 'success');
+        } catch (error) {
+            ui.showToast('Failed to update refill package: ' + error.message, 'error');
+            await this.loadAutoRefillSettings();
+        }
+    }
+
+    async handleAutoRefillCardSetup() {
+        const pkgSelect = document.getElementById('auto-refill-package');
+        try {
+            ui.showToast('Redirecting to Stripe card setup...', 'info');
+            const response = await api.createAutoRefillSetup(pkgSelect ? pkgSelect.value : null);
+            window.location.href = response.url;
+        } catch (error) {
+            ui.showToast('Card setup failed: ' + error.message, 'error');
+        }
+    }
+
     checkPaymentStatus() {
         const params = new URLSearchParams(window.location.search);
 
@@ -454,6 +592,14 @@ class App {
             window.history.replaceState({}, document.title, window.location.pathname);
         } else if (params.get('payment') === 'cancelled') {
             ui.showToast('Payment cancelled', 'warning');
+            window.history.replaceState({}, document.title, window.location.pathname);
+        } else if (params.get('auto_refill') === 'setup_success') {
+            ui.showToast('Payment card saved! You can now enable Automatic Refill.', 'success');
+            auth.updateBalance();
+            window.history.replaceState({}, document.title, window.location.pathname);
+            this.handleManageBilling();
+        } else if (params.get('auto_refill') === 'setup_cancelled') {
+            ui.showToast('Card setup cancelled', 'warning');
             window.history.replaceState({}, document.title, window.location.pathname);
         }
     }

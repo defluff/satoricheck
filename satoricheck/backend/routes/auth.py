@@ -355,7 +355,8 @@ def get_current_user():
             'email': user.email,
             'balance': balance,
             'streak': current_streak,
-            'is_test_mode': Config.TEST_MODE
+            'is_test_mode': Config.TEST_MODE,
+            'auto_refill_failed': bool(token_balance and token_balance.auto_refill_failed),
         }
     })
 
