@@ -54,3 +54,259 @@
     color: white;
     box-shadow: 0 0 15px rgba(239, 68, 68, 0.3);
 }
+
+/* Cloud Storage Sync Modal & Summary */
+.storage-summary-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-xs);
+    margin: var(--spacing-sm) 0 var(--spacing-md);
+}
+
+.storage-summary-pill {
+    font-size: 0.75rem;
+    padding: 3px 9px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-neutral-subtle);
+    color: var(--color-text-secondary);
+    border: 1px solid var(--color-border);
+}
+
+.storage-summary-pill--connected {
+    background: var(--bg-success-subtle);
+    color: var(--color-success);
+    border-color: rgba(16, 185, 129, 0.35);
+    font-weight: 600;
+}
+
+.cloud-storage-modal-content {
+    max-width: 780px;
+}
+
+.cloud-storage-providers {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.storage-provider-card {
+    background: var(--color-surface-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-md);
+    backdrop-filter: blur(8px);
+    box-shadow: var(--shadow-sm);
+    transition: border-color var(--transition-base), box-shadow var(--transition-base);
+}
+
+.storage-provider-card--focused {
+    border-color: var(--color-primary-strong);
+    box-shadow: var(--shadow-md);
+}
+
+.storage-provider-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+}
+
+.storage-provider-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+}
+
+.storage-provider-title {
+    margin: 0;
+    font-size: 1rem;
+    color: var(--color-text);
+}
+
+.storage-status-pill {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-neutral-subtle);
+    color: var(--color-text-muted);
+}
+
+.storage-status-pill--connected {
+    background: var(--bg-success-subtle);
+    color: var(--color-success);
+}
+
+.storage-status-pill--error {
+    background: var(--bg-error-subtle);
+    color: var(--color-error);
+}
+
+.storage-disconnected-hint {
+    margin: var(--spacing-sm) 0 0;
+    font-size: 0.82rem;
+    color: var(--color-text-secondary);
+}
+
+.storage-config-form {
+    margin-top: var(--spacing-md);
+    padding-top: var(--spacing-md);
+    border-top: 1px solid var(--color-border);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.storage-config-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--spacing-sm) var(--spacing-md);
+}
+
+.storage-config-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.storage-config-field label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+}
+
+.storage-toggles-box {
+    justify-content: center;
+    gap: var(--spacing-sm);
+}
+
+.storage-input {
+    width: 100%;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    font-size: 0.82rem;
+    color: var(--color-text);
+}
+
+.storage-input:focus {
+    outline: none;
+    border-color: var(--color-primary-strong);
+}
+
+.storage-field-muted {
+    opacity: 0.6;
+}
+
+.storage-inline-error {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: var(--bg-error-subtle);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    border-radius: var(--radius-sm);
+    color: var(--color-error);
+    font-size: 0.8rem;
+}
+
+.storage-card-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-xs);
+}
+
+.storage-meta-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}
+
+.storage-last-error {
+    color: var(--color-error);
+}
+
+.storage-sync-results {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    font-size: 0.8rem;
+}
+
+.storage-sync-summary-line {
+    font-weight: 600;
+    color: var(--color-text);
+    margin-bottom: var(--spacing-xs);
+}
+
+.storage-sync-records-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.storage-record-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+    padding-top: 6px;
+    border-top: 1px solid var(--color-border);
+}
+
+.storage-record-name {
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.storage-record-status {
+    font-size: 0.74rem;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-neutral-subtle);
+    color: var(--color-text-secondary);
+}
+
+.storage-record-status--completed {
+    background: var(--bg-success-subtle);
+    color: var(--color-success);
+}
+
+.storage-record-status--insufficient_cp,
+.storage-record-status--skipped_invalid {
+    background: var(--bg-warning-subtle);
+    color: var(--color-warning);
+}
+
+.storage-record-status--error {
+    background: var(--bg-error-subtle);
+    color: var(--color-error);
+}
+
+.storage-record-link {
+    color: var(--color-accent-text);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.storage-record-link:hover {
+    text-decoration: underline;
+}
+
+.storage-record-sheet {
+    color: var(--color-text-secondary);
+}
+
+.storage-record-error {
+    color: var(--color-error);
+}

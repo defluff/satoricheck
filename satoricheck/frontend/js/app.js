@@ -11,6 +11,7 @@ import selection from './selection.js';
 import api from './api.js';
 import pitchdeck from './pitchdeck.js';
 import media from './media.js';
+import storageSync from './storage-sync.js';
 
 class App {
     constructor() {
@@ -39,11 +40,19 @@ class App {
         // Initialize Pitch Deck module
         pitchdeck.init();
 
+        // Initialize Cloud Storage Sync modal/panel
+        storageSync.init();
+
         // Initialize Media Authenticity & Stream module
         media.init();
 
         // Default landing view is Pitch Deck
         this.switchView('pitchdeck');
+
+        if (auth.currentUser) {
+            await this.handleStorageOAuthCallbackParams();
+            storageSync.loadConnections({ silent: true });
+        }
 
         // Set up audio result handler for auto-check (Standard mode)
         audio.onResult((transcript) => {
@@ -601,6 +610,41 @@ class App {
         } else if (params.get('auto_refill') === 'setup_cancelled') {
             ui.showToast('Card setup cancelled', 'warning');
             window.history.replaceState({}, document.title, window.location.pathname);
+        }
+    }
+
+    async handleStorageOAuthCallbackParams() {
+        const url = new URL(window.location.href);
+        const connectedProvider = url.searchParams.get('storage_connected');
+        const storageError = url.searchParams.get('storage_error');
+
+        if (!connectedProvider && !storageError) return;
+
+        url.searchParams.delete('storage_connected');
+        url.searchParams.delete('storage_error');
+        const cleanUrl = url.pathname + (url.search ? url.search : '') + url.hash;
+        window.history.replaceState({}, document.title, cleanUrl);
+
+        if (connectedProvider) {
+            const labels = {
+                google_drive: 'Google Drive',
+                dropbox: 'Dropbox',
+                onedrive: 'OneDrive'
+            };
+            const label = labels[connectedProvider] || 'Cloud storage';
+            ui.showToast(`${label} connected!`, 'success');
+            await storageSync.loadConnections({ silent: true });
+            const resumed = await pitchdeck.resumePendingStorageExport(connectedProvider);
+            if (!resumed) {
+                await storageSync.openModal(connectedProvider);
+            }
+        } else if (storageError) {
+            const errorMessages = {
+                access_denied: 'Cloud storage authorization was cancelled.',
+                invalid_state: 'Cloud storage authorization expired or invalid. Please try again.',
+                oauth_failed: 'Could not complete cloud storage connection. Please try again.'
+            };
+            ui.showToast(errorMessages[storageError] || 'Cloud storage connection failed.', 'error');
         }
     }
 

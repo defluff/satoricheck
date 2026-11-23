@@ -239,6 +239,58 @@ class APIClient {
         });
     }
 
+    async exportPitchdeckGoogleDoc(payload) {
+        return this.request('/export/pitchdeck/google-doc', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+    }
+
+    async exportPitchdeckGoogleSheet(payload) {
+        return this.request('/export/pitchdeck/google-sheet', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+    }
+
+    async exportPitchdeckCloudSync(payload) {
+        return this.request('/export/pitchdeck/cloud-sync', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+    }
+
+    // --- CLOUD STORAGE SYNC ENDPOINTS ---
+
+    async getStorageConnections() {
+        return this.request('/storage/connections');
+    }
+
+    async getStorageStatus(provider) {
+        return this.request(`/storage/${encodeURIComponent(provider)}/status`);
+    }
+
+    async disconnectStorageProvider(provider) {
+        return this.request(`/storage/${encodeURIComponent(provider)}/disconnect`, {
+            method: 'POST'
+        });
+    }
+
+    async updateStorageConfig(provider, configPayload) {
+        return this.request(`/storage/${encodeURIComponent(provider)}/config`, {
+            method: 'PUT',
+            body: JSON.stringify(configPayload)
+        });
+    }
+
+    async triggerStorageSync(provider, payload = null) {
+        const opts = { method: 'POST' };
+        if (payload && typeof payload === 'object') {
+            opts.body = JSON.stringify(payload);
+        }
+        return this.request(`/storage/${encodeURIComponent(provider)}/sync`, opts);
+    }
+
     // --- UTILITY ENDPOINTS ---
 
     async exportFactChecks(format = 'csv') {

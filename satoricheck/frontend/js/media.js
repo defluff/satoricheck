@@ -772,24 +772,45 @@ class MediaModule {
 
                 if (details) {
                     details.classList.remove('hidden');
-                    const sources = (resultData.sources || []).map(src => {
+                    const explanationP = document.createElement('p');
+                    explanationP.className = 'ma-claim-explanation';
+                    explanationP.textContent = resultData.explanation || '';
+
+                    const detailNodes = [explanationP];
+                    const sourceLinks = [];
+                    for (const src of (resultData.sources || [])) {
                         const rawUrl = typeof src === 'string' ? src : (src.url || '');
                         if (!rawUrl || (!rawUrl.startsWith('http://') && !rawUrl.startsWith('https://'))) {
-                            return '';
+                            continue;
                         }
-                        let hostname = 'Source';
+                        let parsedUrl;
                         try {
-                            hostname = new URL(rawUrl).hostname;
-                        } catch (_) {}
+                            parsedUrl = new URL(rawUrl);
+                        } catch (_) {
+                            continue;
+                        }
+                        if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+                            continue;
+                        }
+                        const hostname = parsedUrl.hostname || 'Source';
                         const displayName = typeof src === 'string' ? hostname : (src.title || src.domain || hostname);
-                        return `<a href="${this._escapeHtml(rawUrl)}" target="_blank" rel="noopener noreferrer" class="ma-source-link">🔗 ${this._escapeHtml(displayName)}</a>`;
-                    }).filter(Boolean).join('');
+                        const a = document.createElement('a');
+                        a.href = parsedUrl.href;
+                        a.target = '_blank';
+                        a.rel = 'noopener noreferrer';
+                        a.className = 'ma-source-link';
+                        a.textContent = `🔗 ${displayName}`;
+                        sourceLinks.push(a);
+                    }
 
-                    const explanation = resultData.explanation || '';
-                    details.innerHTML = `
-                        <p class="ma-claim-explanation">${this._escapeHtml(explanation)}</p>
-                        ${sources ? `<div class="ma-claim-sources">${sources}</div>` : ''}
-                    `;
+                    if (sourceLinks.length > 0) {
+                        const sourcesDiv = document.createElement('div');
+                        sourcesDiv.className = 'ma-claim-sources';
+                        sourcesDiv.replaceChildren(...sourceLinks);
+                        detailNodes.push(sourcesDiv);
+                    }
+
+                    details.replaceChildren(...detailNodes);
                 }
             });
 

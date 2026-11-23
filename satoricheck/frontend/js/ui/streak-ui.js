@@ -21,16 +21,15 @@ class StreakUI {
     }
 
     renderStreakRoadmap(streakData) {
-        const currentStreak = streakData.current_streak || 0;
-        const claimedUpTo = streakData.cycle_reward_high_water || 0;
+        const currentStreak = Math.max(0, Number(streakData.current_streak) || 0);
+        const claimedUpTo = Math.max(0, Number(streakData.cycle_reward_high_water) || 0);
 
         // Calculate Cycle (Prestige Level)
-        const cycle = Math.floor((currentStreak - 1) / 30);
-        const displayStreak = (currentStreak - 1) % 30 + 1;
+        const cycle = currentStreak > 0 ? Math.floor((currentStreak - 1) / 30) : 0;
+        const displayStreak = currentStreak > 0 ? ((currentStreak - 1) % 30) + 1 : 0;
 
         const isLegendary = cycle > 0;
         const themeClass = isLegendary ? 'legendary' : '';
-        const badgeHtml = isLegendary ? '<span class="legendary-badge">👑</span>' : '';
 
         // Reward schedule
         const rewards = {
@@ -42,51 +41,65 @@ class StreakUI {
             30: { icon: '💎', amount: 250 }
         };
 
-        let html = `
-            <div class="streak-info-container ${themeClass}">
-                <span class="streak-count-large ${themeClass}">
-                    ${currentStreak} Days ${badgeHtml}
-                </span>
-                <p class="modal-subtitle">
-                    ${isLegendary ? 'Legendary Streak Active! Blue Flame Ignited.' : 'Keep the energy flowing!'}
-                </p>
-            </div>
-            <div class="streak-grid ${themeClass}">
-        `;
+        const infoContainer = document.createElement('div');
+        infoContainer.className = isLegendary ? 'streak-info-container legendary' : 'streak-info-container';
+
+        const countLarge = document.createElement('span');
+        countLarge.className = isLegendary ? 'streak-count-large legendary' : 'streak-count-large';
+        countLarge.appendChild(document.createTextNode(`${currentStreak} Days `));
+        if (isLegendary) {
+            const badge = document.createElement('span');
+            badge.className = 'legendary-badge';
+            badge.textContent = '👑';
+            countLarge.appendChild(badge);
+        }
+
+        const subtitle = document.createElement('p');
+        subtitle.className = 'modal-subtitle';
+        subtitle.textContent = isLegendary ? 'Legendary Streak Active! Blue Flame Ignited.' : 'Keep the energy flowing!';
+
+        infoContainer.append(countLarge, subtitle);
+
+        const grid = document.createElement('div');
+        grid.className = isLegendary ? `streak-grid ${themeClass}` : 'streak-grid';
 
         for (let i = 1; i <= 30; i++) {
-            let classes = 'streak-day';
-            let iconHtml = '';
+            const dayEl = document.createElement('div');
+            dayEl.className = 'streak-day';
 
             if (i <= displayStreak) {
-                classes += ' completed';
-                if (i === displayStreak) classes += ' today';
+                dayEl.classList.add('completed');
+                if (i === displayStreak) dayEl.classList.add('today');
             }
 
             if (isLegendary) {
-                classes += ' legendary';
+                dayEl.classList.add('legendary');
             }
 
-            let tooltipAttr = '';
+            const dayNumber = document.createElement('span');
+            dayNumber.className = 'day-number';
+            dayNumber.textContent = String(i);
+            dayEl.appendChild(dayNumber);
+
             if (rewards[i]) {
                 const isClaimedInCycle = i <= claimedUpTo;
-                classes += isClaimedInCycle ? ' reward-day claimed' : ' reward-day';
-                iconHtml = `<span class="streak-reward-icon large">${rewards[i].icon}</span>`;
-                tooltipAttr = isClaimedInCycle
-                    ? `data-tooltip="Claimed this cycle (${rewards[i].amount} CP)"`
-                    : `data-tooltip="Reward: ${rewards[i].amount} CP"`;
+                dayEl.classList.add('reward-day');
+                if (isClaimedInCycle) {
+                    dayEl.classList.add('claimed');
+                    dayEl.setAttribute('data-tooltip', `Claimed this cycle (${rewards[i].amount} CP)`);
+                } else {
+                    dayEl.setAttribute('data-tooltip', `Reward: ${rewards[i].amount} CP`);
+                }
+                const rewardIcon = document.createElement('span');
+                rewardIcon.className = 'streak-reward-icon large';
+                rewardIcon.textContent = rewards[i].icon;
+                dayEl.appendChild(rewardIcon);
             }
 
-            html += `
-                <div class="${classes}" ${tooltipAttr}>
-                    <span class="day-number">${i}</span>
-                    ${iconHtml}
-                </div>
-            `;
+            grid.appendChild(dayEl);
         }
 
-        html += '</div>';
-        this.streakRoadmap.innerHTML = html;
+        this.streakRoadmap.replaceChildren(infoContainer, grid);
 
         // Update header flame color if legendary
         if (isLegendary) {

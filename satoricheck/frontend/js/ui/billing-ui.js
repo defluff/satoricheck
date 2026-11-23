@@ -51,17 +51,48 @@ class BillingUI {
             const priceFormatted = (pkg.price / 100).toFixed(2);
             const currency = pkg.currency.toUpperCase();
 
-            card.innerHTML = `
-                ${id === 'wizard' ? '<div class="package-badge">Best Value</div>' : ''}
-                <div class="package-icon">${icon}</div>
-                <h3>${pkg.name}</h3>
-                <div class="package-tokens">
-                    ${id === 'wizard' ? `${pkg.tokens.toLocaleString()} CP/month` : `${pkg.tokens.toLocaleString()} CP`}
-                </div>
-                ${id === 'wizard' ? `<div class="package-duration">${Math.floor(pkg.duration / 12)} Years</div>` : ''}
-                <div class="package-price">${priceFormatted} ${currency}</div>
-                <button class="btn-primary btn-full">${id === 'wizard' ? 'Subscribe' : 'Purchase'}</button>
-            `;
+            const nodes = [];
+            if (id === 'wizard') {
+                const badge = document.createElement('div');
+                badge.className = 'package-badge';
+                badge.textContent = 'Best Value';
+                nodes.push(badge);
+            }
+
+            const iconDiv = document.createElement('div');
+            iconDiv.className = 'package-icon';
+            iconDiv.textContent = icon;
+            nodes.push(iconDiv);
+
+            const titleEl = document.createElement('h3');
+            titleEl.textContent = pkg.name;
+            nodes.push(titleEl);
+
+            const tokensDiv = document.createElement('div');
+            tokensDiv.className = 'package-tokens';
+            tokensDiv.textContent = id === 'wizard'
+                ? `${pkg.tokens.toLocaleString()} CP/month`
+                : `${pkg.tokens.toLocaleString()} CP`;
+            nodes.push(tokensDiv);
+
+            if (id === 'wizard') {
+                const durationDiv = document.createElement('div');
+                durationDiv.className = 'package-duration';
+                durationDiv.textContent = `${Math.floor(pkg.duration / 12)} Years`;
+                nodes.push(durationDiv);
+            }
+
+            const priceDiv = document.createElement('div');
+            priceDiv.className = 'package-price';
+            priceDiv.textContent = `${priceFormatted} ${currency}`;
+            nodes.push(priceDiv);
+
+            const btn = document.createElement('button');
+            btn.className = 'btn-primary btn-full';
+            btn.textContent = id === 'wizard' ? 'Subscribe' : 'Purchase';
+            nodes.push(btn);
+
+            card.replaceChildren(...nodes);
 
             container.appendChild(card);
         });

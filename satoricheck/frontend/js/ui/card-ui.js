@@ -79,24 +79,49 @@ class CardUI {
             metaTruthBox.className = 'meta-truth-box';
 
             const quoteStatus = result.quote_verified ? '✅ Verified' : (result.quote_verified === false ? '❌ Not Found' : '❓ Unverified');
-            const metaVerdictClass = result.meta_truth_verdict ? result.meta_truth_verdict.toLowerCase() : 'unknown';
+            const metaVerdictClass = String(result.meta_truth_verdict || 'unknown').toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'unknown';
 
-            metaTruthBox.innerHTML = `
-                <div class="meta-truth-header">🔍 Meta Analysis</div>
-                <div class="meta-truth-levels">
-                    <div class="meta-level level-1">
-                        <span class="level-label">Level 1: Quote</span>
-                        <span class="level-result">${quoteStatus}</span>
-                        ${result.quote_source ? `<span class="level-detail">${this.escapeHtml(result.quote_attribution)} — ${this.escapeHtml(result.quote_source)}</span>` : `<span class="level-detail">${this.escapeHtml(result.quote_attribution)}</span>`}
-                    </div>
-                    <div class="meta-arrow">→</div>
-                    <div class="meta-level level-2">
-                        <span class="level-label">Level 2: Statement</span>
-                        <span class="level-result verdict-${metaVerdictClass}">${this.escapeHtml(result.meta_truth_verdict || result.verdict)}</span>
-                        <span class="level-detail">Is the content of the quote true?</span>
-                    </div>
-                </div>
-            `;
+            const headerDiv = document.createElement('div');
+            headerDiv.className = 'meta-truth-header';
+            headerDiv.textContent = '🔍 Meta Analysis';
+
+            const levelsDiv = document.createElement('div');
+            levelsDiv.className = 'meta-truth-levels';
+
+            const level1 = document.createElement('div');
+            level1.className = 'meta-level level-1';
+            const level1Label = document.createElement('span');
+            level1Label.className = 'level-label';
+            level1Label.textContent = 'Level 1: Quote';
+            const level1Result = document.createElement('span');
+            level1Result.className = 'level-result';
+            level1Result.textContent = quoteStatus;
+            const level1Detail = document.createElement('span');
+            level1Detail.className = 'level-detail';
+            level1Detail.textContent = result.quote_source
+                ? `${result.quote_attribution} — ${result.quote_source}`
+                : result.quote_attribution;
+            level1.append(level1Label, level1Result, level1Detail);
+
+            const arrowDiv = document.createElement('div');
+            arrowDiv.className = 'meta-arrow';
+            arrowDiv.textContent = '→';
+
+            const level2 = document.createElement('div');
+            level2.className = 'meta-level level-2';
+            const level2Label = document.createElement('span');
+            level2Label.className = 'level-label';
+            level2Label.textContent = 'Level 2: Statement';
+            const level2Result = document.createElement('span');
+            level2Result.className = `level-result verdict-${metaVerdictClass}`;
+            level2Result.textContent = result.meta_truth_verdict || result.verdict;
+            const level2Detail = document.createElement('span');
+            level2Detail.className = 'level-detail';
+            level2Detail.textContent = 'Is the content of the quote true?';
+            level2.append(level2Label, level2Result, level2Detail);
+
+            levelsDiv.append(level1, arrowDiv, level2);
+            metaTruthBox.replaceChildren(headerDiv, levelsDiv);
             detailsContainer.appendChild(metaTruthBox);
         }
 

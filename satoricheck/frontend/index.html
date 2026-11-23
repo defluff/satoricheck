@@ -191,6 +191,17 @@
                         </div>
                     </div>
                     <div class="pd-thesis-bar-actions">
+                        <div class="pd-split-btn-group" role="group" aria-label="Cloud Storage Sync">
+                            <button type="button" class="btn-secondary btn-sm pd-split-btn-main" id="pd-cloud-sync-now-btn"
+                                title="Sync Now using your saved Cloud Storage & Google Sheet settings">
+                                ☁️ Sync Now
+                            </button>
+                            <button type="button" class="btn-secondary btn-sm pd-split-btn-gear" id="pd-cloud-sync-btn"
+                                aria-label="Cloud Sync Settings"
+                                title="Configure Cloud Storage provider, folders, Deal Memo preset & Google Sheet">
+                                ⚙️
+                            </button>
+                        </div>
                         <button type="button" class="btn-secondary btn-sm" id="pd-archive-toggle-btn"
                             aria-expanded="false" title="View Zero-File Deal Archive & Decision Log">
                             🗂️ Deal Archive (<span id="pd-archive-count">0</span>)
@@ -327,6 +338,21 @@
                                     title="Export structured Deal Brief as PDF">
                                     📄 Export PDF
                                 </button>
+                                <div class="pd-split-btn-group" role="group" aria-label="Deal Cloud Sync">
+                                    <button type="button" class="btn-secondary btn-sm pd-split-btn-main" id="pd-deal-sync-now-btn"
+                                        title="Export this Deal Memo (+ Google Sheet row if enabled) & run pending inbox sync">
+                                        ☁️ Sync Now
+                                    </button>
+                                    <button type="button" class="btn-secondary btn-sm pd-split-btn-gear" id="pd-deal-sync-settings-btn"
+                                        aria-label="Deal Cloud Sync Settings"
+                                        title="Switch target folder, Google Sheet, or Brief/Extended preset">
+                                        ⚙️
+                                    </button>
+                                </div>
+                                <a id="pd-cloud-memo-result-link" class="pd-export-result-link hidden"
+                                    target="_blank" rel="noopener noreferrer">Open Memo ↗</a>
+                                <a id="pd-cloud-sheet-result-link" class="pd-export-result-link hidden"
+                                    target="_blank" rel="noopener noreferrer">Open Sheet ↗</a>
                             </div>
                         </div>
                     </div>
@@ -998,6 +1024,13 @@
             </div>
 
             <div class="settings-section">
+                <h3>Cloud Storage Sync</h3>
+                <p class="settings-help">Connect Google Drive, Dropbox, or OneDrive for pitch deck folder sync and Google Docs/Sheets export.</p>
+                <div id="settings-storage-summary" class="storage-summary-pills"></div>
+                <button type="button" class="btn-secondary" id="settings-manage-storage-btn">☁️ Manage Cloud Storage</button>
+            </div>
+
+            <div class="settings-section">
                 <h3>Billing</h3>
                 <button class="btn-secondary" id="manage-billing-btn">Billing Account</button>
             </div>
@@ -1053,6 +1086,17 @@
                     <div class="loading-transactions">Loading transactions...</div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Cloud Storage Sync Modal -->
+    <div class="modal hidden" id="cloud-storage-modal" role="dialog" aria-modal="true" aria-labelledby="cloud-storage-title">
+        <div class="modal-overlay"></div>
+        <div class="modal-content cloud-storage-modal-content">
+            <button type="button" class="modal-close" id="close-cloud-storage-modal" aria-label="Close">×</button>
+            <h2 id="cloud-storage-title">☁️ Cloud Storage Sync</h2>
+            <p class="modal-subtitle">Configure an input folder for incoming PDF pitch decks and a separate output folder for Deal Memos.</p>
+            <div id="cloud-storage-providers" class="cloud-storage-providers"></div>
         </div>
     </div>
 

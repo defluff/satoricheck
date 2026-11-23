@@ -99,6 +99,19 @@
         padding: var(--spacing-lg) var(--spacing-md);
     }
 
+    .storage-config-grid,
+    .pd-gsheet-popover-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .pd-export-actions {
+        width: 100%;
+    }
+
+    .pd-gdoc-folder-input {
+        width: 100%;
+    }
+
     .module-nav-container,
     .module-nav-toggle {
         order: -1;

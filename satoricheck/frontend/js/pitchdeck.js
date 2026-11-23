@@ -11,6 +11,7 @@
 
 import ui from './ui.js';
 import api from './api.js';
+import storageSync from './storage-sync.js';
 
 // Self-hosted PDF.js (see frontend/vendor/pdfjs-3.11.174/README.md for provenance)
 const PDFJS_LIB_SRC = '/vendor/pdfjs-3.11.174/pdf.min.js';
@@ -18,6 +19,7 @@ const PDFJS_WORKER_SRC = '/vendor/pdfjs-3.11.174/pdf.worker.min.js';
 
 const THESIS_STORAGE_KEY = 'authenix_pd_thesis_v1';
 const ARCHIVE_STORAGE_KEY = 'authenix_pd_archive_v1';
+const PENDING_STORAGE_ACTION_KEY = 'authenix_pending_storage_action_v1';
 const MAX_ARCHIVED_DEALS = 100;
 
 const DECISION_LABELS = {
@@ -85,6 +87,7 @@ class PitchdeckModule {
         this.currentNotes = '';
         this.archivedDeals = this.loadArchivedDeals();
         this.priorBoomerangDeal = null;
+        this.lastExportedDocUrl = null;
     }
 
     /**
@@ -169,7 +172,13 @@ class PitchdeckModule {
             notesSavedIndicator: document.getElementById('pd-notes-saved-indicator'),
             copyBriefBtn: document.getElementById('pd-copy-brief-btn'),
             exportPdfBtn: document.getElementById('pd-export-pdf-btn'),
-            printReportContainer: document.getElementById('pd-print-report')
+            printReportContainer: document.getElementById('pd-print-report'),
+
+            // Unified Cloud Sync Split-Button Controls
+            headerSyncNowBtn: document.getElementById('pd-cloud-sync-now-btn'),
+            dealSyncNowBtn: document.getElementById('pd-deal-sync-now-btn'),
+            cloudMemoResultLink: document.getElementById('pd-cloud-memo-result-link'),
+            cloudSheetResultLink: document.getElementById('pd-cloud-sheet-result-link')
         };
 
         if (!this.elements.pitchdeckView) {
@@ -417,6 +426,15 @@ class PitchdeckModule {
 
         this.elements.exportPdfBtn?.addEventListener('click', () => {
             this.exportDealBriefPdf();
+        });
+
+        // Unified Split-Button: [ ☁️ Sync Now | ⚙️ ]
+        this.elements.headerSyncNowBtn?.addEventListener('click', () => {
+            this.handleUnifiedCloudSyncNow(this.elements.headerSyncNowBtn);
+        });
+
+        this.elements.dealSyncNowBtn?.addEventListener('click', () => {
+            this.handleUnifiedCloudSyncNow(this.elements.dealSyncNowBtn);
         });
     }
 
@@ -1041,6 +1059,9 @@ class PitchdeckModule {
     async displayResults(result, options = {}) {
         const { fromArchive = false, archiveEntry = null } = options;
         this.lastAnalysisResult = result;
+        this.lastExportedDocUrl = null;
+        this.elements.cloudMemoResultLink?.classList.add('hidden');
+        this.elements.cloudSheetResultLink?.classList.add('hidden');
 
         const summaryLoading = document.getElementById('pd-summary-loading');
         const summaryResults = document.getElementById('pd-summary-results');
@@ -1469,11 +1490,16 @@ class PitchdeckModule {
             el.className = 'pd-metric-item';
 
             if (!data) {
-                el.innerHTML = `
-                    <span class="pd-metric-label">${label}</span>
-                    <span class="pd-metric-value pd-metric-value--muted">—</span>
-                    <span class="badge badge-neutral">Not Disclosed</span>
-                `;
+                const labelSpan = document.createElement('span');
+                labelSpan.className = 'pd-metric-label';
+                labelSpan.textContent = label;
+                const valueSpan = document.createElement('span');
+                valueSpan.className = 'pd-metric-value pd-metric-value--muted';
+                valueSpan.textContent = '—';
+                const badgeSpan = document.createElement('span');
+                badgeSpan.className = 'badge badge-neutral';
+                badgeSpan.textContent = 'Not Disclosed';
+                el.replaceChildren(labelSpan, valueSpan, badgeSpan);
             } else {
                 const badgeClass = this._getMetricBadgeClass(data.assessment);
                 el.innerHTML = DOMPurify.sanitize(`
@@ -1933,8 +1959,11 @@ class PitchdeckModule {
             usp: r.usp || '',
             industry: r.industry || '',
             sector: r.sector || '',
+            funding_ask: r.funding_ask || '',
+            page_count: r.page_count || this.totalSlides || null,
             market_size: r.market_size || '',
             competition: r.competition || [],
+            team_highlights: r.team_highlights || '',
             startup_profile: r.startup_profile || {},
             vc_metrics: r.vc_metrics || {},
             red_flags: r.red_flags || [],
@@ -2029,8 +2058,11 @@ class PitchdeckModule {
             usp: entry.usp || '—',
             industry: entry.industry || '—',
             sector: entry.sector || entry.thesis_alignment?.sector?.extracted || '—',
+            funding_ask: entry.funding_ask || '',
+            page_count: entry.page_count ?? null,
             market_size: entry.market_size || 'Not specified',
             competition: entry.competition || [],
+            team_highlights: entry.team_highlights || '',
             startup_profile: entry.startup_profile || {
                 geography: entry.thesis_alignment?.geography?.extracted || 'Not Disclosed',
                 geography_tags: [],
@@ -2061,12 +2093,18 @@ class PitchdeckModule {
         this.elements.slideCanvas?.classList.add('hidden');
         if (this.elements.canvasPlaceholder) {
             this.elements.canvasPlaceholder.classList.remove('hidden');
-            // localStorage is user-editable, so sanitize before interpolating into HTML
-            this.elements.canvasPlaceholder.innerHTML = DOMPurify.sanitize(`
-                <div class="pd-placeholder-icon">🗂️</div>
-                <p>Archived Deal Brief (${entry.company_name})</p>
-                <p style="font-size: 0.78rem; opacity: 0.75; margin-top: 4px;">Zero-File Archive: Raw PDF was purged after analysis for privacy.</p>
-            `);
+            const iconDiv = document.createElement('div');
+            iconDiv.className = 'pd-placeholder-icon';
+            iconDiv.textContent = '🗂️';
+
+            const titleP = document.createElement('p');
+            titleP.textContent = `Archived Deal Brief (${entry.company_name})`;
+
+            const noteP = document.createElement('p');
+            noteP.className = 'pd-placeholder-subnote';
+            noteP.textContent = 'Zero-File Archive: Raw PDF was purged after analysis for privacy.';
+
+            this.elements.canvasPlaceholder.replaceChildren(iconDiv, titleP, noteP);
         }
 
         await this.displayResults(reconstructed, { fromArchive: true, archiveEntry: entry });
@@ -2309,6 +2347,190 @@ class PitchdeckModule {
         `);
 
         window.print();
+    }
+
+    buildCloudExportPayload() {
+        const r = this.lastAnalysisResult || {};
+        const dec = val => this._decodeHtmlEntities(val);
+        const align = this.currentThesisAlignment;
+        const flatThesis = align ? {
+            geography: dec(align.geography?.extracted) || 'Unknown',
+            sector: dec(align.sector?.extracted) || 'Unknown',
+            stage: dec(align.stage?.extracted) || 'Unknown',
+            status: (this.elements.thesisOverallBadge?.textContent || '').trim()
+        } : undefined;
+
+        const claims = (this.extractedClaims || []).slice(0, 50).map(c => ({
+            claim: c.claim || c.claim_text || '',
+            slide_number: c.slide_number || 1,
+            category: c.category || 'other',
+            verifiability: c.verifiability || 'public',
+            risk_level: this._getClaimRiskLevel(c),
+            verification_finding: c.verificationResult?.verification_finding
+                || c.verificationResult?.explanation
+                || c.verification_finding
+                || '',
+            suggested_question: c.verificationResult?.suggested_question
+                || c.suggested_question
+                || ''
+        }));
+
+        const rawPageCount = r.page_count ?? (this.pdfDoc ? this.totalSlides : undefined);
+        const payload = {
+            company_name: dec(r.company_name) || 'Unknown Startup',
+            summary: dec(r.summary) || '',
+            analyzed_at: this.currentAnalyzedAt
+                ? new Date(this.currentAnalyzedAt).toISOString().split('T')[0]
+                : new Date().toISOString().split('T')[0],
+            industry: r.industry || '',
+            sector: r.sector || '',
+            funding_ask: r.funding_ask || '',
+            page_count: typeof rawPageCount === 'number' && rawPageCount > 0 ? rawPageCount : undefined,
+            investor_decision: DECISION_LABELS[this.currentDecision] || 'Pending',
+            investor_notes: this.currentNotes || '',
+            usp: r.usp || '',
+            market_size: r.market_size || '',
+            competition: Array.isArray(r.competition) ? r.competition.slice(0, 20) : [],
+            team_highlights: r.team_highlights || '',
+            vc_metrics: r.vc_metrics || {},
+            red_flags: Array.isArray(r.red_flags) ? r.red_flags.slice(0, 20) : [],
+            verifiable_claims: claims,
+            startup_profile: r.startup_profile || {},
+            thesis_alignment: flatThesis
+        };
+
+        // Guard against exceeding backend 256 KB JSON cap
+        if (JSON.stringify(payload).length > 240 * 1024) {
+            payload.verifiable_claims = claims.slice(0, 15);
+            payload.summary = payload.summary.slice(0, 5000);
+        }
+        return payload;
+    }
+
+    async handleUnifiedCloudSyncNow(triggerBtn = null) {
+        const activeConn = await storageSync.getPrimaryConnectedConnection();
+        if (!activeConn) {
+            ui.showToast('Connect your cloud storage provider first to enable 1-click Sync Now.', 'info');
+            await storageSync.openModal();
+            return;
+        }
+
+        const provider = activeConn.provider;
+        const btn = triggerBtn || this.elements.dealSyncNowBtn || this.elements.headerSyncNowBtn;
+        const originalText = btn ? btn.textContent : '☁️ Sync Now';
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Syncing...';
+        }
+
+        try {
+            // Case B: A pitch deck is currently analyzed on screen -> export Deal Memo (+ Google Sheet row) & run inbox sync if configured
+            if (this.lastAnalysisResult) {
+                const body = {
+                    provider,
+                    ...this.buildCloudExportPayload()
+                };
+                const exportRes = await api.exportPitchdeckCloudSync(body);
+                if (exportRes?.memo_url && exportRes.memo_url.startsWith('https://')) {
+                    this.lastExportedDocUrl = exportRes.memo_url;
+                    if (this.elements.cloudMemoResultLink) {
+                        this.elements.cloudMemoResultLink.href = exportRes.memo_url;
+                        this.elements.cloudMemoResultLink.textContent = provider === 'google_drive' ? 'Open Doc ↗' : 'Open Memo ↗';
+                        this.elements.cloudMemoResultLink.classList.remove('hidden');
+                    }
+                }
+                if (exportRes?.sheet_url && exportRes.sheet_url.startsWith('https://') && this.elements.cloudSheetResultLink) {
+                    this.elements.cloudSheetResultLink.href = exportRes.sheet_url;
+                    this.elements.cloudSheetResultLink.textContent = 'Open Sheet ↗';
+                    this.elements.cloudSheetResultLink.classList.remove('hidden');
+                }
+
+                // Also run pending inbox sync if input & output folders are configured
+                let inboxMsg = '';
+                if (activeConn.input_folder_ref && activeConn.output_folder_ref) {
+                    try {
+                        const syncRes = await api.triggerStorageSync(provider);
+                        if (typeof syncRes?.new_balance === 'number') {
+                            ui.updateBalance(syncRes.new_balance);
+                        }
+                        if (syncRes?.processed > 0) {
+                            inboxMsg = ` + ${syncRes.processed} inbox deck(s) synced`;
+                        }
+                    } catch (inboxErr) {
+                        console.warn('[Pitchdeck] Non-fatal inbox sync after deck export:', inboxErr);
+                    }
+                }
+
+                const sheetNote = exportRes?.updated_sheet_range ? ` + Sheet (${exportRes.updated_sheet_range})` : '';
+                ui.showToast(`Deal Memo synced (${exportRes.mode || 'brief'})${sheetNote}${inboxMsg}.`, 'success');
+                return;
+            }
+
+            // Case A: No deck open on screen -> trigger inbox folder sync (or open modal if folders aren't configured yet)
+            if (!activeConn.input_folder_ref || !activeConn.output_folder_ref) {
+                await storageSync.openModal(provider);
+                return;
+            }
+
+            const res = await api.triggerStorageSync(provider);
+            if (typeof res?.new_balance === 'number') {
+                ui.updateBalance(res.new_balance);
+            }
+            ui.showToast(
+                `Sync complete: ${res.processed ?? 0} processed, ${res.skipped_insufficient_cp ?? 0} insufficient CP.`,
+                (res.errors > 0 || res.skipped_insufficient_cp > 0) ? 'warning' : 'success'
+            );
+            await storageSync.loadConnections({ silent: true, focusProvider: provider });
+        } catch (error) {
+            if (error.status === 401 && (error.data?.needs_reauth || error.data?.needs_google_auth)) {
+                try {
+                    sessionStorage.setItem(PENDING_STORAGE_ACTION_KEY, JSON.stringify({
+                        action: 'cloud-sync',
+                        provider,
+                        analysis_id: this.currentAnalysisId
+                    }));
+                } catch (_) {}
+                ui.showToast('Cloud storage authorization expired. Reconnecting...', 'info');
+                window.location.assign(`/api/storage/${encodeURIComponent(provider)}/connect`);
+                return;
+            }
+            ui.showToast('Cloud Sync failed: ' + error.message, 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
+    }
+
+    async resumePendingStorageExport(provider) {
+        let rawPending = null;
+        try {
+            rawPending = sessionStorage.getItem(PENDING_STORAGE_ACTION_KEY);
+            if (!rawPending) return false;
+            sessionStorage.removeItem(PENDING_STORAGE_ACTION_KEY);
+        } catch (err) {
+            return false;
+        }
+
+        let pending = null;
+        try {
+            pending = JSON.parse(rawPending);
+        } catch (err) {
+            return false;
+        }
+        if (!pending || !pending.action) return false;
+
+        if (!this.lastAnalysisResult && pending.analysis_id) {
+            await this.loadDealFromArchive(pending.analysis_id);
+        }
+        if (!this.lastAnalysisResult) return false;
+
+        if (pending.action === 'cloud-sync' || provider) {
+            await this.handleUnifiedCloudSyncNow();
+            return true;
+        }
+        return false;
     }
 
     isValidPdf(file) {
