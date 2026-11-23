@@ -310,7 +310,7 @@ async function handleVerify() {
             rateLimited = true;
             showRateLimitCountdown(verifyBtn, 'Verify', error.retryAfterSec);
         } else if (error.status === 402 || error.status === 403) {
-            triggerCheckout();
+            openTopupModal();
         }
     } finally {
         isProcessing = false;
@@ -363,87 +363,164 @@ function updateCardWithResult(cardId, data) {
     const headerRight = card.querySelector('.sp-badges-right');
     const detailsContainer = card.querySelector('.sp-card-details');
 
-    let leftBadgesHtml = '';
-    let rightBadgesHtml = '';
-    let detailsHtml = '';
+    const safeClassToken = (val, fallback) => {
+        const s = String(val || '').trim();
+        return /^[A-Za-z0-9_-]+$/.test(s) ? s : fallback;
+    };
+
+    const leftBadgesNodes = [];
+    const rightBadgesNodes = [];
+    const detailsNodes = [];
 
     // 1. Claims Verdict Badge & Analysis Block (for 'both' or 'claims' mode)
     if (data.claims) {
-        const verdict = data.claims.verdict || 'NOT_VERIFIED';
-        leftBadgesHtml += `<span class="sp-verdict ${verdict}">${verdict.replace(/_/g, ' ')}</span>`;
+        const rawVerdict = String(data.claims.verdict || 'NOT_VERIFIED');
+        const verdictClass = safeClassToken(rawVerdict, 'NOT_VERIFIED');
+        const verdictLabel = rawVerdict.replace(/_/g, ' ');
 
-        let claimSectionInner = '';
+        const topBadge = document.createElement('span');
+        topBadge.className = `sp-verdict ${verdictClass}`;
+        topBadge.textContent = verdictLabel;
+        leftBadgesNodes.push(topBadge);
+
+        const claimBlock = document.createElement('div');
+        claimBlock.className = 'sp-section-block sp-claim-block';
+
+        const sectionHeader = document.createElement('div');
+        sectionHeader.className = 'sp-section-header';
+        const sectionTitle = document.createElement('span');
+        sectionTitle.className = 'sp-section-title';
+        sectionTitle.textContent = '🔍 Claim Check';
+        const headerVerdict = document.createElement('span');
+        headerVerdict.className = `sp-verdict ${verdictClass}`;
+        headerVerdict.textContent = verdictLabel;
+        sectionHeader.append(sectionTitle, headerVerdict);
+        claimBlock.appendChild(sectionHeader);
+
         if (data.claims.explanation) {
-            const safeExp = typeof DOMPurify !== 'undefined'
-                ? DOMPurify.sanitize(data.claims.explanation)
-                : escapeHtml(data.claims.explanation);
-            claimSectionInner += `<p class="sp-explanation">${safeExp}</p>`;
+            const expP = document.createElement('p');
+            expP.className = 'sp-explanation';
+            if (typeof DOMPurify !== 'undefined') {
+                expP.appendChild(DOMPurify.sanitize(String(data.claims.explanation), { RETURN_DOM_FRAGMENT: true }));
+            } else {
+                expP.textContent = String(data.claims.explanation);
+            }
+            claimBlock.appendChild(expP);
         }
 
         if (data.claims.fallacy) {
-            claimSectionInner += `<span class="sp-fallacy">⚠️ ${escapeHtml(data.claims.fallacy)}</span>`;
+            const fallacySpan = document.createElement('span');
+            fallacySpan.className = 'sp-fallacy';
+            fallacySpan.textContent = `⚠️ ${data.claims.fallacy}`;
+            claimBlock.appendChild(fallacySpan);
         }
 
         if (data.claims.sources && Array.isArray(data.claims.sources) && data.claims.sources.length > 0) {
-            const validSources = data.claims.sources.filter(u => sanitizeUrl(u));
+            const validSources = data.claims.sources.map(u => ({ raw: u, safe: sanitizeUrl(u) })).filter(s => s.safe);
             if (validSources.length > 0) {
-                claimSectionInner += `<div class="sp-sources"><strong>Verified Sources:</strong>${validSources.map(u =>
-                    `<a href="${sanitizeUrl(u)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(u)}">🔗 ${formatUrl(u)}</a>`
-                ).join('')}</div>`;
+                const sourcesDiv = document.createElement('div');
+                sourcesDiv.className = 'sp-sources';
+                const strong = document.createElement('strong');
+                strong.textContent = 'Verified Sources:';
+                sourcesDiv.appendChild(strong);
+                for (const { raw, safe } of validSources) {
+                    const a = document.createElement('a');
+                    a.href = safe;
+                    a.target = '_blank';
+                    a.rel = 'noopener noreferrer';
+                    a.title = String(raw);
+                    a.textContent = `🔗 ${formatUrl(raw)}`;
+                    sourcesDiv.appendChild(a);
+                }
+                claimBlock.appendChild(sourcesDiv);
             }
         }
 
-        detailsHtml += `
-            <div class="sp-section-block sp-claim-block">
-                <div class="sp-section-header">
-                    <span class="sp-section-title">🔍 Claim Check</span>
-                    <span class="sp-verdict ${verdict}">${verdict.replace(/_/g, ' ')}</span>
-                </div>
-                ${claimSectionInner}
-            </div>
-        `;
+        detailsNodes.push(claimBlock);
     }
 
     // 2. AI Probability Pill & Forensics Block (for 'both' or 'ai' mode)
     if (data.ai) {
         if (data.ai.skipped) {
-            rightBadgesHtml += `<span class="sp-ai-pill ai-short" title="${escapeHtml(data.ai.reason)}">🤖 Short (&lt;${MIN_AI_WORDS}w)</span>`;
+            const shortPill = document.createElement('span');
+            shortPill.className = 'sp-ai-pill ai-short';
+            shortPill.title = String(data.ai.reason || '');
+            shortPill.textContent = `🤖 Short (<${MIN_AI_WORDS}w)`;
+            rightBadgesNodes.push(shortPill);
         } else {
-            const prob = data.ai.ai_probability ?? 50;
-            const conf = data.ai.confidence || 'MED';
+            const rawProb = Number(data.ai.ai_probability ?? 50);
+            const prob = Number.isFinite(rawProb) ? Math.max(0, Math.min(100, rawProb)) : 50;
+            const conf = String(data.ai.confidence || 'MED');
             const pillClass = prob >= 70 ? 'ai-high' : prob >= 40 ? 'ai-med' : 'ai-low';
             const probLabel = prob >= 70 ? `${prob}% AI Likely` : prob <= 30 ? `${100 - prob}% Human` : `${prob}% AI Prob`;
 
-            rightBadgesHtml += `<span class="sp-ai-pill ${pillClass}">🤖 ${probLabel}</span>`;
+            const aiPill = document.createElement('span');
+            aiPill.className = `sp-ai-pill ${pillClass}`;
+            aiPill.textContent = `🤖 ${probLabel}`;
+            rightBadgesNodes.push(aiPill);
 
             // Forensics breakdown box
             const aiIndicators = (data.ai.ai_indicators || []).slice(0, 3);
             const humanIndicators = (data.ai.human_indicators || []).slice(0, 3);
 
-            detailsHtml += `
-                <div class="sp-section-block sp-ai-block">
-                    <div class="sp-section-header">
-                        <span class="sp-section-title">🤖 AI Forensics (${prob}%)</span>
-                        <span class="sp-ai-confidence-tag">Confidence: ${conf}</span>
-                    </div>
-                    <div class="sp-ai-bar-track">
-                        <div class="sp-ai-bar-fill ${pillClass}" style="width: ${prob}%"></div>
-                    </div>
-                    ${data.ai.explanation ? `<p class="sp-explanation" style="margin-top: 4px;">${escapeHtml(data.ai.explanation)}</p>` : ''}
-                    <div class="sp-ai-indicators">
-                        ${aiIndicators.map(ind => `<span class="sp-indicator-tag">Marker: ${escapeHtml(ind)}</span>`).join('')}
-                        ${humanIndicators.map(ind => `<span class="sp-indicator-tag sp-indicator-human">Human trait: ${escapeHtml(ind)}</span>`).join('')}
-                    </div>
-                </div>
-            `;
+            const aiBlock = document.createElement('div');
+            aiBlock.className = 'sp-section-block sp-ai-block';
+
+            const aiHeader = document.createElement('div');
+            aiHeader.className = 'sp-section-header';
+            const aiTitle = document.createElement('span');
+            aiTitle.className = 'sp-section-title';
+            aiTitle.textContent = `🤖 AI Forensics (${prob}%)`;
+            const confTag = document.createElement('span');
+            confTag.className = 'sp-ai-confidence-tag';
+            confTag.textContent = `Confidence: ${conf}`;
+            aiHeader.append(aiTitle, confTag);
+            aiBlock.appendChild(aiHeader);
+
+            const barTrack = document.createElement('div');
+            barTrack.className = 'sp-ai-bar-track';
+            const barFill = document.createElement('div');
+            barFill.className = `sp-ai-bar-fill ${pillClass}`;
+            barFill.style.width = `${prob}%`;
+            barTrack.appendChild(barFill);
+            aiBlock.appendChild(barTrack);
+
+            if (data.ai.explanation) {
+                const aiExp = document.createElement('p');
+                aiExp.className = 'sp-explanation';
+                aiExp.style.marginTop = '4px';
+                aiExp.textContent = String(data.ai.explanation);
+                aiBlock.appendChild(aiExp);
+            }
+
+            const indicatorsDiv = document.createElement('div');
+            indicatorsDiv.className = 'sp-ai-indicators';
+            for (const ind of aiIndicators) {
+                const tag = document.createElement('span');
+                tag.className = 'sp-indicator-tag';
+                tag.textContent = `Marker: ${ind}`;
+                indicatorsDiv.appendChild(tag);
+            }
+            for (const ind of humanIndicators) {
+                const tag = document.createElement('span');
+                tag.className = 'sp-indicator-tag sp-indicator-human';
+                tag.textContent = `Human trait: ${ind}`;
+                indicatorsDiv.appendChild(tag);
+            }
+            aiBlock.appendChild(indicatorsDiv);
+
+            detailsNodes.push(aiBlock);
         }
     }
 
-    rightBadgesHtml += `<span class="sp-card-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>`;
+    const timeBadge = document.createElement('span');
+    timeBadge.className = 'sp-card-time';
+    timeBadge.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    rightBadgesNodes.push(timeBadge);
 
-    if (headerLeft) headerLeft.innerHTML = leftBadgesHtml;
-    if (headerRight) headerRight.innerHTML = rightBadgesHtml;
-    detailsContainer.innerHTML = detailsHtml;
+    if (headerLeft) headerLeft.replaceChildren(...leftBadgesNodes);
+    if (headerRight) headerRight.replaceChildren(...rightBadgesNodes);
+    detailsContainer.replaceChildren(...detailsNodes);
 
     // Card expand toggle
     card.classList.add('expanded'); // Auto-expand upon arrival
@@ -456,11 +533,32 @@ function updateCardError(cardId, message) {
     if (!card) return;
 
     card.classList.remove('pending');
-    const headerBadges = card.querySelector('.sp-badges-group');
-    headerBadges.innerHTML = '<span class="sp-verdict FALSE">ERROR</span>';
-
+    const headerLeft = card.querySelector('.sp-badges-left');
+    const headerRight = card.querySelector('.sp-badges-right');
     const details = card.querySelector('.sp-card-details');
-    details.innerHTML = `<p class="sp-explanation" style="color: var(--color-error);">${escapeHtml(message)}</p>`;
+
+    if (headerLeft) {
+        const errorBadge = document.createElement('span');
+        errorBadge.className = 'sp-verdict FALSE error';
+        errorBadge.textContent = 'ERROR';
+        headerLeft.replaceChildren(errorBadge);
+    }
+
+    if (headerRight) {
+        const timeBadge = document.createElement('span');
+        timeBadge.className = 'sp-card-time';
+        timeBadge.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        headerRight.replaceChildren(timeBadge);
+    }
+
+    if (details) {
+        const errP = document.createElement('p');
+        errP.className = 'sp-explanation sp-error-msg';
+        errP.style.color = 'var(--color-error)';
+        errP.textContent = String(message || 'Verification failed');
+        details.replaceChildren(errP);
+    }
+
     card.classList.add('expanded');
 }
 
@@ -473,11 +571,19 @@ function clearEmptyState() {
 
 function setButtonLoading(btn, label) {
     btn.disabled = true;
-    btn.innerHTML = `<span class="sp-spinner"></span> <span class="btn-text">${label}</span>`;
+    const spinner = document.createElement('span');
+    spinner.className = 'sp-spinner';
+    const textSpan = document.createElement('span');
+    textSpan.className = 'btn-text';
+    textSpan.textContent = label;
+    btn.replaceChildren(spinner, document.createTextNode(' '), textSpan);
 }
 
 function resetButton(btn, label) {
-    btn.innerHTML = `<span class="btn-text">${label}</span>`;
+    const textSpan = document.createElement('span');
+    textSpan.className = 'btn-text';
+    textSpan.textContent = label;
+    btn.replaceChildren(textSpan);
     btn.disabled = inputText.value.trim().length === 0;
 }
 
@@ -489,7 +595,10 @@ function showRateLimitCountdown(btn, defaultLabel, seconds = 60) {
             resetButton(btn, defaultLabel);
             return;
         }
-        btn.innerHTML = `<span class="btn-text">Wait ${remaining}s</span>`;
+        const textSpan = document.createElement('span');
+        textSpan.className = 'btn-text';
+        textSpan.textContent = `Wait ${remaining}s`;
+        btn.replaceChildren(textSpan);
         remaining--;
         setTimeout(tick, 1000);
     };

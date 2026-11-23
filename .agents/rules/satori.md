@@ -6,7 +6,11 @@ trigger: always_on
 
 ## 1. Project Context & Branding
 - **Product Name**: **Authenix** (live AI verification platform for text, audio streams, and media forensics).
-- **Codebase Naming**: Frontend and user-facing assets use **Authenix**. Backend routes and database filenames retain `satoricheck` / `satoricheck.db` to maintain backwards compatibility in production.
+- **Codebase Naming**: Frontend and user-facing assets use **Authenix**. Backend routes, Cloud Run service name (`satoricheck`), and database filenames (`satoricheck.db`) retain `satoricheck` until a dedicated Authenix Cloud Run service / custom app domain is provisioned.
+- **Domains & Deployment Reality**:
+  - **Marketing & Legal Site (Framer, external):** `https://authenix.ai` (hosts landing pages and `https://authenix.ai/privacy_and_terms`). It does **not** serve the Flask app or API.
+  - **Live Web App & API (Google Cloud Run, `europe-west6`, service `satoricheck`):** `https://satoricheck-829698588154.europe-west6.run.app`. All live endpoints, OAuth callbacks (`/api/auth/google/callback`, `/api/storage/google_drive/callback`, `/api/storage/onedrive/callback`, `/api/storage/dropbox/callback`), Cloud Scheduler jobs, and the Chrome Extension target this origin.
+  - **Allowed JS / OAuth Origins:** `https://satoricheck-829698588154.europe-west6.run.app` (production) and `http://localhost:8000` (local testing). Do **not** point API/OAuth/extension URLs to `https://authenix.ai` until a dedicated Authenix app domain is deployed on Cloud Run.
 - **Runtime Environment**: Python 3.12+ in Docker / Cloud Run (production). Local dev uses `.venv/` at repository root.
 - **Scope Discipline**: When auditing or implementing a single-layer spec (e.g., backend billing), keep code edits strictly within that layer; log cross-layer findings (frontend, extension, stale copy, legacy cleanup) to the active TODO doc rather than editing them inline.
 

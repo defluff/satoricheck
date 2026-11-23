@@ -42,11 +42,11 @@ To test the Chrome/Brave extension against localhost:
 1. **Set API Base URL** in `satoricheck/extension/lib/api.js`:
    ```javascript
    const API_BASE = 'http://127.0.0.1:8000/api';
-   // const API_BASE = 'https://authenix.ai/api';
+   // const API_BASE = 'https://satoricheck-829698588154.europe-west6.run.app/api';
    ```
 2. **Reload Extension**: Open `chrome://extensions` or `brave://extensions` and click the reload icon on Authenix.
 3. **Auto-Session Detection**: Because `TEST_MODE=true` creates an active cookie session on localhost, the extension sidebar syncs automatically.
-4. **Revert before commit**: Ensure `API_BASE` is restored to `https://authenix.ai/api`.
+4. **Revert before commit**: Ensure `API_BASE` is restored to `https://satoricheck-829698588154.europe-west6.run.app/api`.
 
 ---
 
