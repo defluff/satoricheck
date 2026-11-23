@@ -21,22 +21,25 @@ def reserve_flat_tokens(
     error_message: str | None = None,
     auto_create: bool = False,
     error_status: int = 403,
+    transaction_description: str | None = None,
+    session=None,
 ) -> TokenBalance:
     """Atomically reserve a flat token cost and commit immediately before external I/O."""
-    token_balance = db_session.query(TokenBalance).filter_by(user_id=user_id).with_for_update().first()
+    active_session = session if session is not None else db_session
+    token_balance = active_session.query(TokenBalance).filter_by(user_id=user_id).with_for_update().first()
     if not token_balance:
         if auto_create:
             token_balance = TokenBalance(user_id=user_id, balance=0)
-            db_session.add(token_balance)
-            db_session.flush()
+            active_session.add(token_balance)
+            active_session.flush()
         else:
             raise APIError(error_message or 'No token balance found', status_code=403)
 
     if token_balance.balance < cost:
         if token_balance.auto_refill_enabled:
             from backend.routes.billing import maybe_trigger_auto_refill
-            maybe_trigger_auto_refill(user_id, db_session, required_cost=cost)
-            token_balance = db_session.query(TokenBalance).filter_by(user_id=user_id).with_for_update().first()
+            maybe_trigger_auto_refill(user_id, active_session, required_cost=cost)
+            token_balance = active_session.query(TokenBalance).filter_by(user_id=user_id).with_for_update().first()
 
         if not token_balance or token_balance.balance < cost:
             default_message = (
@@ -53,7 +56,21 @@ def reserve_flat_tokens(
 
     token_balance.balance -= cost
     token_balance.last_updated = datetime.now(UTC)
-    db_session.commit()
+    if transaction_description is not None:
+        active_session.add(
+            Transaction(
+                user_id=user_id,
+                type='deduction',
+                amount=-cost,
+                description=transaction_description,
+                timestamp=datetime.now(UTC),
+            )
+        )
+    try:
+        active_session.commit()
+    except Exception:
+        active_session.rollback()
+        raise
     return token_balance
 
 
@@ -84,36 +101,56 @@ def ensure_sufficient_tokens(
     return token_balance
 
 
-def trigger_post_action_refill_if_empty(user_id: int) -> tuple[int, bool]:
+def trigger_post_action_refill_if_empty(user_id: int, session=None) -> tuple[int, bool]:
     """Trigger off-session auto-refill if a successful action drained balance to 0 CP.
 
     Returns (current_balance, auto_refill_failed).
     """
-    token_balance = db_session.query(TokenBalance).filter_by(user_id=user_id).first()
+    active_session = session if session is not None else db_session
+    token_balance = active_session.query(TokenBalance).filter_by(user_id=user_id).first()
     if not token_balance:
         return 0, False
 
     if (token_balance.balance or 0) <= 0 and token_balance.auto_refill_enabled:
         from backend.routes.billing import maybe_trigger_auto_refill
-        maybe_trigger_auto_refill(user_id, db_session, required_cost=0)
-        token_balance = db_session.query(TokenBalance).filter_by(user_id=user_id).first()
+        maybe_trigger_auto_refill(user_id, active_session, required_cost=0)
+        token_balance = active_session.query(TokenBalance).filter_by(user_id=user_id).first()
 
     if not token_balance:
         return 0, False
     return token_balance.balance, bool(token_balance.auto_refill_failed)
 
 
-def refund_flat_tokens(user_id: int, cost: int) -> None:
+def refund_flat_tokens(
+    user_id: int,
+    cost: int,
+    *,
+    transaction_description: str | None = None,
+    session=None,
+) -> bool:
     """Refund a previously committed flat token reservation after an upstream failure."""
+    active_session = session if session is not None else db_session
     try:
-        token_balance = db_session.query(TokenBalance).filter_by(user_id=user_id).with_for_update().first()
+        token_balance = active_session.query(TokenBalance).filter_by(user_id=user_id).with_for_update().first()
         if token_balance:
             token_balance.balance += cost
             token_balance.last_updated = datetime.now(UTC)
-            db_session.commit()
+            if transaction_description is not None:
+                active_session.add(
+                    Transaction(
+                        user_id=user_id,
+                        type='refund',
+                        amount=cost,
+                        description=transaction_description,
+                        timestamp=datetime.now(UTC),
+                    )
+                )
+            active_session.commit()
+        return True
     except Exception as refund_err:
-        db_session.rollback()
+        active_session.rollback()
         logger.error(f"Failed to refund {cost} CP for user {user_id}: {refund_err}")
+        return False
 
 
 @tokens_bp.route('/balance', methods=['GET'])
