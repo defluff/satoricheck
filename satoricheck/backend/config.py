@@ -52,6 +52,20 @@ class Config:
     # Google OAuth
     GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')
     GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET')
+
+    # Cloud Storage OAuth & Token Encryption (optional unless cloud sync is enabled)
+    GOOGLE_TOKEN_ENCRYPTION_KEY = os.getenv('GOOGLE_TOKEN_ENCRYPTION_KEY')
+    # Strictly non-restricted Public Stage 1 scopes (drive.file + spreadsheets) — zero CASA Tier 2 audit.
+    GOOGLE_DRIVE_SCOPES = os.getenv(
+        'GOOGLE_DRIVE_SCOPES',
+        'https://www.googleapis.com/auth/drive.file '
+        'https://www.googleapis.com/auth/spreadsheets',
+    )
+    DROPBOX_CLIENT_ID = os.getenv('DROPBOX_CLIENT_ID')
+    DROPBOX_CLIENT_SECRET = os.getenv('DROPBOX_CLIENT_SECRET')
+    ONEDRIVE_CLIENT_ID = os.getenv('ONEDRIVE_CLIENT_ID')
+    ONEDRIVE_CLIENT_SECRET = os.getenv('ONEDRIVE_CLIENT_SECRET')
+    CLOUD_OAUTH_REDIRECT_BASE = os.getenv('CLOUD_OAUTH_REDIRECT_BASE')
     
     # Stripe
     STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY')
@@ -173,6 +187,20 @@ class Config:
         if required:
             raise ValueError(f"Missing required environment variables: {', '.join(required)}")
     
+    @classmethod
+    def get_google_drive_scopes(cls) -> str:
+        """Return space-delimited non-restricted Google Drive/Sheets scopes (never drive.readonly)."""
+        tokens = [
+            tok for tok in (cls.GOOGLE_DRIVE_SCOPES or '').split()
+            if tok and tok != 'https://www.googleapis.com/auth/drive.readonly'
+        ]
+        if not tokens:
+            tokens = [
+                'https://www.googleapis.com/auth/drive.file',
+                'https://www.googleapis.com/auth/spreadsheets',
+            ]
+        return ' '.join(tokens)
+
     @classmethod
     def get_streak_milestone(cls, streak_count):
         """Get the milestone name for a streak count."""

@@ -10,6 +10,7 @@ from backend.config import Config
 
 SCHEDULER_ENDPOINTS = [
     '/api/billing/wizard-refill',
+    '/api/cron/sync-watched-folders',
     '/api/factcheck/cleanup-expired',
 ]
 
