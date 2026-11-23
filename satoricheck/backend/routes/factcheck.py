@@ -12,7 +12,7 @@ import time
 from datetime import datetime, UTC, timedelta
 
 from backend.database import db_session
-from backend.models import FactCheck, MediaCheck, TokenBalance
+from backend.models import FactCheck, MediaCheck, TokenBalance, record_audit_event
 from backend.routes.auth import login_required, scheduler_secret_required
 from backend.routes.tokens import (
     ensure_sufficient_tokens,
@@ -115,7 +115,7 @@ def analyze_claim():
         analysis_text = text
         if context:
             analysis_text = f"[Context: {context}]\n\n{text}"
-            logger.info(f"Using context window: {context[:50]}...")
+            logger.info(f"Using context window (len={len(context)})")
             
         # Get global Gemini service (needed for pre-analysis)
         gemini_service = get_gemini_service()
@@ -129,7 +129,7 @@ def analyze_claim():
             error_message='Insufficient tokens. Fact-check analysis requires 1 CP.'
         )
         
-        logger.info(f"Analyzing claim for user {user.email}: {text[:100]}... (Cost: {token_cost} CP)")
+        logger.info(f"Analyzing claim for user_id={user.id} (len={len(text)}, words={word_count}, Cost: {token_cost} CP)")
         
         # Record start time
         start_time = time.time()
@@ -331,7 +331,7 @@ def analyze_batch_claims():
             ).order_by(FactCheck.timestamp.desc()).first()
             
             if cached:
-                logger.info(f"Batch Cache HIT: {clean_text[:30]}...")
+                logger.info(f"Batch Cache HIT (user_id={user.id}, claim_len={len(clean_text)}, cached_id={cached.id})")
                 results.append({
                     'index': i,
                     'is_cached': True,
@@ -538,7 +538,7 @@ def identify_claims():
         gemini_service = get_gemini_service()
         
         # Identify claims
-        logger.info(f"Smart Agent identifying claims for user {user.id}: {text[:100]}...")
+        logger.info(f"Smart Agent identifying claims for user_id={user.id} (len={len(text)})")
         claims = gemini_service.identify_claims(text)
         
         logger.info(f"Smart Agent found {len(claims)} claims")
@@ -600,12 +600,12 @@ def analyze_ai():
             raise
         
         if token_cost > 0:
-            logger.info(f"AI Detection deducted {token_cost} CP from user {user.email}")
+            logger.info(f"AI Detection deducted {token_cost} CP from user_id={user.id}")
 
         new_balance, refill_failed = trigger_post_action_refill_if_empty(user.id)
         
         elapsed = time.time() - start_time
-        logger.info(f"AI Detection completed for user {user.email}: {result['ai_probability']}% in {elapsed:.2f}s")
+        logger.info(f"AI Detection completed for user_id={user.id}: {result['ai_probability']}% in {elapsed:.2f}s")
         
         resp_payload = {
             'success': True,
@@ -642,6 +642,11 @@ def cleanup_expired_checks():
     try:
         fc_count = db_session.query(FactCheck).filter(FactCheck.timestamp < cutoff).delete()
         mc_count = db_session.query(MediaCheck).filter(MediaCheck.timestamp < cutoff).delete()
+        record_audit_event(
+            db_session,
+            'scheduler.cleanup_expired',
+            detail=f'fc={fc_count} mc={mc_count}',
+        )
         db_session.commit()
         logger.info(f"Cleanup: purged {fc_count} fact-checks, {mc_count} media-checks older than 7 days")
         return jsonify({

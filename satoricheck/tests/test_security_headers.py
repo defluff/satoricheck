@@ -55,6 +55,18 @@ def test_csp_workers_are_same_origin_only(production_response):
     assert directives['worker-src'] == "'self' blob:"
 
 
+def test_csp_script_src_disallows_unsafe_inline(production_response):
+    """CSP script-src must forbid 'unsafe-inline' so XSS payloads cannot execute inline."""
+    directives = dict(
+        part.strip().split(' ', 1)
+        for part in production_response.headers['Content-Security-Policy'].split(';')
+        if part.strip()
+    )
+    assert 'script-src' in directives
+    assert "'unsafe-inline'" not in directives['script-src']
+    assert "'self'" in directives['script-src']
+
+
 def test_cors_allows_pinned_chrome_extension_origin(client):
     """CORS must allow the published Chrome Web Store extension origin with credentials."""
     pinned_origin = 'chrome-extension://egamiabbbonhkjlhjbniocfpihpdcehl'

@@ -7,6 +7,7 @@ import base64
 import hmac
 import logging
 import math
+import re
 
 from backend.routes.auth import login_required
 from backend.routes.tokens import (
@@ -25,6 +26,20 @@ from backend.extensions import limiter
 logger = logging.getLogger(__name__)
 
 pitchdeck_bp = Blueprint('pitchdeck', __name__, url_prefix='/api/pitchdeck')
+
+_SAFE_PITCHDECK_VALUE_ERRORS = frozenset({
+    'PDF data is required',
+    'PDF data is required - file is empty',
+    'Invalid PDF - not a valid PDF file',
+    'No response from analysis',
+    'Malformed response structure',
+    'Failed to parse analysis response',
+})
+
+_SAFE_PITCHDECK_VALUE_ERROR_PATTERNS = (
+    re.compile(r'File too large\. Maximum size is \d+MB'),
+    re.compile(r'Pitch deck exceeds maximum allowed size \(\d+ slides\)\. Maximum allowed is \d+ slides\.'),
+)
 
 _OriginalPitchdeckService = PitchdeckService
 
@@ -154,8 +169,17 @@ def analyze_pitch_deck():
             # Revert deduction on known failures
             logger.warning(f"[Pitchdeck] Refunding {cost} CP due to expected error: {e}")
             refund_flat_tokens(user.id, cost)
-            status_code = 400 if isinstance(e, ValueError) else 504
-            raise APIError(str(e), status_code=status_code)
+            if isinstance(e, TimeoutError):
+                raise APIError('Analysis timed out. Please try again.', status_code=504)
+            msg = str(e)
+            if msg in _SAFE_PITCHDECK_VALUE_ERRORS or any(
+                pattern.fullmatch(msg) for pattern in _SAFE_PITCHDECK_VALUE_ERROR_PATTERNS
+            ):
+                raise APIError(msg, status_code=400)
+            raise APIError(
+                'Pitch deck could not be processed. Please verify the PDF and try again.',
+                status_code=400,
+            )
             
         except Exception as e:
             # Revert deduction on unexpected failures

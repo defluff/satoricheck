@@ -239,7 +239,7 @@ Go through the text SENTENCE BY SENTENCE, keeping the context of the whole text.
                 logger.warning(f"Smart Agent chunk {i+1} failed: {e}", exc_info=True)
         
         final_claims = list(seen_normalized.values())
-        logger.info(f"Smart Agent total distinct claims found: {final_claims}")
+        logger.info(f"Smart Agent total distinct claims found: {len(final_claims)}")
         return final_claims
 
     def analyze_ai_content(self, text):

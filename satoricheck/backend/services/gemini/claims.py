@@ -23,7 +23,7 @@ class GeminiServiceClaims(GeminiServiceBatch):
             
             social_hint = should_fire_grok(text)
             if social_hint:
-                logger.info(f"Social trigger detected for: {text[:50]}...")
+                logger.info(f"Social trigger detected (text_len={len(text)})")
             
             system_instruction = self._load_skill(
                 "fact_checking",
@@ -59,7 +59,7 @@ CLAIM TO ANALYZE:
 Verify the claim and respond with JSON matching the required schema."""
             
             log_prefix = f"AGENTIC (Thinking{' + Cache' if cache_name else ''})"
-            logger.info(f"Starting {log_prefix} analysis for: {text[:50]}...")
+            logger.info(f"Starting {log_prefix} analysis (text_len={len(text)})")
 
             def _single_claim_parser(final_json_text, response):
                 if final_json_text and "verdict" in final_json_text:
@@ -68,7 +68,7 @@ Verify the claim and respond with JSON matching the required schema."""
                         json.loads(clean_json)
                         return self._parse_response(response)
                     except json.JSONDecodeError:
-                        logger.warning(f"Agent emitted invalid JSON: {clean_json[:50]}...")
+                        logger.warning(f"Agent emitted invalid JSON (len={len(clean_json)})")
                 logger.warning("Agent stopped without JSON or Tool call. Forcing another turn...")
                 return None
 
@@ -128,7 +128,7 @@ CLAIM TO ANALYZE:
 
 Verify the claim and respond with JSON matching the required schema."""
                 
-                logger.info(f"Sending fact-check request (attempt {attempt + 1}) for text: {text[:100]}...")
+                logger.info(f"Sending fact-check request (attempt={attempt + 1}, text_len={len(text)})")
                 
                 if self.client:
                     response = self.client.models.generate_content(

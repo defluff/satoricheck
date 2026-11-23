@@ -21,6 +21,7 @@ from backend.routes.tokens import tokens_bp
 from backend.routes.billing import billing_bp
 from backend.routes.factcheck import factcheck_bp
 from backend.routes.export import export_bp
+from backend.routes.storage_oauth import cron_bp, storage_oauth_bp
 
 # Configure logging
 logging.basicConfig(
@@ -128,7 +129,7 @@ def set_security_headers(response):
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; "
         "media-src 'self' blob: data: https:; "
-        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://js.stripe.com; "
+        "script-src 'self' https://cdn.jsdelivr.net https://js.stripe.com; "
         "worker-src 'self' blob:; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
         "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
@@ -173,7 +174,10 @@ if Config.GOOGLE_CLIENT_ID and Config.GOOGLE_CLIENT_SECRET:
         client_id=Config.GOOGLE_CLIENT_ID,
         client_secret=Config.GOOGLE_CLIENT_SECRET,
         server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
-        client_kwargs={'scope': 'openid email profile'}
+        client_kwargs={
+            'scope': 'openid email profile',
+            'code_challenge_method': 'S256',
+        }
     )
     logger.info("✓ Google OAuth registered")
 else:
@@ -197,6 +201,8 @@ app.register_blueprint(tokens_bp)
 app.register_blueprint(billing_bp)
 app.register_blueprint(factcheck_bp)
 app.register_blueprint(export_bp)
+app.register_blueprint(storage_oauth_bp)
+app.register_blueprint(cron_bp)
 
 
 # Import and register Analytics blueprint (share tracking)

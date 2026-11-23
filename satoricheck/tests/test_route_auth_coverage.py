@@ -30,6 +30,7 @@ PUBLIC_ENDPOINTS = {
 # Cloud Scheduler cron endpoints: authenticated by X-Scheduler-Secret, not by user session.
 SCHEDULER_ENDPOINTS = {
     'billing.wizard_monthly_refill',
+    'cron.sync_watched_folders',
     'factcheck.cleanup_expired_checks',
 }
 

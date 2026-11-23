@@ -3,7 +3,7 @@ Database models for Authenix.
 """
 from datetime import datetime, UTC
 import json
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.orm import relationship, declarative_base
 
 Base = declarative_base()
@@ -31,9 +31,11 @@ class User(Base):
     transactions = relationship('Transaction', back_populates='user')
     fact_checks = relationship('FactCheck', back_populates='user')
     media_checks = relationship('MediaCheck', back_populates='user')
+    cloud_connections = relationship('CloudStorageConnection', back_populates='user')
+    synced_deck_records = relationship('SyncedDeckRecord', back_populates='user')
     
     def __repr__(self):
-        return f'<User {self.email}>'
+        return f'<User id={self.id}>'
 
 
 class TokenBalance(Base):
@@ -238,4 +240,152 @@ class MediaCheck(Base):
     
     def __repr__(self):
         return f'<MediaCheck id={self.id} verdict={self.verdict}>'
+
+
+class AuditLog(Base):
+    """Security and OAuth audit event log (strictly non-PII)."""
+    __tablename__ = 'audit_logs'
+
+    id = Column(Integer, primary_key=True)
+    # No FK to users.id so account deletion audit trails survive GDPR user erasure.
+    user_id = Column(Integer, nullable=True, index=True)
+    event_type = Column(String(64), nullable=False, index=True)
+    provider = Column(String(32), nullable=True)
+    detail = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False, index=True)
+
+    __table_args__ = (
+        Index('ix_auditlog_user_created', 'user_id', 'created_at'),
+    )
+
+    def __repr__(self):
+        return f'<AuditLog id={self.id} event_type={self.event_type}>'
+
+
+def record_audit_event(
+    session_db,
+    event_type: str,
+    *,
+    user_id: int | None = None,
+    provider: str | None = None,
+    detail: str | None = None,
+    commit: bool = False,
+) -> AuditLog:
+    """Append a strictly non-PII AuditLog entry to the given SQLAlchemy session."""
+    safe_event_type = str(event_type)[:64]
+    safe_provider = str(provider)[:32] if provider is not None else None
+    safe_detail = str(detail)[:255] if detail is not None else None
+    entry = AuditLog(
+        user_id=user_id,
+        event_type=safe_event_type,
+        provider=safe_provider,
+        detail=safe_detail,
+        created_at=datetime.now(UTC),
+    )
+    session_db.add(entry)
+    if commit:
+        session_db.commit()
+    return entry
+
+
+class CloudStorageConnection(Base):
+    """Per-user encrypted OAuth connection and sync config for a cloud storage provider."""
+    __tablename__ = 'cloud_storage_connections'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    provider = Column(String(32), nullable=False)  # 'google_drive', 'dropbox', 'onedrive'
+
+    encrypted_access_token = Column(Text, nullable=True)
+    encrypted_refresh_token = Column(Text, nullable=True)
+    token_expiry = Column(DateTime, nullable=True)
+    granted_scopes = Column(Text, nullable=True)
+
+    input_folder_ref = Column(String(255), nullable=True)
+    output_folder_ref = Column(String(255), nullable=True)
+    daily_sync_enabled = Column(Boolean, default=False, nullable=False)
+    memo_preset = Column(String(16), default='brief', nullable=False)
+
+    auto_export_sheets = Column(Boolean, default=False, nullable=False)
+    sheets_spreadsheet_id = Column(String(128), nullable=True)
+    sheets_sheet_name = Column(String(128), nullable=True)
+
+    last_synced_at = Column(DateTime, nullable=True)
+    last_error = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False)
+
+    user = relationship('User', back_populates='cloud_connections')
+    synced_decks = relationship('SyncedDeckRecord', back_populates='connection')
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'provider', name='uq_cloud_storage_user_provider'),
+    )
+
+    def __repr__(self):
+        return f'<CloudStorageConnection id={self.id} user_id={self.user_id} provider={self.provider}>'
+
+    @staticmethod
+    def default_status_dict(provider: str) -> dict:
+        """Return status defaults for an unconfigured provider (strictly token-free)."""
+        return {
+            'provider': provider,
+            'connected': False,
+            'input_folder_ref': None,
+            'output_folder_ref': None,
+            'daily_sync_enabled': False,
+            'memo_preset': 'brief',
+            'auto_export_sheets': False,
+            'sheets_spreadsheet_id': None,
+            'sheets_sheet_name': None,
+            'last_synced_at': None,
+            'last_error': None,
+        }
+
+    def to_status_dict(self) -> dict:
+        """Serialize connection status without exposing any encrypted/plaintext tokens."""
+        return {
+            'provider': self.provider,
+            'connected': bool(self.encrypted_access_token or self.encrypted_refresh_token),
+            'input_folder_ref': self.input_folder_ref,
+            'output_folder_ref': self.output_folder_ref,
+            'daily_sync_enabled': bool(self.daily_sync_enabled),
+            'memo_preset': self.memo_preset or 'brief',
+            'auto_export_sheets': bool(self.auto_export_sheets),
+            'sheets_spreadsheet_id': self.sheets_spreadsheet_id,
+            'sheets_sheet_name': self.sheets_sheet_name,
+            'last_synced_at': self.last_synced_at.isoformat() if self.last_synced_at else None,
+            'last_error': self.last_error,
+        }
+
+
+class SyncedDeckRecord(Base):
+    """Deduplication and audit ledger for cloud-synced pitch decks."""
+    __tablename__ = 'synced_deck_records'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    connection_id = Column(Integer, ForeignKey('cloud_storage_connections.id'), nullable=False, index=True)
+
+    external_file_id = Column(String(255), nullable=False)
+    file_name = Column(String(255), nullable=False)
+    file_etag_or_modified = Column(String(255), nullable=False)
+    status = Column(String(32), nullable=False)  # 'completed', 'insufficient_cp', 'skipped_invalid', 'error'
+
+    exported_doc_url = Column(String(512), nullable=True)
+    exported_sheet_range = Column(String(128), nullable=True)
+    cp_charged = Column(Integer, default=0, nullable=False)
+    error_message = Column(String(255), nullable=True)
+    processed_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+
+    user = relationship('User', back_populates='synced_deck_records')
+    connection = relationship('CloudStorageConnection', back_populates='synced_decks')
+
+    __table_args__ = (
+        Index('ix_synced_deck_dedup', 'connection_id', 'external_file_id', 'file_etag_or_modified'),
+    )
+
+    def __repr__(self):
+        return f'<SyncedDeckRecord id={self.id} connection_id={self.connection_id} status={self.status}>'
+
 

@@ -125,8 +125,8 @@ def _analyze_media(
     )
 
     logger.info(
-        f"Media analysis started for user {user.email}: "
-        f"{display_name} (Cost: {cost})"
+        f"Media analysis started for user_id={user.id}: "
+        f"{input_type} ({mime_type}, Cost: {cost} CP)"
     )
     start_time = time.time()
 
@@ -180,7 +180,7 @@ def _analyze_media(
         return payload
     except Exception:
         refund_flat_tokens(user.id, cost)
-        logger.info(f"Refunded {cost} CP to user {user.email} due to analysis failure")
+        logger.info(f"Refunded {cost} CP to user_id={user.id} due to analysis failure")
         raise
 
 
@@ -290,7 +290,7 @@ def analyze_url() -> tuple:
                     status_code=400,
                 )
             except Exception as head_err:
-                logger.warning(f"HEAD probe failed for {url[:100]}: {head_err}")
+                logger.warning(f"HEAD probe failed for host={parsed_url.hostname}: {type(head_err).__name__}")
 
         if not mime_type or mime_type not in ALLOWED_MIME_TYPES:
             # Check for known video/social platforms and give a helpful error

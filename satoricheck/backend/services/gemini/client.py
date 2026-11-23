@@ -192,7 +192,7 @@ class GeminiServiceClient:
 
             if fn_name == 'search_social':
                 query = fn_args.get('query', '')
-                logger.info(f"🔍 Executing Tool: search_social(query='{query[:50]}')")
+                logger.info(f"🔍 Executing Tool: search_social(query_len={len(query)})")
                 result = grok.search_social(query)
                 if result.get('error'):
                     logger.info(f"Grok failed ({result['error']}), injecting fallback hint.")

@@ -9,7 +9,7 @@ import threading
 from datetime import datetime, UTC
 
 from backend.database import db_session
-from backend.models import TokenBalance, Transaction
+from backend.models import TokenBalance, Transaction, record_audit_event
 from backend.routes.auth import login_required, scheduler_secret_required
 from backend.config import Config
 from backend.error_handlers import APIError
@@ -283,6 +283,7 @@ def get_packages():
 
 @billing_bp.route('/checkout', methods=['POST'])
 @login_required
+@limiter.limit("10 per minute")
 def create_checkout_session():
     """Create Stripe checkout session for token purchase."""
     try:
@@ -315,7 +316,7 @@ def create_checkout_session():
                 )
                 stripe_customer_id = customer.id
             except stripe.error.StripeError as e:
-                logger.error(f"Failed to create Stripe customer for {user.email}: {str(e)}", exc_info=True)
+                logger.error(f"Failed to create Stripe customer for user_id={user.id}: {type(e).__name__}", exc_info=True)
                 raise APIError('Payment system temporarily unavailable. Please try again.')
         
         # Determine if this is a subscription or one-time payment
@@ -340,25 +341,25 @@ def create_checkout_session():
                 }
             )
         except stripe.error.CardError as e:
-            logger.error(f"Stripe card error for user {user.email}: {str(e)}", exc_info=True)
+            logger.error(f"Stripe card error for user_id={user.id}: {type(e).__name__}", exc_info=True)
             raise APIError('Payment failed. Please check your card details.')
         except stripe.error.RateLimitError as e:
-            logger.error(f"Stripe rate limit hit: {str(e)}", exc_info=True)
+            logger.error(f"Stripe rate limit hit: {type(e).__name__}", exc_info=True)
             raise APIError('Payment system is busy. Please try again in a moment.')
         except stripe.error.InvalidRequestError as e:
-            logger.error(f"Invalid Stripe request for user {user.email}: {str(e)}", exc_info=True)
+            logger.error(f"Invalid Stripe request for user_id={user.id}: {type(e).__name__}", exc_info=True)
             raise APIError('Payment request invalid. Please contact support.')
         except stripe.error.AuthenticationError as e:
-            logger.error(f"Stripe authentication failed: {str(e)}", exc_info=True)
+            logger.error(f"Stripe authentication failed: {type(e).__name__}", exc_info=True)
             raise APIError('Payment system configuration error. Please contact support.')
         except stripe.error.APIConnectionError as e:
-            logger.error(f"Stripe API connection failed: {str(e)}", exc_info=True)
+            logger.error(f"Stripe API connection failed: {type(e).__name__}", exc_info=True)
             raise APIError('Cannot connect to payment system. Please check your internet connection.')
         except stripe.error.StripeError as e:
-            logger.error(f"Generic Stripe error for user {user.email}: {str(e)}", exc_info=True)
+            logger.error(f"Generic Stripe error for user_id={user.id}: {type(e).__name__}", exc_info=True)
             raise APIError('Payment failed. Please try again.')
         
-        logger.info(f"Created Stripe checkout session for user {user.email}, package {package_type}")
+        logger.info(f"Created Stripe checkout session for user_id={user.id}, package={package_type}")
         
         return jsonify({
             'success': True,
@@ -369,7 +370,7 @@ def create_checkout_session():
     except APIError:
         raise
     except Exception as e:
-        logger.error(f"Unexpected checkout creation error for user {request.current_user.email}: {str(e)}", exc_info=True)
+        logger.error(f"Unexpected checkout creation error for user_id={request.current_user.id}: {type(e).__name__}", exc_info=True)
         raise APIError('Payment initialization failed. Please try again.')
 
 @billing_bp.route('/success', methods=['GET'])
@@ -392,6 +393,7 @@ def payment_success():
 
 @billing_bp.route('/create-portal', methods=['POST'])
 @login_required
+@limiter.limit("10 per minute")
 def create_portal_session():
     """Create Stripe billing portal session."""
     try:
@@ -650,6 +652,14 @@ def stripe_webhook():
                 session_id = getattr(session, 'id', None)
                 customer_id = getattr(session, 'customer', None)
                 _fulfill_purchase(user_id, package_type, tokens, session_id, customer_id, db_session)
+                record_audit_event(
+                    db_session,
+                    'billing.webhook_fulfilled',
+                    user_id=user_id,
+                    provider='stripe',
+                    detail=f'package={package_type} tokens={tokens}',
+                    commit=True,
+                )
                 logger.info(f"Webhook: Fulfilled order for user {user_id}")
 
         # Handle off-session auto-refill PaymentIntent fulfillment
@@ -673,6 +683,14 @@ def stripe_webhook():
                         db_session=db_session,
                         description=f"Auto-refill: {pkg['name']}",
                         clear_auto_refill_failed=True,
+                    )
+                    record_audit_event(
+                        db_session,
+                        'billing.webhook_fulfilled',
+                        user_id=user_id,
+                        provider='stripe',
+                        detail=f'auto_refill package={package_type} tokens={pkg["tokens"]}',
+                        commit=True,
                     )
                     logger.info(f"Webhook: Fulfilled auto-refill PaymentIntent for user {user_id}")
 

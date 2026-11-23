@@ -14,7 +14,7 @@ import hashlib
 import re
 
 from backend.database import db_session
-from backend.models import User, TokenBalance, Streak, DeletedUser
+from backend.models import User, TokenBalance, Streak, DeletedUser, record_audit_event
 from backend.config import Config
 from backend.error_handlers import APIError
 from backend.services.streak import handle_login_streak
@@ -163,7 +163,7 @@ def create_test_user():
     # Provision new user (balance + streak)
     provision_new_user(user)
     
-    logger.info(f"Test user created: {user.email}")
+    logger.info(f"Test user created (user_id={user.id})")
     return user
 
 
@@ -217,12 +217,19 @@ def signup():
         
         # Provision new user (balance + streak)
         provision_new_user(user, bonus_amount=bonus)
+        record_audit_event(
+            db_session,
+            'auth.signup',
+            user_id=user.id,
+            detail=f'bonus={bonus} was_deleted={bool(was_deleted)}',
+            commit=True,
+        )
         
         # Create JWT token and set legacy session for backwards compatibility
         jwt_token = create_token(user.id, user.email)
         session['user_id'] = user.id
         
-        logger.info(f"New user registered: {email}")
+        logger.info(f"New user registered (user_id={user.id})")
         
         msg = f'Account created! You received {bonus} CP bonus'
         if was_deleted:
@@ -269,18 +276,32 @@ def login():
         user = db_session.query(User).filter_by(email=email).first()
         if not user:
             bcrypt.checkpw(password.encode('utf-8'), _DUMMY_BCRYPT_HASH)
-            logger.warning(f"Login: User not found: {email}")
+            logger.warning("Login: User not found")
+            record_audit_event(
+                db_session,
+                'auth.login_failed',
+                detail='reason=user_not_found',
+                commit=True,
+            )
             raise APIError('Invalid email or password', status_code=401)
         
         # Verify password
         if not bcrypt.checkpw(password.encode('utf-8'), user.password_hash.encode('utf-8')):
-            logger.warning(f"Login: Invalid password for: {email}")
+            logger.warning(f"Login: Invalid password (user_id={user.id})")
+            record_audit_event(
+                db_session,
+                'auth.login_failed',
+                user_id=user.id,
+                detail='reason=invalid_password',
+                commit=True,
+            )
             raise APIError('Invalid email or password', status_code=401)
         
         # Update last login and handle streak
         user.last_login = datetime.now(UTC)
         streak_result = handle_login_streak(user.id, db_session)
         current_streak = streak_result['streak_count']
+        record_audit_event(db_session, 'auth.login', user_id=user.id)
         
         db_session.commit()
         
@@ -294,7 +315,7 @@ def login():
         token_balance = db_session.query(TokenBalance).filter_by(user_id=user.id).first()
         balance = token_balance.balance if token_balance else 0
         
-        logger.info(f"User logged in: {email}")
+        logger.info(f"User logged in (user_id={user.id})")
         
         # Create response with JWT cookie
         response = make_response(jsonify({
@@ -376,7 +397,7 @@ def get_extension_token():
         # Edge case: user created before api_token migration
         user.api_token = secrets.token_hex(32)
         db_session.commit()
-        logger.info(f"Generated missing api_token for user {user.email}")
+        logger.info(f"Generated missing api_token (user_id={user.id})")
 
     return jsonify({
         'success': True,
@@ -386,17 +407,35 @@ def get_extension_token():
 
 @auth_bp.route('/delete-account', methods=['POST'])
 @login_required
+@limiter.limit("5 per hour")
 def delete_account():
     """Permanently delete user account and all related data."""
     try:
         user = request.current_user
+        user_id = user.id
         user_email = user.email
         
-        logger.warning(f"DELETING ACCOUNT: {user_email} (ID: {user.id})")
+        logger.warning(f"DELETING ACCOUNT: user_id={user_id}")
         
         # Imports to ensure we have all models needed for cleanup
-        from backend.models import MediaCheck, TokenBalance, Streak, Transaction, FactCheck, DeletedUser
-        
+        from backend.models import (
+            CloudStorageConnection,
+            DeletedUser,
+            FactCheck,
+            MediaCheck,
+            Streak,
+            SyncedDeckRecord,
+            TokenBalance,
+            Transaction,
+        )
+        from backend.services.cloud_tokens import extract_revoke_targets, revoke_tokens_best_effort
+
+        # Capture connected cloud storage tokens for best-effort upstream revocation
+        cloud_conns = db_session.query(CloudStorageConnection).filter_by(user_id=user.id).limit(10).all()
+        revoke_targets = [
+            target for target in (extract_revoke_targets(c) for c in cloud_conns) if target
+        ]
+
         # 1. Create a tombstone record to prevent bonus abuse on re-signup
         # We store SHA256 of email to be GDPR/Privacy compliant (no PII kept)
         email_hash = hashlib.sha256(user_email.lower().strip().encode()).hexdigest()
@@ -407,10 +446,12 @@ def delete_account():
             tombstone = DeletedUser(email_hash=email_hash)
             db_session.add(tombstone)
 
-        # 2. Delete all dependent records explicitly.
+        # 2. Delete all dependent records explicitly (FK-safe order).
         # SQLAlchemy relationships do not have cascade='all, delete-orphan' set,
         # so we must delete each child table manually to satisfy FK constraints
         # and ensure GDPR compliance (no orphaned user data survives).
+        db_session.query(SyncedDeckRecord).filter_by(user_id=user.id).delete()
+        db_session.query(CloudStorageConnection).filter_by(user_id=user.id).delete()
         db_session.query(MediaCheck).filter_by(user_id=user.id).delete()
         db_session.query(TokenBalance).filter_by(user_id=user.id).delete()
         db_session.query(Streak).filter_by(user_id=user.id).delete()
@@ -427,9 +468,22 @@ def delete_account():
             if cache_name
         ]
 
-        # 3. Delete the user
+        # 3. Delete the user and record non-PII deletion audit log
         db_session.delete(user)
+        record_audit_event(
+            db_session,
+            'auth.delete_account',
+            user_id=user_id,
+            detail=f'deleted_caches={len(caches_to_delete)}',
+        )
         db_session.commit()
+
+        for target in revoke_targets:
+            revoke_tokens_best_effort(
+                target['provider'],
+                access_token=target.get('access_token'),
+                refresh_token=target.get('refresh_token'),
+            )
 
         if caches_to_delete:
             try:
@@ -440,7 +494,7 @@ def delete_account():
             except Exception as cache_err:
                 logger.warning(f"Failed to purge remote caches during account deletion: {cache_err}")
         
-        logger.info(f"Account deleted successfully: {user_email}")
+        logger.info(f"Account deleted successfully: user_id={user_id}")
         
         # 3. Clear session and cookies
         session.clear()
@@ -469,6 +523,8 @@ def google_login():
     # Preserve extension redirect intent through the OAuth cycle
     if request.args.get('ext') == '1':
         session['ext_redirect'] = '1'
+    else:
+        session.pop('ext_redirect', None)
     redirect_uri = url_for('auth.google_callback', _external=True)
     return oauth.google.authorize_redirect(redirect_uri)
 
@@ -477,8 +533,18 @@ def google_login():
 def google_callback():
     """Handle Google OAuth callback."""
     try:
+        oauth_error = request.args.get('error')
+        if oauth_error:
+            session.pop('ext_redirect', None)
+            safe_err = re.sub(r'[^a-zA-Z0-9_.-]', '_', oauth_error)[:64]
+            logger.warning(f"Google OAuth callback returned error={safe_err}")
+            if oauth_error == 'access_denied':
+                return redirect('/?error=access_denied')
+            return redirect('/?error=google_auth_failed')
+
         # Fast-fail: reject requests without OAuth code/state (bots/crawlers)
         if 'code' not in request.args or 'state' not in request.args:
+            session.pop('ext_redirect', None)
             logger.warning("OAuth callback hit without code/state - likely a bot")
             return redirect('/?error=invalid_oauth_request')
         
@@ -521,13 +587,20 @@ def google_callback():
             # Provision new user (balance + streak)
             provision_new_user(user, bonus_amount=bonus)
             
-            logger.info(f"New Google user created: {email} (Bonus: {bonus} - was_deleted: {was_deleted})")
+            logger.info(f"New Google user created: user_id={user.id} (Bonus: {bonus} - was_deleted: {bool(was_deleted)})")
             
         # Consolidate last login and streak handling for both new and existing users
         user.last_login = datetime.now(UTC)
         handle_login_streak(user.id, db_session)
+        record_audit_event(
+            db_session,
+            'auth.google_login',
+            user_id=user.id,
+            provider='google',
+            detail=f'is_new_user={is_new_user}',
+        )
         db_session.commit()
-        logger.info(f"Google user logged in: {email}")
+        logger.info(f"Google user logged in (user_id={user.id})")
             
         # Create JWT token
         jwt_token = create_token(user.id, user.email)
@@ -549,6 +622,7 @@ def google_callback():
         return response
         
     except Exception as e:
+        session.pop('ext_redirect', None)
         logger.error(f"Google login error: {e}", exc_info=True)
         # Don't leak internal error details - redirect to home with error
         response = make_response(redirect('/?error=google_auth_failed'))
