@@ -17,6 +17,7 @@ DNS_TABLE = {
     'public.example.com': PUBLIC_IP,
     'cdn.example.com': '93.184.216.35',
     'internal.example.com': '10.0.0.5',
+    '127.0.0.1': '127.0.0.1',
     '169.254.169.254': '169.254.169.254',
 }
 
@@ -287,3 +288,142 @@ class TestAnalyzeUrlHeadProbe:
         assert response.status_code == 403
         assert 'Insufficient tokens' in response.get_json()['error']
         mock_head.assert_not_called()
+
+
+class TestSafeApiRequest:
+
+    @pytest.mark.parametrize('url', [
+        'http://public.example.com/oauth/token',
+        'file:///etc/passwd',
+        'ftp://public.example.com/file',
+        'https://',
+        '',
+    ])
+    def test_rejects_non_https_or_malformed_urls_without_dns_or_http(self, fake_dns, url):
+        with patch('backend.services.safe_http.requests.request') as mock_req:
+            with pytest.raises(safe_http.UnsafeURLError):
+                safe_http.safe_api_request('GET', url)
+        fake_dns.assert_not_called()
+        mock_req.assert_not_called()
+
+    @pytest.mark.parametrize('url', [
+        'https://internal.example.com/api/v1',
+        'https://169.254.169.254/computeMetadata/v1/',
+        'https://127.0.0.1/admin',
+    ])
+    def test_blocks_private_loopback_and_metadata_ips_before_http(self, fake_dns, url):
+        with patch('backend.services.safe_http.requests.request') as mock_req:
+            with pytest.raises(safe_http.UnsafeURLError, match='restricted address'):
+                safe_http.safe_api_request('POST', url, json_body={'k': 'v'})
+        mock_req.assert_not_called()
+
+    @pytest.mark.parametrize('bad_method', ['', '   ', 'TRACE', 'CONNECT', None])
+    def test_rejects_invalid_http_methods(self, fake_dns, bad_method):
+        with patch('backend.services.safe_http.requests.request') as mock_req:
+            with pytest.raises(ValueError):
+                safe_http.safe_api_request(bad_method, 'https://public.example.com/api')
+        mock_req.assert_not_called()
+
+    @pytest.mark.parametrize('bad_timeout', [0, -1, -0.5, False, True, None, (5,), (5, 0), float('nan'), float('inf')])
+    def test_rejects_non_positive_or_invalid_timeout(self, fake_dns, bad_timeout):
+        with patch('backend.services.safe_http.requests.request') as mock_req:
+            with pytest.raises(ValueError, match='timeout'):
+                safe_http.safe_api_request('GET', 'https://public.example.com/api', timeout=bad_timeout)
+        mock_req.assert_not_called()
+
+    def test_pins_dns_and_blocks_private_connected_peer(self):
+        rebind_answers = [
+            [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', (PUBLIC_IP, 443))],
+            [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('169.254.169.254', 443))],
+        ]
+        observed_ips = []
+
+        def transport(method, url, **kwargs):
+            resolved = socket.getaddrinfo('rebind.example.com', 443, proto=socket.IPPROTO_TCP)
+            observed_ips.append(resolved[0][4][0])
+            return _response(200)
+
+        with patch('backend.services.safe_http.socket.getaddrinfo', side_effect=rebind_answers) as mock_dns, \
+             patch('backend.services.safe_http.requests.request', side_effect=transport):
+            resp = safe_http.safe_api_request('GET', 'https://rebind.example.com/v1')
+
+        assert resp.status_code == 200
+        assert observed_ips == [PUBLIC_IP]
+        assert mock_dns.call_count == 1
+
+        private_peer_resp = _response(200)
+        private_peer_resp.raw._connection.sock.getpeername.return_value = ('10.0.0.5', 443)
+        with patch('backend.services.safe_http.socket.getaddrinfo', side_effect=_fake_getaddrinfo), \
+             patch('backend.services.safe_http.requests.request', return_value=private_peer_resp):
+            with pytest.raises(safe_http.UnsafeURLError, match='Connected peer address is restricted'):
+                safe_http.safe_api_request('GET', 'https://public.example.com/v1')
+        private_peer_resp.close.assert_called_once_with()
+
+    def test_forwards_parameters_and_disables_redirects(self, fake_dns):
+        redirect_resp = _response(302, {'Location': 'https://internal.example.com/steal'})
+        with patch('backend.services.safe_http.requests.request', return_value=redirect_resp) as mock_req:
+            resp = safe_http.safe_api_request(
+                'post',
+                'https://public.example.com/oauth/token',
+                headers={'Authorization': 'Bearer tok'},
+                params={'alt': 'json'},
+                json_body={'hello': 'world'},
+                data=None,
+                timeout=(3, 10),
+                stream=True,
+            )
+
+        assert resp is redirect_resp
+        assert resp.status_code == 302
+        mock_req.assert_called_once_with(
+            'POST',
+            'https://public.example.com/oauth/token',
+            headers={'Authorization': 'Bearer tok'},
+            params={'alt': 'json'},
+            json={'hello': 'world'},
+            data=None,
+            timeout=(3, 10),
+            stream=True,
+            allow_redirects=False,
+        )
+
+    def test_safe_api_request_strips_query_string_and_userinfo_from_errors(self, fake_dns):
+        with patch('backend.services.safe_http.requests.request') as mock_req:
+            with pytest.raises(safe_http.UnsafeURLError) as exc_info:
+                safe_http.safe_api_request(
+                    'GET',
+                    'http://user:SECRET_PW@api.example.com/v1?access_token=SECRET_TOK#frag',
+                )
+        err_msg = str(exc_info.value)
+        assert 'access_token' not in err_msg
+        assert 'SECRET_TOK' not in err_msg
+        assert 'SECRET_PW' not in err_msg
+        assert 'http://api.example.com/v1' in err_msg
+        fake_dns.assert_not_called()
+        mock_req.assert_not_called()
+
+    @pytest.mark.parametrize('bad_url', [
+        ' https://public.example.com/v1?token=SECRET_WS',
+        'https://public.example.com/v1 ',
+        'https://public.example.com/v1\n?token=SECRET_CTL',
+    ])
+    def test_rejects_whitespace_and_control_chars_without_dns_or_leak(self, fake_dns, bad_url):
+        with patch('backend.services.safe_http.requests.request') as mock_req:
+            with pytest.raises(safe_http.UnsafeURLError) as exc_info:
+                safe_http.safe_api_request('GET', bad_url)
+        err_msg = str(exc_info.value)
+        assert 'SECRET_' not in err_msg
+        fake_dns.assert_not_called()
+        mock_req.assert_not_called()
+
+    def test_assert_public_url_ssrf_log_scrubs_query_string_and_userinfo(self, fake_dns, caplog):
+        import logging
+        caplog.set_level(logging.WARNING)
+        with pytest.raises(safe_http.UnsafeURLError, match='restricted address'):
+            safe_http.assert_public_url(
+                'https://user:SECRET_PASS@127.0.0.1/video.mp4?secret_token=SECRET_QS_999#frag'
+            )
+        assert 'SECRET_PASS' not in caplog.text
+        assert 'secret_token' not in caplog.text
+        assert 'SECRET_QS_999' not in caplog.text
+        assert 'https://127.0.0.1/video.mp4' in caplog.text
