@@ -845,7 +845,7 @@ class PitchdeckModule {
                 this.currentSlide = 1;
                 this.zoomLevel = 1.0;
                 await this.renderSlide(1);
-                ui.showToast(`Loaded ${this.totalSlides} slides. Click "Analyze Deck with AI" to extract intelligence.`, 'info');
+                ui.showToast(`Loaded ${this.totalSlides} slides. Click "Analyze" to extract intelligence.`, 'info');
             } else {
                 ui.showToast('Could not preview PDF locally, but AI analysis is still available.', 'warning');
             }
@@ -1044,7 +1044,7 @@ class PitchdeckModule {
             marketLoading?.classList.add('hidden');
 
             this.elements.generateBtn.disabled = false;
-            this.elements.generateBtn.textContent = '⚡ Analyze Deck with AI';
+            this.elements.generateBtn.textContent = 'Analyze';
             this.elements.generateBtn.classList.remove('analyzing');
         } finally {
             clearTimeout(timeoutId);
@@ -2417,7 +2417,7 @@ class PitchdeckModule {
 
         const provider = activeConn.provider;
         const btn = triggerBtn || this.elements.dealSyncNowBtn || this.elements.headerSyncNowBtn;
-        const originalText = btn ? btn.textContent : '☁️ Sync Now';
+        const originalText = btn ? btn.textContent : 'Sync Now';
         if (btn) {
             btn.disabled = true;
             btn.textContent = 'Syncing...';

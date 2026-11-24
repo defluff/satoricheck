@@ -95,6 +95,10 @@
         gap: var(--spacing-lg);
     }
 
+    .pd-upload-row {
+        grid-template-columns: 1fr;
+    }
+
     .pd-upload-zone {
         padding: var(--spacing-lg) var(--spacing-md);
     }

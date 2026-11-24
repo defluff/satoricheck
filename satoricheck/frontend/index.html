@@ -37,8 +37,8 @@
                     </button>
                 </div>
                 <div class="module-nav-toggle">
-                    <button class="module-nav-btn" id="nav-factcheck-btn" title="Fact Check Mode">
-                        Fact Check
+                    <button class="module-nav-btn" id="nav-factcheck-btn" title="Text Fact Check Mode">
+                        Text
                     </button>
                     <button class="module-nav-btn" id="nav-media-btn" title="Media Authenticity Check">
                         Media
@@ -184,31 +184,22 @@
             <!-- Feature A: Persistent Thesis Configuration Gate -->
             <section class="pd-card pd-thesis-gate" id="pd-thesis-gate">
                 <div class="pd-thesis-bar">
-                    <div class="pd-thesis-bar-summary">
-                        <span class="pd-thesis-bar-title">🎯 Fund Thesis Mandate</span>
-                        <div class="pd-thesis-active-pills" id="pd-thesis-active-pills">
-                            <!-- Populated by JS -->
+                    <div class="pd-thesis-bar-left">
+                        <div class="pd-thesis-bar-summary">
+                            <span class="pd-thesis-bar-title">Fund Thesis Mandate</span>
+                            <div class="pd-thesis-active-pills" id="pd-thesis-active-pills">
+                                <!-- Populated by JS -->
+                            </div>
                         </div>
-                    </div>
-                    <div class="pd-thesis-bar-actions">
-                        <div class="pd-split-btn-group" role="group" aria-label="Cloud Storage Sync">
-                            <button type="button" class="btn-secondary btn-sm pd-split-btn-main" id="pd-cloud-sync-now-btn"
-                                title="Sync Now using your saved Cloud Storage & Google Sheet settings">
-                                ☁️ Sync Now
-                            </button>
-                            <button type="button" class="btn-secondary btn-sm pd-split-btn-gear" id="pd-cloud-sync-btn"
-                                aria-label="Cloud Sync Settings"
-                                title="Configure Cloud Storage provider, folders, Deal Memo preset & Google Sheet">
-                                ⚙️
-                            </button>
-                        </div>
-                        <button type="button" class="btn-secondary btn-sm" id="pd-archive-toggle-btn"
-                            aria-expanded="false" title="View Zero-File Deal Archive & Decision Log">
-                            🗂️ Deal Archive (<span id="pd-archive-count">0</span>)
-                        </button>
-                        <button type="button" class="btn-secondary btn-sm" id="pd-thesis-toggle-btn"
+                        <button type="button" class="btn-secondary btn-sm pd-thesis-toggle-btn" id="pd-thesis-toggle-btn"
                             aria-expanded="false">
                             ⚙️ Configure Thesis
+                        </button>
+                    </div>
+                    <div class="pd-thesis-bar-actions">
+                        <button type="button" class="btn-secondary btn-sm" id="pd-archive-toggle-btn"
+                            aria-expanded="false" title="View Zero-File Deal Archive & Decision Log">
+                            Deal Archive (<span id="pd-archive-count">0</span>)
                         </button>
                     </div>
                 </div>
@@ -267,24 +258,63 @@
 
             <!-- Upload Section -->
             <section class="pd-upload-section">
-                <div class="pd-upload-zone" id="pd-upload-zone">
-                    <div class="pd-upload-icon">
-                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="1.5">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                            <polyline points="14 2 14 8 20 8" />
-                            <line x1="12" y1="18" x2="12" y2="12" />
-                            <line x1="9" y1="15" x2="12" y2="12" />
-                            <line x1="15" y1="15" x2="12" y2="12" />
-                        </svg>
+                <div class="pd-upload-row">
+                    <div class="pd-upload-zone" id="pd-upload-zone">
+                        <div class="pd-upload-icon">
+                            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="1.5">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                <polyline points="14 2 14 8 20 8" />
+                                <line x1="12" y1="18" x2="12" y2="12" />
+                                <line x1="9" y1="15" x2="12" y2="12" />
+                                <line x1="15" y1="15" x2="12" y2="12" />
+                            </svg>
+                        </div>
+                        <h3 class="pd-upload-title">Upload Pitch Deck (PDF)</h3>
+                        <p class="pd-upload-subtitle">Drag & drop or click to upload. Core slides and annex supported.</p>
+                        <!-- Uploaded file display (initially hidden) -->
+                        <div class="pd-uploaded-info hidden">
+                            <span class="pd-uploaded-icon">✓</span>
+                            <span class="pd-uploaded-filename"></span>
+                            <span class="pd-uploaded-pages-badge" id="pd-uploaded-pages-badge"></span>
+                        </div>
                     </div>
-                    <h3 class="pd-upload-title">Upload Pitch Deck (PDF)</h3>
-                    <p class="pd-upload-subtitle">Drag & drop or click to upload. Core slides and annex supported.</p>
-                    <!-- Uploaded file display (initially hidden) -->
-                    <div class="pd-uploaded-info hidden">
-                        <span class="pd-uploaded-icon">✓</span>
-                        <span class="pd-uploaded-filename"></span>
-                        <span class="pd-uploaded-pages-badge" id="pd-uploaded-pages-badge"></span>
+
+                    <!-- Cloud Folder Sync Card (25% right column) -->
+                    <div class="pd-folder-sync-card" id="pd-folder-sync-card">
+                        <div class="pd-folder-sync-state" id="pd-folder-sync-unconfigured">
+                            <div class="pd-upload-icon">
+                                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="1.5">
+                                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                                </svg>
+                            </div>
+                            <h3 class="pd-folder-sync-title">Sync Folder</h3>
+                            <p class="pd-folder-sync-subtitle" id="pd-folder-unconfigured-subtitle">
+                                Connect a cloud folder to sync decks.
+                            </p>
+                            <button type="button" class="btn-secondary btn-sm" id="pd-choose-folder-btn">
+                                📁 Choose Folder
+                            </button>
+                        </div>
+
+                        <div class="pd-folder-sync-state hidden" id="pd-folder-sync-connected">
+                            <div class="pd-folder-sync-provider-row">
+                                <span class="pd-folder-connected-dot" aria-hidden="true"></span>
+                                <span class="pd-folder-sync-provider" id="pd-sync-provider-name">Cloud Folder</span>
+                            </div>
+                            <div class="pd-folder-name-pill" id="pd-sync-folder-name" title="">
+                                <!-- Populated by JS -->
+                            </div>
+                            <button type="button" class="pd-folder-change-btn" id="pd-cloud-sync-btn"
+                                title="Configure Cloud Storage provider, folders, Deal Memo preset & Google Sheet">
+                                Change folder
+                            </button>
+                            <button type="button" class="btn-primary btn-sm pd-folder-sync-now-btn" id="pd-cloud-sync-now-btn"
+                                title="Sync Now using your saved Cloud Storage & Google Sheet settings">
+                                Sync Now
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -294,7 +324,7 @@
 
                 <!-- Generate Overview Button -->
                 <button class="btn-primary pd-generate-btn" id="pd-generate-btn" disabled>
-                    ⚡ Analyze Deck with AI
+                    Analyze
                 </button>
             </section>
 
@@ -551,10 +581,10 @@
                         <!-- Feature B: Segmented View Switcher -->
                         <div class="pd-claims-filter-tabs" id="pd-claims-filter-tabs" role="tablist">
                             <button class="btn-tab pd-tab-btn active" data-filter="risk" role="tab" aria-selected="true">
-                                🎯 Risk Priority View
+                                Risk Priority View
                             </button>
                             <button class="btn-tab pd-tab-btn" data-filter="slide" role="tab" aria-selected="false">
-                                🖼️ Slide-by-Slide View
+                                Slide-by-Slide View
                             </button>
                             <button class="btn-tab pd-tab-btn" data-filter="financials" role="tab" aria-selected="false">
                                 Financials &amp; Traction

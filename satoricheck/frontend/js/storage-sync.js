@@ -46,10 +46,21 @@ class StorageSyncManager {
             settingsSummary: document.getElementById('settings-storage-summary'),
             settingsManageBtn: document.getElementById('settings-manage-storage-btn'),
             pdCloudSyncBtn: document.getElementById('pd-cloud-sync-btn'),
+            pdChooseFolderBtn: document.getElementById('pd-choose-folder-btn'),
+            pdFolderSyncCard: document.getElementById('pd-folder-sync-card'),
+            pdFolderSyncUnconfigured: document.getElementById('pd-folder-sync-unconfigured'),
+            pdFolderSyncConnected: document.getElementById('pd-folder-sync-connected'),
+            pdFolderUnconfiguredSubtitle: document.getElementById('pd-folder-unconfigured-subtitle'),
+            pdSyncProviderName: document.getElementById('pd-sync-provider-name'),
+            pdSyncFolderName: document.getElementById('pd-sync-folder-name'),
             pdDealSyncSettingsBtn: document.getElementById('pd-deal-sync-settings-btn')
         };
 
         this.elements.pdCloudSyncBtn?.addEventListener('click', () => {
+            this.openModal();
+        });
+
+        this.elements.pdChooseFolderBtn?.addEventListener('click', () => {
             this.openModal();
         });
 
@@ -90,6 +101,7 @@ class StorageSyncManager {
             this.connections = list;
             this.renderSettingsSummary(list);
             this.renderConnections(list);
+            this.renderPitchdeckFolderCard(list);
             return list;
         } catch (error) {
             if (!silent) {
@@ -97,6 +109,71 @@ class StorageSyncManager {
             }
             return [];
         }
+    }
+
+    renderPitchdeckFolderCard(connections) {
+        const card = this.elements.pdFolderSyncCard;
+        const unconfigured = this.elements.pdFolderSyncUnconfigured;
+        const connectedEl = this.elements.pdFolderSyncConnected;
+        if (!card || !unconfigured || !connectedEl) return;
+
+        const list = Array.isArray(connections) ? connections : [];
+        const configuredConn = list.find(
+            c => Boolean(c?.connected) && Boolean(c?.input_folder_ref) && Boolean(c?.output_folder_ref)
+        );
+        const connectedOnly = !configuredConn ? list.find(c => Boolean(c?.connected)) : null;
+
+        if (configuredConn) {
+            const meta = PROVIDERS.find(p => p.id === configuredConn.provider);
+            const providerLabel = meta ? meta.name : configuredConn.provider;
+            const folderRef = String(configuredConn.input_folder_ref || '').trim();
+            const displayFolder = this._formatFolderDisplay(folderRef);
+
+            if (this.elements.pdSyncProviderName) {
+                this.elements.pdSyncProviderName.textContent = providerLabel;
+            }
+            if (this.elements.pdSyncFolderName) {
+                this.elements.pdSyncFolderName.textContent = `📁 ${displayFolder}`;
+                this.elements.pdSyncFolderName.title = folderRef;
+            }
+
+            card.classList.add('pd-folder-sync-card--connected');
+            unconfigured.classList.add('hidden');
+            connectedEl.classList.remove('hidden');
+            return;
+        }
+
+        card.classList.remove('pd-folder-sync-card--connected');
+        connectedEl.classList.add('hidden');
+        unconfigured.classList.remove('hidden');
+
+        if (this.elements.pdFolderUnconfiguredSubtitle) {
+            if (connectedOnly) {
+                const meta = PROVIDERS.find(p => p.id === connectedOnly.provider);
+                const providerLabel = meta ? meta.name : connectedOnly.provider;
+                this.elements.pdFolderUnconfiguredSubtitle.textContent =
+                    `${providerLabel} connected — choose a folder to sync.`;
+            } else {
+                this.elements.pdFolderUnconfiguredSubtitle.textContent =
+                    'Connect a cloud folder to sync decks.';
+            }
+        }
+    }
+
+    _formatFolderDisplay(folderRef) {
+        if (!folderRef) return 'Folder';
+        // Strip URL prefix if user pasted a full Drive/Dropbox URL
+        try {
+            if (folderRef.startsWith('http://') || folderRef.startsWith('https://')) {
+                const url = new URL(folderRef);
+                const segments = url.pathname.split('/').filter(Boolean);
+                const last = segments[segments.length - 1];
+                if (last) return decodeURIComponent(last);
+            }
+        } catch (_) {
+            // Fall back to raw string handling
+        }
+        return folderRef;
     }
 
     renderSettingsSummary(connections) {
