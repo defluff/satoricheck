@@ -103,16 +103,11 @@
         padding: var(--spacing-lg) var(--spacing-md);
     }
 
-    .storage-config-grid,
-    .pd-gsheet-popover-grid {
+    .storage-config-grid {
         grid-template-columns: 1fr;
     }
 
     .pd-export-actions {
-        width: 100%;
-    }
-
-    .pd-gdoc-folder-input {
         width: 100%;
     }
 

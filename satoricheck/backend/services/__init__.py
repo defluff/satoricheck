@@ -1,6 +1,6 @@
 from typing import Optional
 from backend.services.gemini_service import GeminiService
-from backend.services.grok_service import GrokService, get_grok_service
+from backend.services.grok_service import get_grok_service
 from backend.services.pitchdeck_service import PitchdeckService
 import logging
 

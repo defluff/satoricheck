@@ -70,10 +70,6 @@ def resolve_analyzed_date(payload: dict) -> str:
     return datetime.now(UTC).strftime('%Y-%m-%d')
 
 
-# Backwards-compatible alias
-_resolve_analyzed_date = resolve_analyzed_date
-
-
 def _collect_red_flags(payload: dict) -> list[str]:
     """Collect bounded deck-level red flags plus any high-risk contradicted claim findings."""
     flags: list[str] = []

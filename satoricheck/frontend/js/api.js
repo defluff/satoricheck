@@ -239,20 +239,6 @@ class APIClient {
         });
     }
 
-    async exportPitchdeckGoogleDoc(payload) {
-        return this.request('/export/pitchdeck/google-doc', {
-            method: 'POST',
-            body: JSON.stringify(payload)
-        });
-    }
-
-    async exportPitchdeckGoogleSheet(payload) {
-        return this.request('/export/pitchdeck/google-sheet', {
-            method: 'POST',
-            body: JSON.stringify(payload)
-        });
-    }
-
     async exportPitchdeckCloudSync(payload) {
         return this.request('/export/pitchdeck/cloud-sync', {
             method: 'POST',
@@ -264,10 +250,6 @@ class APIClient {
 
     async getStorageConnections() {
         return this.request('/storage/connections');
-    }
-
-    async getStorageStatus(provider) {
-        return this.request(`/storage/${encodeURIComponent(provider)}/status`);
     }
 
     async disconnectStorageProvider(provider) {

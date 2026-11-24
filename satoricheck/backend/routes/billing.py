@@ -711,6 +711,9 @@ def stripe_webhook():
                         logger.warning(f"Webhook: Auto-refill payment failed for user {user_id}")
         
         # Handle subscription renewal (Wizard Refills)
+        # Invariant: Must retain invoice.payment_succeeded to service active legacy recurring
+        # Wizard subscriptions created prior to one-time refill migration. Do NOT delete without
+        # verifying zero active subscriptions in the live Stripe customer ledger.
         if event['type'] == 'invoice.payment_succeeded':
             invoice = event['data']['object']
             # Attribute access for stripe-python v15 compatibility

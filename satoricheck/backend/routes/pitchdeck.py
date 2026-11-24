@@ -119,7 +119,7 @@ def analyze_pitch_deck():
 
         # Calculate Cost (2 CP per 10 slides, Min 2, Max 12 CP for up to 60 standard slides)
         # Examples: 8 slides -> 2 CP. 12 slides -> 4 CP. 55 slides -> 12 CP.
-        effective_pages = min(page_count, 60)
+        effective_pages = min(page_count, service.MAX_SLIDES_STANDARD)
         cost = max(2, math.ceil(effective_pages / 10) * 2)
         
         logger.info(f"[Pitchdeck] Pricing: {page_count} pages (effective {effective_pages}) -> {cost} CP")
@@ -319,7 +319,7 @@ def verify_market_claims():
 
         # --- PRICING: 1 CP flat per market verification ---
         cost = 1  # Flat rate: 1 CP per verification call
-        token_balance = reserve_flat_tokens(
+        reserve_flat_tokens(
             user.id,
             cost,
             error_message=f'Insufficient tokens. Verification requires {cost} CP.'

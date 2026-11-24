@@ -14,7 +14,7 @@ from flask import Blueprint, request, jsonify
 from werkzeug.utils import secure_filename
 
 from backend.database import db_session
-from backend.models import MediaCheck, TokenBalance
+from backend.models import MediaCheck
 from backend.routes.auth import login_required
 from backend.routes.tokens import (
     ensure_sufficient_tokens,
@@ -118,7 +118,7 @@ def _analyze_media(
     """
     cost = _calculate_media_cp_cost(mime_type, file_size_bytes)
 
-    token_balance = reserve_flat_tokens(
+    reserve_flat_tokens(
         user.id,
         cost,
         error_message=f'Insufficient tokens. Media analysis costs {cost} CP.'

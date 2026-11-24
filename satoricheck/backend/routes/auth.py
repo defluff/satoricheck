@@ -170,7 +170,11 @@ def create_test_user():
 @auth_bp.route('/signup', methods=['POST'])
 @limiter.limit("5 per hour")
 def signup():
-    """Register a new user."""
+    """Register a new user.
+
+    Invariant: Retained for testing harnesses, local RFC-2606 test persona provisioning,
+    and fallback programmatic user registration. Do NOT delete without updating test suites.
+    """
     # Rate limit: 5 signups per hour per IP (prevent bonus farming)
     try:
         data = request.get_json()
@@ -257,7 +261,12 @@ def signup():
 @auth_bp.route('/login', methods=['POST'])
 @limiter.limit("15 per minute")
 def login():
-    """Log in a user."""
+    """Log in a user.
+
+    Invariant: Foundation fixture dependency for pytest (conftest.py `auth_client`
+    authenticates via POST /api/auth/login). Do NOT delete or modify response structure
+    without migrating the test harness authentication fixture.
+    """
     # Rate limit: 15 logins per minute per IP (prevent brute force)
     try:
         data = request.get_json()
@@ -390,6 +399,9 @@ def get_extension_token():
     The token is the existing api_token (64-char hex) already stored
     on the User model. No new secrets are generated — this just
     surfaces the value so the web app UI can show it for copy-paste.
+
+    Invariant: Retained for manual token copy fallback and regression test coverage
+    (tests/test_extension_security.py, tests/test_auth.py).
     """
     user = request.current_user
 
@@ -548,7 +560,7 @@ def google_callback():
             logger.warning("OAuth callback hit without code/state - likely a bot")
             return redirect('/?error=invalid_oauth_request')
         
-        token = oauth.google.authorize_access_token()
+        oauth.google.authorize_access_token()
         resp = oauth.google.get('https://www.googleapis.com/oauth2/v3/userinfo')
         user_info = resp.json()
         

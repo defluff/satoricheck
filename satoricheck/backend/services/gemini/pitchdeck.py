@@ -31,13 +31,7 @@ class GeminiServicePitchdeck(GeminiServiceMedia):
     MAX_FIELD_LENGTH = 5000
     MAX_COMPANY_NAME_LENGTH = 200
 
-    # Allowed schema keys and categories for strict validation
-    ALLOWED_TOP_LEVEL_KEYS = {
-        'company_name', 'summary', 'usp', 'industry', 'sector', 'startup_profile',
-        'market_size', 'competition', 'team_highlights', 'funding_ask',
-        'verifiable_claims', 'vc_metrics', 'red_flags', 'copy_style', 'page_count', 'cache_name'
-    }
-
+    # Allowed schema categories and enums for strict validation
     ALLOWED_CLAIM_CATEGORIES = {
         'market_size', 'revenue', 'growth_rate', 'roi', 'customer_count',
         'cost_savings', 'competitor', 'technology', 'clinical', 'product_feature',
@@ -48,8 +42,6 @@ class GeminiServicePitchdeck(GeminiServiceMedia):
     ALLOWED_COPY_STYLES = {'distinctive', 'generic_ai', 'inconclusive'}
 
     ALLOWED_RISK_LEVELS = {'high', 'low', 'medium', 'undefined'}
-
-    ALLOWED_STAGES = {'Pre-Seed', 'Seed', 'Series A', 'Series B+', 'Unknown'}
 
     ALLOWED_VERIFIABILITY = {'ambiguous', 'internal', 'public'}
 
@@ -673,7 +665,6 @@ class GeminiServicePitchdeck(GeminiServiceMedia):
     def _build_fallback_question(
         self,
         claim: Optional[dict],
-        verdict: Optional[str],
         risk_level: str
     ) -> Optional[str]:
         """Return existing suggested_question or synthesize a default founder question for high/medium risk claims."""
@@ -748,7 +739,7 @@ class GeminiServicePitchdeck(GeminiServiceMedia):
             verdict = res.get("verdict", "UNVERIFIED")
             explanation = res.get("explanation", "Verification unavailable")
             risk_level = self._map_verdict_to_risk_level(verdict, c)
-            suggested_question = self._build_fallback_question(c, verdict, risk_level)
+            suggested_question = self._build_fallback_question(c, risk_level)
 
             findings.append({
                 "claim_type": c.get("category", "other"),

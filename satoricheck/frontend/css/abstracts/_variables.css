@@ -23,11 +23,7 @@
     --color-info: #000080;
 
     /* Verdict Colors */
-    --color-true: #10B981;
     --color-false: #EF4444;
-    --color-misleading: #F59E0B;
-    --color-not-verified: #000080;
-    --color-not-claim: #9CA3AF;
 
     /* Upload Zone Background */
     --color-upload-bg: rgba(173, 216, 230, 0.25); /* Icy Blue subtle */
@@ -60,7 +56,6 @@
 
     /* Background Colors - Semi-transparent */
     --bg-success-subtle: rgba(16, 185, 129, 0.1);
-    --bg-success-hover: rgba(16, 185, 129, 0.05);
     --bg-primary-subtle: rgba(0, 0, 128, 0.1);
     --bg-primary-hover: rgba(0, 0, 128, 0.05);
     --bg-error-subtle: rgba(239, 68, 68, 0.08);
@@ -114,11 +109,7 @@
     --color-info: #3b82f6;
 
     /* Verdict Colors */
-    --color-true: #10b981;
     --color-false: #ef4444;
-    --color-misleading: #f59e0b;
-    --color-not-verified: #3b82f6;
-    --color-not-claim: #6b7280;
 
     /* Upload Zone Background */
     --color-upload-bg: rgba(53, 59, 74, 0.6);
@@ -129,7 +120,6 @@
 
     /* Background Colors - Semi-transparent */
     --bg-success-subtle: rgba(16, 185, 129, 0.15);
-    --bg-success-hover: rgba(16, 185, 129, 0.1);
     --bg-primary-subtle: rgba(59, 130, 246, 0.15);
     --bg-primary-hover: rgba(59, 130, 246, 0.1);
     --bg-error-subtle: rgba(239, 68, 68, 0.1);

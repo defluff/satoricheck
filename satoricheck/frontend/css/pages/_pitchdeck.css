@@ -1285,28 +1285,6 @@
     flex-wrap: wrap;
 }
 
-.pd-export-select,
-.pd-gdoc-folder-input {
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    color: var(--color-text);
-    font-size: 0.76rem;
-    padding: 4px 8px;
-    transition: border-color var(--transition-fast);
-}
-
-.pd-gdoc-folder-input {
-    width: 120px;
-}
-
-.pd-export-select:focus,
-.pd-gdoc-folder-input:focus,
-.pd-gsheet-input:focus {
-    outline: none;
-    border-color: var(--color-primary-strong);
-}
-
 .pd-export-result-link {
     font-size: 0.76rem;
     font-weight: 600;

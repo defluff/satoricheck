@@ -33,7 +33,8 @@ MAX_SYNC_FILES_PER_RUN = 5
 
 def calculate_sync_cp(page_count: int) -> int:
     """Compute total Check Points (analysis CP [2..12] + 1 CP sync/upload fee)."""
-    effective_pages = min(max(1, page_count), 60)
+    from backend.services.gemini.pitchdeck import GeminiServicePitchdeck
+    effective_pages = min(max(1, page_count), GeminiServicePitchdeck.MAX_SLIDES_STANDARD)
     analysis_cp = max(2, math.ceil(effective_pages / 10) * 2)
     return analysis_cp + 1
 

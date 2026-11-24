@@ -73,7 +73,6 @@ def add_tokens(email, amount):
             user.token_balance = TokenBalance(user_id=user.id, balance=0)
             db_session.add(user.token_balance)
 
-        old_bal = user.token_balance.balance
         user.token_balance.balance += int(amount)
         
         # Log transaction

@@ -123,7 +123,7 @@ def analyze_claim():
         # Atomically reserve 1 CP flat BEFORE calling external AI APIs
         # (standalone claims always trigger Flash + Google Search grounding)
         token_cost = 1
-        token_balance = reserve_flat_tokens(
+        reserve_flat_tokens(
             user.id,
             token_cost,
             error_message='Insufficient tokens. Fact-check analysis requires 1 CP.'
@@ -367,7 +367,7 @@ def analyze_batch_claims():
             token_cost = max(1, math.ceil(len(claims_to_process) / sub_batch_size))
 
             # Atomically reserve and commit tokens BEFORE calling external AI APIs
-            token_balance = reserve_flat_tokens(
+            reserve_flat_tokens(
                 user.id,
                 token_cost,
                 error_message=f'Insufficient tokens. Batch verification requires {token_cost} CP.',
@@ -585,7 +585,7 @@ def analyze_ai():
         
         # Atomically reserve 1 CP flat BEFORE calling external AI APIs
         token_cost = 1
-        token_balance = reserve_flat_tokens(
+        reserve_flat_tokens(
             user.id,
             token_cost,
             error_status=402,
