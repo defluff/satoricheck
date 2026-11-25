@@ -5,7 +5,9 @@ description: Start local server, run unit/integration/E2E test suites, test Chro
 
 # Local Testing & Development Guide
 
-Use `TEST_MODE=true` to run the application locally on `http://127.0.0.1:8000`. This bypasses external OAuth and automatically authenticates as `test@authenix.ai`.
+Use `TEST_MODE=true` to run the application locally on `http://localhost:8000`. This bypasses external OAuth and automatically authenticates as `test@authenix.ai`.
+
+> ⚠️ **Always open `http://localhost:8000` (not `http://127.0.0.1:8000`).** OneDrive and Dropbox OAuth redirect URIs are registered for `http://localhost:8000`, and [`_build_callback_uri`](satoricheck/backend/routes/storage_oauth.py) derives the callback URI from the incoming request host unless `CLOUD_OAUTH_REDIRECT_BASE` is set.
 
 ---
 
@@ -31,7 +33,7 @@ cd satoricheck
 TEST_MODE=true python -m backend.server
 ```
 
-App will be available at: `http://127.0.0.1:8000`
+App will be available at: `http://localhost:8000`
 
 ---
 
@@ -41,8 +43,8 @@ To test the Chrome/Brave extension against localhost:
 
 1. **Set API Base URL** in `satoricheck/extension/lib/api.js`:
    ```javascript
-   const API_BASE = 'http://127.0.0.1:8000/api';
-   // const API_BASE = 'https://satoricheck-829698588154.europe-west6.run.app/api';
+   export const API_BASE = 'http://localhost:8000/api';
+   // export const API_BASE = 'https://satoricheck-829698588154.europe-west6.run.app/api';
    ```
 2. **Reload Extension**: Open `chrome://extensions` or `brave://extensions` and click the reload icon on Authenix.
 3. **Auto-Session Detection**: Because `TEST_MODE=true` creates an active cookie session on localhost, the extension sidebar syncs automatically.
