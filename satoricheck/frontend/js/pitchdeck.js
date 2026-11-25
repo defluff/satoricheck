@@ -2121,7 +2121,7 @@ class PitchdeckModule {
         if (!listEl) return;
 
         if (this.archivedDeals.length === 0) {
-            listEl.innerHTML = `<div class="pd-archive-empty">No archived deals yet. Analyze a pitch deck to automatically log its lightweight Deal Brief here (zero PDF storage).</div>`;
+            listEl.innerHTML = `<div class="pd-archive-empty">No archived deals yet. Analyzed pitch decks will appear here.</div>`;
             return;
         }
 
@@ -2235,11 +2235,7 @@ class PitchdeckModule {
                 const titleP = document.createElement('p');
                 titleP.textContent = `Deal Brief: ${entry.company_name}`;
 
-                const noteP = document.createElement('p');
-                noteP.className = 'pd-placeholder-subnote';
-                noteP.textContent = 'Zero-File Archive: Raw PDF is not stored locally for privacy.';
-
-                const children = [titleP, noteP];
+                const children = [titleP];
                 if (typeof entry.exported_doc_url === 'string' && entry.exported_doc_url.startsWith('https://')) {
                     const docLink = document.createElement('a');
                     docLink.href = entry.exported_doc_url;
@@ -2667,10 +2663,7 @@ class PitchdeckModule {
                 this.elements.canvasPlaceholder.classList.remove('hidden');
                 const titleP = document.createElement('p');
                 titleP.textContent = `Deal Brief: ${result.company_name || 'Checked Startup'}`;
-                const noteP = document.createElement('p');
-                noteP.className = 'pd-placeholder-subnote';
-                noteP.textContent = 'Checked via Cloud Batch — raw PDF is not stored locally.';
-                const children = [titleP, noteP];
+                const children = [titleP];
                 if (typeof exportedDocUrl === 'string' && exportedDocUrl.startsWith('https://')) {
                     const docLink = document.createElement('a');
                     docLink.href = exportedDocUrl;
