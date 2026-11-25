@@ -19,6 +19,7 @@ RUN chown -R python:python /app
 # Switch to non-root user
 USER python
 
-ENV PORT=8080
+ENV PORT=8080 \
+    OMIT_FOLDER_SYNC=true
 CMD exec gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 300 --preload --no-control-socket backend.server:app
 

@@ -1035,6 +1035,10 @@ class TestFolderConfigValidation:
             user_id=test_user.id, provider='google_drive'
         ).count() == 1
 
+        from pathlib import Path
+        dockerfile_text = (Path(__file__).resolve().parents[2] / 'Dockerfile').read_text(encoding='utf-8')
+        assert 'OMIT_FOLDER_SYNC=true' in dockerfile_text
+
 
 class TestMultiProviderSyncAndPreflight:
     """Verify manual sync, PDF discovery/pre-flight, deduplication, and Zero-File purge."""

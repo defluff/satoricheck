@@ -76,7 +76,12 @@ class Config:
     # Application
     TEST_MODE = os.getenv('TEST_MODE', 'false').lower() == 'true'
     MAINTENANCE_MODE = os.getenv('MAINTENANCE_MODE', 'false').lower() == 'true'
-    OMIT_FOLDER_SYNC = os.getenv('OMIT_FOLDER_SYNC', 'false').lower() == 'true'
+    # Omit Folder Sync by default in production ('Coming Soon'); active in local dev/testing unless overridden.
+    OMIT_FOLDER_SYNC = (
+        os.getenv('OMIT_FOLDER_SYNC').lower() == 'true'
+        if os.getenv('OMIT_FOLDER_SYNC') is not None
+        else (ENV == 'production')
+    )
     FOLDER_SYNC_ENABLED = os.getenv('FOLDER_SYNC_ENABLED', 'true').lower() == 'true'
     DATABASE_URL = normalize_database_url(os.getenv('DATABASE_URL', 'sqlite:///authenix.db'))
     # Per-process in-memory counters by default (single-instance Cloud Run). When scaling
