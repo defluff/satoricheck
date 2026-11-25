@@ -10,6 +10,7 @@ import logging
 import re
 from datetime import datetime, UTC
 
+from backend.config import Config
 from backend.database import db_session
 from backend.models import CloudStorageConnection, FactCheck
 from backend.routes.auth import login_required
@@ -205,6 +206,8 @@ def _get_authorized_google_drive_connection(user_id: int) -> CloudStorageConnect
 @limiter.limit("20 per hour")
 def export_pitchdeck_google_doc():
     """Render a pitch deck deal memo (Brief or Extended) and upload to Google Docs."""
+    if not Config.is_folder_sync_enabled():
+        raise APIError('Folder sync is coming soon', status_code=403)
     user = request.current_user
     user_id = user.id
     payload = _parse_bounded_export_json()
@@ -265,6 +268,8 @@ def export_pitchdeck_google_doc():
 @limiter.limit("20 per hour")
 def export_pitchdeck_google_sheet():
     """Append a structured pitch deck evaluation row to a designated Google Sheet."""
+    if not Config.is_folder_sync_enabled():
+        raise APIError('Folder sync is coming soon', status_code=403)
     user = request.current_user
     user_id = user.id
     payload = _parse_bounded_export_json()
@@ -325,6 +330,8 @@ def export_pitchdeck_google_sheet():
 @limiter.limit("30 per hour")
 def export_pitchdeck_cloud_sync():
     """Export the currently analyzed pitch deck Deal Memo (+ optional Google Sheet row) to the user's connected cloud provider."""
+    if not Config.is_folder_sync_enabled():
+        raise APIError('Folder sync is coming soon', status_code=403)
     user = request.current_user
     user_id = user.id
     payload = _parse_bounded_export_json()

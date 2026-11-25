@@ -120,6 +120,18 @@
     border-color: var(--color-border);
 }
 
+.pd-folder-sync-card.pd-folder-sync-card--disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    pointer-events: none;
+    user-select: none;
+}
+
+.pd-folder-sync-card.pd-folder-sync-card--disabled:hover {
+    border-color: var(--color-border);
+    background: var(--color-upload-bg);
+}
+
 .pd-folder-sync-state {
     display: flex;
     flex-direction: column;
@@ -194,6 +206,93 @@
 
 .pd-folder-change-btn:hover {
     color: var(--color-text);
+}
+
+.pd-batch-card-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-xs);
+    flex-wrap: wrap;
+}
+
+.pd-batch-progress-bar {
+    margin-bottom: var(--spacing-md);
+    padding: var(--spacing-md) var(--spacing-lg);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.pd-batch-progress-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+}
+
+.pd-batch-progress-status {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.pd-batch-progress-hint {
+    font-size: 0.78rem;
+    color: var(--color-text-muted);
+}
+
+.pd-batch-pills {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    flex-wrap: wrap;
+}
+
+.pd-batch-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    font-size: 0.8rem;
+    font-weight: 500;
+    transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+button.pd-batch-pill {
+    cursor: pointer;
+}
+
+button.pd-batch-pill:hover {
+    border-color: var(--color-primary);
+    color: var(--color-text);
+}
+
+button.pd-batch-pill:focus-visible {
+    outline: 2px solid var(--color-primary-strong);
+    outline-offset: 2px;
+}
+
+.pd-batch-pill--active {
+    border-color: var(--color-primary-strong);
+    background: var(--bg-primary-subtle);
+    color: var(--color-text);
+    font-weight: 600;
+}
+
+.pd-batch-pill--running {
+    border-color: var(--color-primary);
+    color: var(--color-text);
+}
+
+.pd-batch-pill--error {
+    border-color: var(--color-error);
+    color: var(--color-error);
 }
 
 .pd-upload-zone:hover {

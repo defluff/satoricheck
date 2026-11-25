@@ -205,47 +205,74 @@
                         </div>
                     </div>
 
-                    <!-- Cloud Folder Sync Card (25% right column) -->
-                    <div class="pd-folder-sync-card" id="pd-folder-sync-card">
-                        <div class="pd-folder-sync-state" id="pd-folder-sync-unconfigured">
+                    <!-- Batch Check Card (25% right column) -->
+                    <div class="pd-folder-sync-card pd-folder-sync-card--disabled" id="pd-folder-sync-card" aria-disabled="true">
+                        <div class="pd-folder-sync-state" id="pd-folder-sync-disabled">
                             <div class="pd-upload-icon">
                                 <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                     stroke-width="1.5">
                                     <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                                 </svg>
                             </div>
-                            <h3 class="pd-folder-sync-title">Sync Folder</h3>
-                            <p class="pd-folder-sync-subtitle" id="pd-folder-unconfigured-subtitle">
-                                Connect a cloud folder to sync decks.
+                            <h3 class="pd-folder-sync-title">Folder Sync</h3>
+                            <span class="badge badge-neutral">Coming Soon</span>
+                            <p class="pd-folder-sync-subtitle">
+                                Multi-deck folder checking &amp; cloud memo sync.
                             </p>
-                            <button type="button" class="btn-secondary btn-sm" id="pd-choose-folder-btn">
-                                📁 Choose Folder
-                            </button>
+                        </div>
+
+                        <div class="pd-folder-sync-state hidden" id="pd-folder-sync-unconfigured">
+                            <div class="pd-upload-icon">
+                                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="1.5">
+                                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                                </svg>
+                            </div>
+                            <h3 class="pd-folder-sync-title">Batch Check</h3>
+                            <p class="pd-folder-sync-subtitle" id="pd-folder-unconfigured-subtitle">
+                                Check multiple PDFs from a local folder or Google Drive.
+                            </p>
+                            <div class="pd-batch-card-actions">
+                                <button type="button" class="btn-primary btn-sm" id="pd-local-folder-btn">
+                                    Local Folder
+                                </button>
+                                <button type="button" class="btn-secondary btn-sm" id="pd-choose-folder-btn">
+                                    Connect Drive
+                                </button>
+                            </div>
                         </div>
 
                         <div class="pd-folder-sync-state hidden" id="pd-folder-sync-connected">
                             <div class="pd-folder-sync-provider-row">
                                 <span class="pd-folder-connected-dot" aria-hidden="true"></span>
-                                <span class="pd-folder-sync-provider" id="pd-sync-provider-name">Cloud Folder</span>
+                                <span class="pd-folder-sync-provider" id="pd-sync-provider-name">Cloud Drive</span>
                             </div>
                             <div class="pd-folder-name-pill" id="pd-sync-folder-name" title="">
                                 <!-- Populated by JS -->
                             </div>
+                            <div class="pd-batch-card-actions">
+                                <button type="button" class="btn-primary btn-sm pd-folder-sync-now-btn" id="pd-cloud-sync-now-btn"
+                                    title="Select and check multiple pitch decks into your Deal Archive & Cloud Memo folder">
+                                    Check Decks
+                                </button>
+                                <button type="button" class="btn-secondary btn-sm" id="pd-local-folder-connected-btn"
+                                    title="Select a local folder of PDF pitch decks to check in batch">
+                                    Local Folder
+                                </button>
+                            </div>
                             <button type="button" class="pd-folder-change-btn" id="pd-cloud-sync-btn"
-                                title="Configure Cloud Storage provider, folders, Deal Memo preset & Google Sheet">
-                                Change folder
-                            </button>
-                            <button type="button" class="btn-primary btn-sm pd-folder-sync-now-btn" id="pd-cloud-sync-now-btn"
-                                title="Sync Now using your saved Cloud Storage & Google Sheet settings">
-                                Sync Now
+                                title="Configure Cloud Storage provider, Memo output folder, preset & Google Sheet">
+                                Batch settings
                             </button>
                         </div>
                     </div>
                 </div>
 
-                <!-- Hidden file input (PDF only) -->
+                <!-- Hidden file inputs (single PDF + local folder batch) -->
                 <input type="file" id="pd-file-input" accept=".pdf,application/pdf" style="display: none;"
                     aria-label="Upload PDF file" />
+                <input type="file" id="pd-folder-input" webkitdirectory directory multiple accept=".pdf,application/pdf"
+                    style="display: none;" aria-label="Select folder of PDF pitch decks" />
 
                 <!-- Generate Overview Button -->
                 <button class="btn-primary pd-generate-btn" id="pd-generate-btn" disabled>
@@ -347,6 +374,9 @@
 
             <!-- Executive & Triage Dashboard (Top Overview) -->
             <section class="pd-triage-section">
+                <!-- Batch Check Live Queue & Switcher -->
+                <div class="pd-card pd-batch-progress-bar hidden" id="pd-batch-progress-bar" aria-live="polite"></div>
+
                 <!-- Feature A & C: Thesis Match Header Scorecard, Decision Control & Deal Export -->
                 <div class="pd-card pd-thesis-scorecard hidden" id="pd-thesis-scorecard">
                     <!-- Boomerang Startup Detection Alert -->
@@ -385,10 +415,10 @@
                                     title="Export structured Deal Brief as PDF">
                                     📄 Export PDF
                                 </button>
-                                <div class="pd-split-btn-group" role="group" aria-label="Deal Cloud Sync">
+                                <div class="pd-split-btn-group hidden" id="pd-deal-sync-group" role="group" aria-label="Deal Cloud Memo Export">
                                     <button type="button" class="btn-secondary btn-sm pd-split-btn-main" id="pd-deal-sync-now-btn"
-                                        title="Export this Deal Memo (+ Google Sheet row if enabled) & run pending inbox sync">
-                                        ☁️ Sync Now
+                                        title="Export this Deal Memo (+ Google Sheet row if enabled) to your connected Cloud Drive">
+                                        Export Memo
                                     </button>
                                     <button type="button" class="btn-secondary btn-sm pd-split-btn-gear" id="pd-deal-sync-settings-btn"
                                         aria-label="Deal Cloud Sync Settings"
@@ -1141,8 +1171,8 @@
         <div class="modal-overlay"></div>
         <div class="modal-content cloud-storage-modal-content">
             <button type="button" class="modal-close" id="close-cloud-storage-modal" aria-label="Close">×</button>
-            <h2 id="cloud-storage-title">☁️ Cloud Storage Sync</h2>
-            <p class="modal-subtitle">Configure an input folder for incoming PDF pitch decks and a separate output folder for Deal Memos.</p>
+            <h2 id="cloud-storage-title">Batch Check &amp; Cloud Settings</h2>
+            <p class="modal-subtitle">Select incoming PDF pitch decks, choose where Deal Memos land, and start checking.</p>
             <div id="cloud-storage-providers" class="cloud-storage-providers"></div>
         </div>
     </div>

@@ -886,6 +886,155 @@ class TestFolderConfigValidation:
         assert sync_wire.calls_matching('get_metadata') == []
         assert sync_wire.calls_matching('/v1.0/me/drive/items/') == []
 
+    def test_google_picker_config_auth_and_payload(self, client, auth_client, monkeypatch, sync_wire):
+        assert client.get('/api/storage/google_drive/picker-config').status_code == 401
+        assert auth_client.get('/api/storage/dropbox/picker-config').status_code == 400
+
+        unconnected = auth_client.get('/api/storage/google_drive/picker-config')
+        assert unconnected.status_code == 401
+        assert unconnected.get_json()['needs_reauth'] is True
+
+        _connect(auth_client, 'google_drive')
+        monkeypatch.setattr(Config, 'GOOGLE_PICKER_API_KEY', None)
+        missing_key = auth_client.get('/api/storage/google_drive/picker-config')
+        assert missing_key.status_code == 503
+
+        monkeypatch.setattr(Config, 'GOOGLE_PICKER_API_KEY', 'AIzaTestPickerKey123')
+        monkeypatch.setattr(Config, 'GOOGLE_CLIENT_ID', '829698588154-testclient.apps.googleusercontent.com')
+        ok = auth_client.get('/api/storage/google_drive/picker-config')
+        assert ok.status_code == 200
+        payload = ok.get_json()
+        assert payload == {
+            'success': True,
+            'api_key': 'AIzaTestPickerKey123',
+            'app_id': '829698588154',
+            'access_token': sync_wire.tokens['google_drive']['access_token'],
+        }
+
+    def test_google_drive_config_allows_omitted_input_and_resets_blank_output_folder(
+        self, auth_client, db_session_fixture, test_user, sync_wire
+    ):
+        _connect(auth_client, 'google_drive')
+        sync_wire.calls.clear()
+
+        resp = auth_client.put('/api/storage/google_drive/config', json={
+            'memo_preset': 'extended',
+            'auto_export_sheets': True,
+            'sheets_spreadsheet_id': '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms',
+            'sheets_sheet_name': 'Deal Flow',
+        })
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body['success'] is True
+        assert body['input_folder_ref'] is None
+        assert body['output_folder_ref'] == 'auto_briefs_folder_1'
+        assert body['memo_preset'] == 'extended'
+        assert body['auto_export_sheets'] is True
+        assert body['sheets_spreadsheet_id'] == '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms'
+        assert body['sheets_sheet_name'] == 'Deal Flow'
+
+        db_session_fixture.expire_all()
+        conn = db_session_fixture.query(CloudStorageConnection).filter_by(
+            user_id=test_user.id, provider='google_drive'
+        ).one()
+        assert conn.input_folder_ref is None
+        assert conn.output_folder_ref == 'auto_briefs_folder_1'
+        assert conn.memo_preset == 'extended'
+        assert conn.auto_export_sheets is True
+        assert conn.sheets_spreadsheet_id == '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms'
+        assert conn.sheets_sheet_name == 'Deal Flow'
+        assert len(sync_wire.calls_matching('/drive/v3/files', 'POST')) == 1
+
+        # Simulate stale/403-inaccessible output folder cleared by user ('output_folder_ref': None)
+        conn.output_folder_ref = 'stale_deleted_folder'
+        db_session_fixture.commit()
+        sync_wire.validate_status_queue['google_drive'].append((403, {'error': {'code': 403}}))
+        sync_wire.calls.clear()
+
+        reset_resp = auth_client.put('/api/storage/google_drive/config', json={
+            'output_folder_ref': None,
+            'memo_preset': 'brief',
+        })
+        assert reset_resp.status_code == 200
+        reset_body = reset_resp.get_json()
+        assert reset_body['output_folder_ref'] == 'auto_briefs_folder_1'
+        assert reset_body['memo_preset'] == 'brief'
+
+        db_session_fixture.expire_all()
+        conn = db_session_fixture.query(CloudStorageConnection).filter_by(
+            user_id=test_user.id, provider='google_drive'
+        ).one()
+        assert conn.output_folder_ref == 'auto_briefs_folder_1'
+        assert conn.memo_preset == 'brief'
+        assert sync_wire.calls_matching('/drive/v3/files/stale_deleted_folder', 'GET') == []
+        assert len(sync_wire.calls_matching('/drive/v3/files', 'POST')) == 1
+
+    def test_google_picker_csp_directives_allow_picker_origins(self, client):
+        resp = client.get('/health')
+        assert resp.status_code == 200
+        csp = resp.headers['Content-Security-Policy']
+        directives = {
+            part.split()[0]: part.split()[1:]
+            for part in csp.split(';')
+            if part.strip()
+        }
+        assert 'https://apis.google.com' in directives['script-src']
+        assert 'https://www.gstatic.com' in directives['script-src']
+        assert 'https://apis.google.com' in directives['connect-src']
+        assert 'https://www.googleapis.com' in directives['connect-src']
+        assert 'https://docs.google.com' in directives['frame-src']
+        assert 'https://drive.google.com' in directives['frame-src']
+
+    def test_omit_folder_sync_disables_storage_cron_and_cloud_export_endpoints(
+        self, client, auth_client, db_session_fixture, test_user, monkeypatch, sync_wire
+    ):
+        _connect(auth_client, 'google_drive')
+        sync_wire.calls.clear()
+
+        monkeypatch.setattr(Config, 'OMIT_FOLDER_SYNC', True)
+        monkeypatch.setattr(Config, 'SCHEDULER_SECRET', 'sched-secret-omit-test')
+
+        # Unauthenticated requests still reject with 401 first
+        anon_client = client.application.test_client()
+        assert anon_client.get('/api/storage/connections').status_code == 401
+        assert anon_client.post('/api/storage/google_drive/sync').status_code == 401
+
+        # Authenticated /connections returns enabled=False and empty connections without deleting DB rows
+        conn_resp = auth_client.get('/api/storage/connections')
+        assert conn_resp.status_code == 200
+        assert conn_resp.get_json() == {
+            'success': True,
+            'enabled': False,
+            'connections': [],
+        }
+
+        for method, url in (
+            ('GET', '/api/storage/google_drive/connect'),
+            ('GET', '/api/storage/google_drive/status'),
+            ('GET', '/api/storage/google_drive/picker-config'),
+            ('PUT', '/api/storage/google_drive/config'),
+            ('POST', '/api/storage/google_drive/sync'),
+            ('POST', '/api/storage/google_drive/disconnect'),
+            ('POST', '/api/export/pitchdeck/google-doc'),
+            ('POST', '/api/export/pitchdeck/google-sheet'),
+            ('POST', '/api/export/pitchdeck/cloud-sync'),
+        ):
+            r = auth_client.open(url, method=method, json={})
+            assert r.status_code == 403
+            assert r.get_json()['error'] == 'Folder sync is coming soon'
+
+        cron_resp = client.post(
+            '/api/cron/sync-watched-folders',
+            headers={'X-Scheduler-Secret': 'sched-secret-omit-test'},
+        )
+        assert cron_resp.status_code == 200
+        assert cron_resp.get_json()['enabled'] is False
+        assert cron_resp.get_json()['processed'] == 0
+        assert sync_wire.calls == []
+        assert db_session_fixture.query(CloudStorageConnection).filter_by(
+            user_id=test_user.id, provider='google_drive'
+        ).count() == 1
+
 
 class TestMultiProviderSyncAndPreflight:
     """Verify manual sync, PDF discovery/pre-flight, deduplication, and Zero-File purge."""
@@ -1296,6 +1445,8 @@ class TestCPBillingAutoRefillAndRefunds:
         assert data['processed'] == 1
         assert data['errors'] == 0
         assert data['new_balance'] == 97
+        assert data['records'][0]['analysis_result']['company_name'] == 'Acme AI'
+        assert data['records'][0]['analysis_result']['page_count'] == 8
         rec = db_session_fixture.query(SyncedDeckRecord).filter_by(
             user_id=test_user.id, external_file_id='f_m4_hook'
         ).one()
@@ -1786,6 +1937,13 @@ class TestIteration2RemediationRegressions:
         assert data['processed'] == 1
         assert data['errors'] == 0
         assert data['new_balance'] == 97
+        assert len(data['records']) == 1
+        rec_summary = data['records'][0]
+        assert rec_summary['status'] == 'completed'
+        assert rec_summary['exported_doc_url'] == 'https://docs.google.com/document/d/doc_1/edit'
+        assert rec_summary['analysis_result']['company_name'] == 'Acme AI'
+        assert rec_summary['analysis_result']['summary'] == 'Automated compliance for SaaS.'
+        assert rec_summary['analysis_result']['page_count'] == 10
         assert sync_wire.archived_files == [
             {
                 'provider': 'google_drive',

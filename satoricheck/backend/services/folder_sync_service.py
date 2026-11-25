@@ -63,9 +63,10 @@ def _build_summary_dict(
     exported_doc_url: str | None = None,
     exported_sheet_range: str | None = None,
     error_message: str | None = None,
+    analysis_result: dict | None = None,
 ) -> dict:
     """Build an API sync record summary dict without requiring a persisted ORM row."""
-    return {
+    summary = {
         'external_file_id': item.file_id[:255],
         'file_name': item.name[:255],
         'status': status,
@@ -74,6 +75,9 @@ def _build_summary_dict(
         'exported_sheet_range': exported_sheet_range[:128] if exported_sheet_range else None,
         'error_message': error_message[:255] if error_message else None,
     }
+    if analysis_result is not None:
+        summary['analysis_result'] = analysis_result
+    return summary
 
 
 def _upsert_synced_record(
@@ -151,9 +155,9 @@ def _upsert_synced_record(
         raise
 
 
-def _record_to_summary(rec: SyncedDeckRecord) -> dict:
+def _record_to_summary(rec: SyncedDeckRecord, *, analysis_result: dict | None = None) -> dict:
     """Serialize a SyncedDeckRecord for API sync responses."""
-    return {
+    summary = {
         'external_file_id': rec.external_file_id,
         'file_name': rec.file_name,
         'status': rec.status,
@@ -162,6 +166,9 @@ def _record_to_summary(rec: SyncedDeckRecord) -> dict:
         'exported_sheet_range': rec.exported_sheet_range,
         'error_message': rec.error_message,
     }
+    if analysis_result is not None:
+        summary['analysis_result'] = analysis_result
+    return summary
 
 
 def _try_auto_export_sheets(
@@ -507,17 +514,21 @@ def sync_connection(
 
             try:
                 analysis = pitchdeck_svc.analyze_pitch_deck(pdf_bytes)
+                hydrated_analysis = {
+                    **analysis,
+                    'page_count': analysis.get('page_count') or page_count,
+                }
                 uploaded = provider.upload_memo(
                     session_db,
                     conn,
                     output_folder_ref=output_folder_ref,
-                    analysis_result=analysis,
+                    analysis_result=hydrated_analysis,
                     memo_preset=memo_preset,
                 )
                 exported_sheet_range = _try_auto_export_sheets(
                     session_db,
                     conn,
-                    analysis_result=analysis,
+                    analysis_result=hydrated_analysis,
                     memo_url=uploaded.url,
                 )
                 rec = _upsert_synced_record(
@@ -552,10 +563,11 @@ def sync_connection(
                             exported_doc_url=uploaded.url,
                             exported_sheet_range=exported_sheet_range,
                             error_message=None,
+                            analysis_result=hydrated_analysis,
                         )
                     )
                     break
-                records_summary.append(_record_to_summary(rec))
+                records_summary.append(_record_to_summary(rec, analysis_result=hydrated_analysis))
             except CloudTokenError as exc:
                 session_db.rollback()
                 refund_flat_tokens(

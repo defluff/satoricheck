@@ -252,6 +252,10 @@ class APIClient {
         return this.request('/storage/connections');
     }
 
+    async getStoragePickerConfig(provider) {
+        return this.request(`/storage/${encodeURIComponent(provider)}/picker-config`);
+    }
+
     async disconnectStorageProvider(provider) {
         return this.request(`/storage/${encodeURIComponent(provider)}/disconnect`, {
             method: 'POST'

@@ -24,10 +24,11 @@ from backend.services.cloud_tokens import (
     extract_revoke_targets,
     generate_pkce_pair,
     get_provider_oauth_spec,
+    get_valid_access_token,
     revoke_tokens_best_effort,
     upsert_connection_tokens,
 )
-from backend.services.deal_memo_renderer import VALID_MEMO_MODES
+from backend.services.deal_memo_renderer import VALID_MEMO_MODES, ensure_google_briefs_folder
 from backend.services.folder_sync_service import (
     run_daily_watched_folders_sync,
     sync_connection,
@@ -54,6 +55,12 @@ def _require_valid_provider(provider: str) -> None:
         raise APIError('Unsupported storage provider', status_code=400)
 
 
+def _require_folder_sync_enabled() -> None:
+    """Reject cloud folder sync / OAuth requests when folder sync is omitted."""
+    if not Config.is_folder_sync_enabled():
+        raise APIError('Folder sync is coming soon', status_code=403)
+
+
 def _build_callback_uri(provider: str) -> str:
     """Build OAuth redirect URI using CLOUD_OAUTH_REDIRECT_BASE or request host."""
     base = (Config.CLOUD_OAUTH_REDIRECT_BASE or '').strip().rstrip('/')
@@ -67,6 +74,12 @@ def _build_callback_uri(provider: str) -> str:
 @limiter.limit("60 per minute")
 def list_connections():
     """Return status for all supported cloud storage providers for the current user."""
+    if not Config.is_folder_sync_enabled():
+        return jsonify({
+            'success': True,
+            'enabled': False,
+            'connections': [],
+        })
     user = request.current_user
     rows = db_session.query(CloudStorageConnection).filter_by(user_id=user.id).all()
     by_provider = {row.provider: row for row in rows}
@@ -78,6 +91,7 @@ def list_connections():
     ]
     return jsonify({
         'success': True,
+        'enabled': True,
         'connections': connections,
     })
 
@@ -87,6 +101,7 @@ def list_connections():
 @limiter.limit("20 per minute")
 def oauth_connect(provider: str):
     """Initiate incremental cloud storage OAuth 2.0 + PKCE flow."""
+    _require_folder_sync_enabled()
     _require_valid_provider(provider)
     spec = get_provider_oauth_spec(provider)
     if not spec['client_id'] or not spec['client_secret']:
@@ -112,6 +127,7 @@ def oauth_connect(provider: str):
 @limiter.limit("20 per minute")
 def oauth_callback(provider: str):
     """Handle cloud storage OAuth 2.0 callback without mutating User or session JWT."""
+    _require_folder_sync_enabled()
     _require_valid_provider(provider)
     user = request.current_user
     stored = session.pop(f'storage_oauth_{provider}', None)
@@ -166,6 +182,7 @@ def oauth_callback(provider: str):
 @limiter.limit("60 per minute")
 def connection_status(provider: str):
     """Return connection and sync configuration status for one provider."""
+    _require_folder_sync_enabled()
     _require_valid_provider(provider)
     user = request.current_user
     conn = (
@@ -183,6 +200,7 @@ def connection_status(provider: str):
 @limiter.limit("20 per minute")
 def disconnect_provider(provider: str):
     """Best-effort revoke tokens upstream and delete connection + sync records."""
+    _require_folder_sync_enabled()
     _require_valid_provider(provider)
     user = request.current_user
     conn = (
@@ -218,11 +236,59 @@ def disconnect_provider(provider: str):
     })
 
 
+@storage_oauth_bp.route('/<provider>/picker-config', methods=['GET'])
+@login_required
+@limiter.limit("30 per minute")
+def get_picker_config(provider: str):
+    """Return Google Picker API key, GCP project number (app_id), and valid OAuth access token."""
+    _require_folder_sync_enabled()
+    _require_valid_provider(provider)
+    if provider != 'google_drive':
+        raise APIError('Google Picker is only supported for Google Drive', status_code=400)
+
+    user = request.current_user
+    conn = (
+        db_session.query(CloudStorageConnection)
+        .filter_by(user_id=user.id, provider='google_drive')
+        .first()
+    )
+    if conn is None or not (conn.encrypted_access_token or conn.encrypted_refresh_token):
+        raise APIError(
+            'Cloud storage connection not found',
+            status_code=401,
+            payload={'needs_reauth': True},
+        )
+
+    api_key = (Config.GOOGLE_PICKER_API_KEY or '').strip()
+    app_id = Config.get_google_picker_app_id()
+    if not api_key or not app_id:
+        raise APIError('Google Picker is not configured on this server', status_code=503)
+
+    try:
+        access_token = get_valid_access_token(db_session, conn)
+    except CloudTokenError as exc:
+        if exc.status_code == 401:
+            raise APIError(
+                'Cloud storage re-authorization required',
+                status_code=401,
+                payload={'needs_reauth': True},
+            )
+        raise APIError('Cloud storage authentication unavailable', status_code=exc.status_code)
+
+    return jsonify({
+        'success': True,
+        'api_key': api_key,
+        'app_id': app_id,
+        'access_token': access_token,
+    }), 200
+
+
 @storage_oauth_bp.route('/<provider>/config', methods=['PUT'])
 @login_required
 @limiter.limit("30 per minute")
 def update_storage_config(provider: str):
     """Validate and save watched input/output folders, memo preset, daily sync, and Sheets config."""
+    _require_folder_sync_enabled()
     _require_valid_provider(provider)
     user = request.current_user
     conn = (
@@ -243,14 +309,21 @@ def update_storage_config(provider: str):
 
     raw_input = data['input_folder_ref'] if 'input_folder_ref' in data else conn.input_folder_ref
     raw_output = data['output_folder_ref'] if 'output_folder_ref' in data else conn.output_folder_ref
-    if not isinstance(raw_input, str) or not raw_input.strip() or not isinstance(raw_output, str) or not raw_output.strip():
+    has_input = isinstance(raw_input, str) and bool(raw_input.strip())
+    has_output = isinstance(raw_output, str) and bool(raw_output.strip())
+
+    if provider != 'google_drive' and (not has_input or not has_output):
         raise APIError('Both input_folder_ref and output_folder_ref are required', status_code=400)
 
     storage_provider = get_storage_provider(provider)
     try:
-        norm_input = storage_provider.normalize_folder_ref(raw_input)
-        norm_output = storage_provider.normalize_folder_ref(raw_output)
-        same_folder = storage_provider.folders_equal(norm_input, norm_output)
+        norm_input = storage_provider.normalize_folder_ref(raw_input) if has_input else None
+        norm_output = storage_provider.normalize_folder_ref(raw_output) if has_output else None
+        same_folder = (
+            norm_input is not None
+            and norm_output is not None
+            and storage_provider.folders_equal(norm_input, norm_output)
+        )
     except ProviderFolderError:
         raise APIError('Invalid folder reference', status_code=400)
 
@@ -309,9 +382,29 @@ def update_storage_config(provider: str):
         sheets_sheet_name = conn.sheets_sheet_name
 
     try:
-        validated_input = storage_provider.validate_folder(db_session, conn, norm_input)
-        validated_output = storage_provider.validate_folder(db_session, conn, norm_output)
+        validated_input = (
+            storage_provider.validate_folder(db_session, conn, norm_input)
+            if norm_input is not None
+            else None
+        )
+        if norm_output is not None:
+            validated_output = storage_provider.validate_folder(db_session, conn, norm_output)
+        else:
+            if 'output_folder_ref' in data:
+                conn.output_folder_ref = None
+            validated_output = ensure_google_briefs_folder(db_session, conn)
+        if (
+            validated_input is not None
+            and validated_output is not None
+            and storage_provider.folders_equal(validated_input, validated_output)
+        ):
+            raise APIError('Input and output folders must be distinct', status_code=400)
     except ProviderFolderError:
+        if provider == 'google_drive':
+            raise APIError(
+                'Google Drive folder not found or inaccessible. With drive.file access, select the folder using Google Picker or choose an Authenix-created folder.',
+                status_code=400,
+            )
         raise APIError('Configured folder was not found or is trashed', status_code=400)
     except ProviderUpstreamError:
         raise APIError('Cloud storage provider unavailable', status_code=502)
@@ -323,6 +416,8 @@ def update_storage_config(provider: str):
                 payload={'needs_reauth': True},
             )
         raise APIError('Cloud storage authentication unavailable', status_code=exc.status_code)
+    except RuntimeError:
+        raise APIError('Cloud storage provider unavailable', status_code=502)
 
     try:
         conn.input_folder_ref = validated_input
@@ -351,9 +446,10 @@ def update_storage_config(provider: str):
 
 @storage_oauth_bp.route('/<provider>/sync', methods=['POST'])
 @login_required
-@limiter.limit("20 per hour")
+@limiter.limit("60 per hour")
 def trigger_manual_sync(provider: str):
     """Trigger manual on-demand folder sync ('Sync now') or explicit file_ids sync for the current user."""
+    _require_folder_sync_enabled()
     _require_valid_provider(provider)
     user = request.current_user
     conn = (
@@ -404,6 +500,17 @@ def trigger_manual_sync(provider: str):
 @scheduler_secret_required
 def sync_watched_folders():
     """Cloud Scheduler endpoint to sync all daily-sync-enabled cloud connections."""
+    if not Config.is_folder_sync_enabled():
+        return jsonify({
+            'success': True,
+            'enabled': False,
+            'connections_checked': 0,
+            'processed': 0,
+            'skipped_duplicate': 0,
+            'skipped_invalid': 0,
+            'skipped_insufficient_cp': 0,
+            'errors': 0,
+        }), 200
     summary = run_daily_watched_folders_sync(db_session)
     logger.info(
         f"Daily watched folder cron completed (connections={summary['connections_checked']}, "

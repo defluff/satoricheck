@@ -129,13 +129,13 @@ def set_security_headers(response):
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; "
         "media-src 'self' blob: data: https:; "
-        "script-src 'self' https://cdn.jsdelivr.net https://js.stripe.com; "
+        "script-src 'self' https://cdn.jsdelivr.net https://js.stripe.com https://apis.google.com https://www.gstatic.com; "
         "worker-src 'self' blob:; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
         "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
         "img-src 'self' data: https:; "
-        "connect-src 'self' wss: https://generativelanguage.googleapis.com https://api.stripe.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
-        "frame-src 'self' https://js.stripe.com https://www.youtube.com https://www.youtube-nocookie.com; "
+        "connect-src 'self' wss: https://generativelanguage.googleapis.com https://api.stripe.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://apis.google.com https://www.googleapis.com; "
+        "frame-src 'self' https://js.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://docs.google.com https://drive.google.com; "
         "frame-ancestors 'none';"
     )
     

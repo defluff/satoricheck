@@ -52,6 +52,7 @@ class Config:
     # Google OAuth
     GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')
     GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET')
+    GOOGLE_PICKER_API_KEY = os.getenv('GOOGLE_PICKER_API_KEY')
 
     # Cloud Storage OAuth & Token Encryption (optional unless cloud sync is enabled)
     GOOGLE_TOKEN_ENCRYPTION_KEY = os.getenv('GOOGLE_TOKEN_ENCRYPTION_KEY')
@@ -75,6 +76,8 @@ class Config:
     # Application
     TEST_MODE = os.getenv('TEST_MODE', 'false').lower() == 'true'
     MAINTENANCE_MODE = os.getenv('MAINTENANCE_MODE', 'false').lower() == 'true'
+    OMIT_FOLDER_SYNC = os.getenv('OMIT_FOLDER_SYNC', 'false').lower() == 'true'
+    FOLDER_SYNC_ENABLED = os.getenv('FOLDER_SYNC_ENABLED', 'true').lower() == 'true'
     DATABASE_URL = normalize_database_url(os.getenv('DATABASE_URL', 'sqlite:///authenix.db'))
     # Per-process in-memory counters by default (single-instance Cloud Run). When scaling
     # Cloud Run max-instances > 1, set RATELIMIT_STORAGE_URI to a shared Redis/Memorystore URI.
@@ -200,6 +203,20 @@ class Config:
                 'https://www.googleapis.com/auth/spreadsheets',
             ]
         return ' '.join(tokens)
+
+    @classmethod
+    def is_folder_sync_enabled(cls) -> bool:
+        """Return False when OMIT_FOLDER_SYNC=true or FOLDER_SYNC_ENABLED=false."""
+        if cls.OMIT_FOLDER_SYNC:
+            return False
+        return bool(cls.FOLDER_SYNC_ENABLED)
+
+    @classmethod
+    def get_google_picker_app_id(cls) -> str | None:
+        """Return GCP project number extracted from GOOGLE_CLIENT_ID for Google Picker setAppId()."""
+        client_id = (cls.GOOGLE_CLIENT_ID or '').strip()
+        prefix = client_id.split('-', 1)[0]
+        return prefix if prefix.isdigit() else None
 
     @classmethod
     def get_streak_milestone(cls, streak_count):

@@ -11,8 +11,7 @@ const PROVIDERS = [
         id: 'google_drive',
         name: 'Google Drive',
         badge: 'Native Google Docs + Sheets',
-        inputPlaceholder: 'Folder ID or https://drive.google.com/drive/folders/...',
-        outputPlaceholder: 'Distinct Memo Folder ID or URL'
+        outputPlaceholder: 'Leave blank to auto-create "Authenix Deal Briefs"'
     },
     {
         id: 'dropbox',
@@ -32,8 +31,12 @@ const PROVIDERS = [
 
 class StorageSyncManager {
     constructor() {
+        this.isEnabled = false;
         this.connections = [];
         this.lastSyncByProvider = new Map();
+        this.stagedDriveFiles = [];
+        this.driveFolderLabels = new Map();
+        this.onBatchCheckRequested = null;
         this.focusProvider = null;
         this.elements = {};
     }
@@ -48,11 +51,13 @@ class StorageSyncManager {
             pdCloudSyncBtn: document.getElementById('pd-cloud-sync-btn'),
             pdChooseFolderBtn: document.getElementById('pd-choose-folder-btn'),
             pdFolderSyncCard: document.getElementById('pd-folder-sync-card'),
+            pdFolderSyncDisabled: document.getElementById('pd-folder-sync-disabled'),
             pdFolderSyncUnconfigured: document.getElementById('pd-folder-sync-unconfigured'),
             pdFolderSyncConnected: document.getElementById('pd-folder-sync-connected'),
             pdFolderUnconfiguredSubtitle: document.getElementById('pd-folder-unconfigured-subtitle'),
             pdSyncProviderName: document.getElementById('pd-sync-provider-name'),
             pdSyncFolderName: document.getElementById('pd-sync-folder-name'),
+            pdDealSyncGroup: document.getElementById('pd-deal-sync-group'),
             pdDealSyncSettingsBtn: document.getElementById('pd-deal-sync-settings-btn')
         };
 
@@ -79,16 +84,51 @@ class StorageSyncManager {
     }
 
     async getPrimaryConnectedConnection() {
+        if (!this.isEnabled) return null;
         if (!Array.isArray(this.connections) || this.connections.length === 0) {
             await this.loadConnections({ silent: true });
         }
+        if (!this.isEnabled) return null;
         return (this.connections || []).find(c => Boolean(c?.connected)) || null;
     }
 
     async openModal(focusProvider = null) {
+        if (!this.isEnabled) return;
         this.focusProvider = focusProvider;
         ui.showModal('cloud-storage-modal');
         await this.loadConnections({ silent: false, focusProvider });
+    }
+
+    applyDisabledComingSoonUI() {
+        const {
+            pdFolderSyncCard,
+            pdFolderSyncDisabled,
+            pdFolderSyncUnconfigured,
+            pdFolderSyncConnected,
+            pdDealSyncGroup,
+            settingsSummary,
+            settingsManageBtn
+        } = this.elements;
+
+        pdFolderSyncCard?.classList.add('pd-folder-sync-card--disabled');
+        pdFolderSyncCard?.classList.remove('pd-folder-sync-card--connected');
+        pdFolderSyncCard?.setAttribute('aria-disabled', 'true');
+        pdFolderSyncDisabled?.classList.remove('hidden');
+        pdFolderSyncUnconfigured?.classList.add('hidden');
+        pdFolderSyncConnected?.classList.add('hidden');
+        pdDealSyncGroup?.classList.add('hidden');
+        ui.hideModal('cloud-storage-modal');
+
+        if (settingsSummary) {
+            const pill = document.createElement('span');
+            pill.className = 'storage-summary-pill';
+            pill.textContent = 'Coming Soon';
+            settingsSummary.replaceChildren(pill);
+        }
+        if (settingsManageBtn) {
+            settingsManageBtn.disabled = true;
+            settingsManageBtn.textContent = 'Coming Soon';
+        }
     }
 
     async loadConnections({ silent = false, focusProvider = null } = {}) {
@@ -97,6 +137,22 @@ class StorageSyncManager {
         }
         try {
             const data = await api.getStorageConnections();
+            this.isEnabled = data?.enabled !== false;
+            if (!this.isEnabled) {
+                this.connections = [];
+                this.applyDisabledComingSoonUI();
+                return [];
+            }
+
+            this.elements.pdFolderSyncCard?.classList.remove('pd-folder-sync-card--disabled');
+            this.elements.pdFolderSyncCard?.removeAttribute('aria-disabled');
+            this.elements.pdFolderSyncDisabled?.classList.add('hidden');
+            this.elements.pdDealSyncGroup?.classList.remove('hidden');
+            if (this.elements.settingsManageBtn) {
+                this.elements.settingsManageBtn.disabled = false;
+                this.elements.settingsManageBtn.textContent = '☁️ Manage Cloud Storage';
+            }
+
             const list = Array.isArray(data?.connections) ? data.connections : [];
             this.connections = list;
             this.renderSettingsSummary(list);
@@ -112,29 +168,45 @@ class StorageSyncManager {
     }
 
     renderPitchdeckFolderCard(connections) {
+        if (!this.isEnabled) {
+            this.applyDisabledComingSoonUI();
+            return;
+        }
         const card = this.elements.pdFolderSyncCard;
         const unconfigured = this.elements.pdFolderSyncUnconfigured;
         const connectedEl = this.elements.pdFolderSyncConnected;
         if (!card || !unconfigured || !connectedEl) return;
+        this.elements.pdFolderSyncDisabled?.classList.add('hidden');
 
         const list = Array.isArray(connections) ? connections : [];
         const configuredConn = list.find(
-            c => Boolean(c?.connected) && Boolean(c?.input_folder_ref) && Boolean(c?.output_folder_ref)
+            c => Boolean(c?.connected) && (
+                c.provider === 'google_drive'
+                || (Boolean(c?.input_folder_ref) && Boolean(c?.output_folder_ref))
+            )
         );
         const connectedOnly = !configuredConn ? list.find(c => Boolean(c?.connected)) : null;
 
         if (configuredConn) {
             const meta = PROVIDERS.find(p => p.id === configuredConn.provider);
             const providerLabel = meta ? meta.name : configuredConn.provider;
+            const isGoogle = configuredConn.provider === 'google_drive';
             const folderRef = String(configuredConn.input_folder_ref || '').trim();
-            const displayFolder = this._formatFolderDisplay(folderRef);
+            const displayFolder = isGoogle
+                ? (this.stagedDriveFiles.length > 0 ? this._formatStagedFilesSummary() : 'Select PDFs to Check')
+                : this._formatFolderDisplay(folderRef);
 
             if (this.elements.pdSyncProviderName) {
                 this.elements.pdSyncProviderName.textContent = providerLabel;
             }
             if (this.elements.pdSyncFolderName) {
-                this.elements.pdSyncFolderName.textContent = `📁 ${displayFolder}`;
-                this.elements.pdSyncFolderName.title = folderRef;
+                this.elements.pdSyncFolderName.textContent = displayFolder;
+                this.elements.pdSyncFolderName.title = isGoogle
+                    ? (this.stagedDriveFiles.map(f => f.name).join(', ') || 'Select PDFs from Google Drive to batch check')
+                    : folderRef;
+            }
+            if (this.elements.pdCloudSyncBtn) {
+                this.elements.pdCloudSyncBtn.textContent = isGoogle ? 'Batch settings' : 'Change folder';
             }
 
             card.classList.add('pd-folder-sync-card--connected');
@@ -152,10 +224,19 @@ class StorageSyncManager {
                 const meta = PROVIDERS.find(p => p.id === connectedOnly.provider);
                 const providerLabel = meta ? meta.name : connectedOnly.provider;
                 this.elements.pdFolderUnconfiguredSubtitle.textContent =
-                    `${providerLabel} connected — choose a folder to sync.`;
+                    `${providerLabel} connected — configure folders in Batch settings.`;
             } else {
                 this.elements.pdFolderUnconfiguredSubtitle.textContent =
-                    'Connect a cloud folder to sync decks.';
+                    'Check multiple PDFs from a local folder or Google Drive.';
+            }
+        }
+    }
+
+    setBatchStatusText(statusText, tooltip = '') {
+        if (this.elements.pdSyncFolderName) {
+            this.elements.pdSyncFolderName.textContent = statusText;
+            if (tooltip) {
+                this.elements.pdSyncFolderName.title = tooltip;
             }
         }
     }
@@ -268,7 +349,9 @@ class StorageSyncManager {
         if (!conn.connected) {
             const hint = document.createElement('p');
             hint.className = 'storage-disconnected-hint';
-            hint.textContent = `Connect your ${meta.name} account to designate an input folder for PDF pitch decks and a separate output folder for Deal Memos.`;
+            hint.textContent = meta.id === 'google_drive'
+                ? 'Connect your Google Drive account to pick pitch deck PDFs from any folder, choose where Deal Memos land, and sync.'
+                : `Connect your ${meta.name} account to designate an input folder for PDF pitch decks and a separate output folder for Deal Memos.`;
             card.appendChild(hint);
             return card;
         }
@@ -289,20 +372,122 @@ class StorageSyncManager {
         const sheetIdInputId = `storage-${meta.id}-sheet-id`;
         const sheetNameInputId = `storage-${meta.id}-sheet-name`;
 
-        const inputField = this._createInputField(
-            inputId,
-            'Input Folder (PDF Pitch Decks)',
-            conn.input_folder_ref || '',
-            meta.inputPlaceholder
-        );
-        const outputField = this._createInputField(
-            outputId,
-            'Output Folder (Deal Memos — must differ)',
-            conn.output_folder_ref || '',
-            meta.outputPlaceholder
-        );
-        grid.appendChild(inputField.wrapper);
-        grid.appendChild(outputField.wrapper);
+        const inlineError = document.createElement('div');
+        inlineError.className = 'storage-inline-error hidden';
+
+        const handleAuthError = (error, fallbackMessage) => {
+            if (error.status === 401 && error.data?.needs_reauth) {
+                statusPill.textContent = 'Reconnect required';
+                statusPill.className = 'storage-status-pill storage-status-pill--error';
+                ui.showToast(`${meta.name} authorization expired. Please reconnect.`, 'error');
+            }
+            inlineError.textContent = error.message || fallbackMessage;
+            inlineError.classList.remove('hidden');
+        };
+
+        const isGoogleDrive = meta.id === 'google_drive';
+        let inputField = null;
+        let outputField = null;
+        let selectedOutputFolderId = conn.output_folder_ref || '';
+
+        if (isGoogleDrive) {
+            const driveInputPicker = this._createPickerField({
+                id: inputId,
+                labelText: '1. Input Pitch Decks (PDFs)',
+                placeholder: 'Browse Drive folder & select PDFs…',
+                onBrowse: async (btn) => {
+                    inlineError.classList.add('hidden');
+                    inlineError.textContent = '';
+                    btn.disabled = true;
+                    btn.textContent = 'Opening…';
+                    try {
+                        const picked = await this._openGoogleDrivePdfPicker();
+                        if (picked) {
+                            this.stagedDriveFiles = picked;
+                            syncDriveInputDisplay();
+                            this.renderPitchdeckFolderCard(this.connections);
+                        }
+                    } catch (error) {
+                        handleAuthError(error, 'Unable to open Google Drive PDF picker.');
+                    } finally {
+                        btn.disabled = false;
+                        btn.textContent = 'Browse…';
+                    }
+                }
+            });
+
+            const syncDriveInputDisplay = () => {
+                if (this.stagedDriveFiles.length > 0) {
+                    driveInputPicker.input.value = `✓ ${this._formatStagedFilesSummary()}`;
+                    driveInputPicker.input.title = this.stagedDriveFiles.map(f => f.name).join(', ');
+                } else {
+                    driveInputPicker.input.value = '';
+                    driveInputPicker.input.title = 'Browse your Google Drive folders and select up to 25 PDFs';
+                }
+            };
+            syncDriveInputDisplay();
+
+            const driveOutputPicker = this._createPickerField({
+                id: outputId,
+                labelText: '2. Output Folder (Where Memos Land)',
+                placeholder: meta.outputPlaceholder,
+                onBrowse: async (btn) => {
+                    inlineError.classList.add('hidden');
+                    inlineError.textContent = '';
+                    btn.disabled = true;
+                    btn.textContent = 'Opening…';
+                    try {
+                        const folder = await this._openGoogleDriveFolderPicker();
+                        if (folder) {
+                            selectedOutputFolderId = folder.id;
+                            this.driveFolderLabels.set(folder.id, folder.name || folder.id);
+                            syncDriveOutputDisplay();
+                        }
+                    } catch (error) {
+                        handleAuthError(error, 'Unable to open Google Drive folder picker.');
+                    } finally {
+                        btn.disabled = false;
+                        btn.textContent = 'Browse…';
+                    }
+                },
+                onReset: () => {
+                    selectedOutputFolderId = '';
+                    syncDriveOutputDisplay();
+                }
+            });
+
+            const syncDriveOutputDisplay = () => {
+                if (selectedOutputFolderId) {
+                    const label = this._formatDriveFolderLabel(selectedOutputFolderId);
+                    driveOutputPicker.input.value = `📁 ${label}`;
+                    driveOutputPicker.input.title = selectedOutputFolderId;
+                    driveOutputPicker.resetBtn?.classList.remove('hidden');
+                } else {
+                    driveOutputPicker.input.value = '';
+                    driveOutputPicker.input.title = meta.outputPlaceholder;
+                    driveOutputPicker.resetBtn?.classList.add('hidden');
+                }
+            };
+            syncDriveOutputDisplay();
+
+            grid.appendChild(driveInputPicker.wrapper);
+            grid.appendChild(driveOutputPicker.wrapper);
+        } else {
+            inputField = this._createInputField(
+                inputId,
+                'Input Folder (PDF Pitch Decks)',
+                conn.input_folder_ref || '',
+                meta.inputPlaceholder
+            );
+            outputField = this._createInputField(
+                outputId,
+                'Output Folder (Deal Memos — must differ)',
+                conn.output_folder_ref || '',
+                meta.outputPlaceholder
+            );
+            grid.appendChild(inputField.wrapper);
+            grid.appendChild(outputField.wrapper);
+        }
 
         const presetWrapper = document.createElement('div');
         presetWrapper.className = 'storage-config-field';
@@ -328,17 +513,21 @@ class StorageSyncManager {
         const togglesWrapper = document.createElement('div');
         togglesWrapper.className = 'storage-config-field storage-toggles-box';
 
-        const dailyToggle = this._createToggleSwitch(
-            dailyId,
-            'Automated Daily Sync',
-            Boolean(conn.daily_sync_enabled)
-        );
+        const dailyToggle = isGoogleDrive
+            ? null
+            : this._createToggleSwitch(
+                dailyId,
+                'Automated Daily Sync',
+                Boolean(conn.daily_sync_enabled)
+            );
         const sheetsToggle = this._createToggleSwitch(
             autoSheetsId,
             'Auto-Export to Google Sheets',
             Boolean(conn.auto_export_sheets)
         );
-        togglesWrapper.appendChild(dailyToggle.label);
+        if (dailyToggle) {
+            togglesWrapper.appendChild(dailyToggle.label);
+        }
         togglesWrapper.appendChild(sheetsToggle.label);
         grid.appendChild(togglesWrapper);
 
@@ -366,9 +555,6 @@ class StorageSyncManager {
         sheetsToggle.checkbox.addEventListener('change', syncSheetsFieldState);
 
         form.appendChild(grid);
-
-        const inlineError = document.createElement('div');
-        inlineError.className = 'storage-inline-error hidden';
         form.appendChild(inlineError);
 
         const actionsRow = document.createElement('div');
@@ -382,7 +568,7 @@ class StorageSyncManager {
         const syncBtn = document.createElement('button');
         syncBtn.type = 'button';
         syncBtn.className = 'btn-primary btn-sm';
-        syncBtn.textContent = 'Sync Now';
+        syncBtn.textContent = 'Check Decks';
         syncBtn.dataset.action = 'sync-now';
 
         actionsRow.appendChild(saveBtn);
@@ -392,8 +578,8 @@ class StorageSyncManager {
         const metaRow = document.createElement('div');
         metaRow.className = 'storage-meta-row';
         const lastSyncedText = conn.last_synced_at
-            ? `Last synced: ${new Date(conn.last_synced_at).toLocaleString()}`
-            : 'Never synced yet';
+            ? `Last checked: ${new Date(conn.last_synced_at).toLocaleString()}`
+            : 'No batch checks run yet';
         const lastSyncedSpan = document.createElement('span');
         lastSyncedSpan.textContent = lastSyncedText;
         metaRow.appendChild(lastSyncedSpan);
@@ -414,55 +600,84 @@ class StorageSyncManager {
         }
         form.appendChild(resultsContainer);
 
+        const buildValidatedConfigPayload = () => {
+            const inputRef = inputField ? inputField.input.value.trim() : '';
+            const outputRef = isGoogleDrive ? selectedOutputFolderId : outputField.input.value.trim();
+            const autoSheets = sheetsToggle.checkbox.checked;
+            const sheetIdVal = sheetIdField.input.value.trim();
+            const sheetNameVal = sheetNameField.input.value.trim();
+
+            if (!isGoogleDrive && (!inputRef || !outputRef)) {
+                inlineError.textContent = 'Both Input Folder and Output Folder are required.';
+                inlineError.classList.remove('hidden');
+                return null;
+            }
+            if (inputRef && outputRef && inputRef === outputRef) {
+                inlineError.textContent = 'Input Folder and Output Folder must be distinct.';
+                inlineError.classList.remove('hidden');
+                return null;
+            }
+            if (autoSheets && !sheetIdVal) {
+                inlineError.textContent = 'Enter a Google Sheet ID or URL to enable auto-export.';
+                inlineError.classList.remove('hidden');
+                return null;
+            }
+
+            const payload = {
+                output_folder_ref: outputRef || null,
+                memo_preset: presetSelect.value,
+                auto_export_sheets: autoSheets,
+                sheets_spreadsheet_id: sheetIdVal || null,
+                sheets_sheet_name: sheetNameVal || null
+            };
+            if (!isGoogleDrive) {
+                payload.input_folder_ref = inputRef;
+                payload.daily_sync_enabled = dailyToggle ? dailyToggle.checkbox.checked : false;
+            }
+            return payload;
+        };
+
+        const hasUnsavedConfig = () => {
+            const currentOutput = isGoogleDrive ? (selectedOutputFolderId || null) : (outputField.input.value.trim() || null);
+            const savedPreset = conn.memo_preset === 'extended' ? 'extended' : 'brief';
+            if (currentOutput !== (conn.output_folder_ref || null)) return true;
+            if (presetSelect.value !== savedPreset) return true;
+            if (sheetsToggle.checkbox.checked !== Boolean(conn.auto_export_sheets)) return true;
+            if ((sheetIdField.input.value.trim() || null) !== (conn.sheets_spreadsheet_id || null)) return true;
+            if ((sheetNameField.input.value.trim() || null) !== (conn.sheets_sheet_name || null)) return true;
+            if (!isGoogleDrive) {
+                if ((inputField.input.value.trim() || null) !== (conn.input_folder_ref || null)) return true;
+                if (Boolean(dailyToggle?.checkbox.checked) !== Boolean(conn.daily_sync_enabled)) return true;
+            }
+            return false;
+        };
+
+        const persistConfig = async () => {
+            const payload = buildValidatedConfigPayload();
+            if (!payload) return false;
+            const requestedBlankDriveOutput = isGoogleDrive && !payload.output_folder_ref;
+            const saved = await api.updateStorageConfig(meta.id, payload);
+            if (requestedBlankDriveOutput && saved?.output_folder_ref) {
+                this.driveFolderLabels.set(saved.output_folder_ref, 'Authenix Deal Briefs');
+                selectedOutputFolderId = saved.output_folder_ref;
+            }
+            return true;
+        };
+
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             inlineError.classList.add('hidden');
             inlineError.textContent = '';
 
-            const inputRef = inputField.input.value.trim();
-            const outputRef = outputField.input.value.trim();
-            const autoSheets = sheetsToggle.checkbox.checked;
-            const sheetIdVal = sheetIdField.input.value.trim();
-            const sheetNameVal = sheetNameField.input.value.trim();
-
-            if (!inputRef || !outputRef) {
-                inlineError.textContent = 'Both Input Folder and Output Folder are required.';
-                inlineError.classList.remove('hidden');
-                return;
-            }
-            if (inputRef === outputRef) {
-                inlineError.textContent = 'Input Folder and Output Folder must be distinct.';
-                inlineError.classList.remove('hidden');
-                return;
-            }
-            if (autoSheets && !sheetIdVal) {
-                inlineError.textContent = 'Enter a Google Sheet ID or URL to enable auto-export.';
-                inlineError.classList.remove('hidden');
-                return;
-            }
-
             saveBtn.disabled = true;
             saveBtn.textContent = 'Saving...';
             try {
-                await api.updateStorageConfig(meta.id, {
-                    input_folder_ref: inputRef,
-                    output_folder_ref: outputRef,
-                    memo_preset: presetSelect.value,
-                    daily_sync_enabled: dailyToggle.checkbox.checked,
-                    auto_export_sheets: autoSheets,
-                    sheets_spreadsheet_id: sheetIdVal || null,
-                    sheets_sheet_name: sheetNameVal || null
-                });
+                const ok = await persistConfig();
+                if (!ok) return;
                 ui.showToast(`${meta.name} sync configuration saved.`, 'success');
                 await this.loadConnections({ silent: true, focusProvider: meta.id });
             } catch (error) {
-                if (error.status === 401 && error.data?.needs_reauth) {
-                    statusPill.textContent = 'Reconnect required';
-                    statusPill.className = 'storage-status-pill storage-status-pill--error';
-                    ui.showToast(`${meta.name} authorization expired. Please reconnect.`, 'error');
-                }
-                inlineError.textContent = error.message || 'Failed to save configuration.';
-                inlineError.classList.remove('hidden');
+                handleAuthError(error, 'Failed to save configuration.');
             } finally {
                 saveBtn.disabled = false;
                 saveBtn.textContent = 'Save Config';
@@ -473,31 +688,46 @@ class StorageSyncManager {
             inlineError.classList.add('hidden');
             inlineError.textContent = '';
             syncBtn.disabled = true;
-            syncBtn.textContent = 'Syncing...';
             try {
-                const res = await api.triggerStorageSync(meta.id);
+                if (hasUnsavedConfig() || (!isGoogleDrive && (!conn.input_folder_ref || !conn.output_folder_ref))) {
+                    syncBtn.textContent = 'Saving...';
+                    const ok = await persistConfig();
+                    if (!ok) return;
+                }
+
+                if (isGoogleDrive && !this.stagedDriveFiles.length) {
+                    syncBtn.textContent = 'Opening Picker...';
+                    const decks = await this.getStagedOrPickGoogleDriveDecks();
+                    if (!decks.length) {
+                        return;
+                    }
+                }
+
+                if (typeof this.onBatchCheckRequested === 'function') {
+                    ui.hideModal('cloud-storage-modal');
+                    await this.onBatchCheckRequested(meta.id);
+                    return;
+                }
+
+                syncBtn.textContent = 'Checking...';
+                const syncPayload = isGoogleDrive
+                    ? { file_ids: this.stagedDriveFiles.map((d) => d.id) }
+                    : null;
+                const res = await api.triggerStorageSync(meta.id, syncPayload);
+                if (isGoogleDrive) {
+                    this.clearStagedDriveFiles();
+                }
                 this.lastSyncByProvider.set(meta.id, res);
                 if (typeof res.new_balance === 'number') {
                     ui.updateBalance(res.new_balance);
                 }
                 this._renderSyncResultsInto(resultsContainer, res);
-                const failedCount = (res.skipped_invalid ?? 0) + (res.errors ?? 0);
-                ui.showToast(
-                    `${meta.name} sync complete: ${res.processed ?? 0} processed, ${failedCount} invalid/errors.`,
-                    failedCount > 0 ? 'warning' : 'success'
-                );
                 await this.loadConnections({ silent: true, focusProvider: meta.id });
             } catch (error) {
-                if (error.status === 401 && error.data?.needs_reauth) {
-                    statusPill.textContent = 'Reconnect required';
-                    statusPill.className = 'storage-status-pill storage-status-pill--error';
-                    ui.showToast(`${meta.name} authorization expired. Please reconnect.`, 'error');
-                }
-                inlineError.textContent = error.message || 'Sync failed.';
-                inlineError.classList.remove('hidden');
+                handleAuthError(error, 'Batch check failed.');
             } finally {
                 syncBtn.disabled = false;
-                syncBtn.textContent = 'Sync Now';
+                syncBtn.textContent = 'Check Decks';
             }
         });
 
@@ -511,6 +741,9 @@ class StorageSyncManager {
         try {
             await api.disconnectStorageProvider(meta.id);
             this.lastSyncByProvider.delete(meta.id);
+            if (meta.id === 'google_drive') {
+                this.clearStagedDriveFiles();
+            }
             ui.showToast(`${meta.name} disconnected.`, 'info');
             await this.loadConnections({ silent: true });
         } catch (error) {
@@ -518,6 +751,202 @@ class StorageSyncManager {
             btn.disabled = false;
             btn.textContent = 'Disconnect';
         }
+    }
+
+    clearStagedDriveFiles() {
+        this.stagedDriveFiles = [];
+        if (Array.isArray(this.connections) && this.connections.length > 0) {
+            this.renderPitchdeckFolderCard(this.connections);
+        }
+    }
+
+    _formatStagedFilesSummary() {
+        const count = this.stagedDriveFiles.length;
+        if (count === 0) return '';
+        if (count === 1) return this.stagedDriveFiles[0].name;
+        return `${count} PDFs (${this.stagedDriveFiles[0].name} +${count - 1})`;
+    }
+
+    _formatDriveFolderLabel(folderId) {
+        const cached = this.driveFolderLabels.get(folderId);
+        if (cached) return cached;
+        return folderId.length > 18 ? `Drive folder (${folderId.slice(0, 10)}…)` : folderId;
+    }
+
+    _loadGooglePickerApi() {
+        if (window.google?.picker) {
+            return Promise.resolve();
+        }
+        if (this._pickerLoadPromise) {
+            return this._pickerLoadPromise;
+        }
+        this._pickerLoadPromise = new Promise((resolve, reject) => {
+            const onGapiReady = () => {
+                if (!window.gapi?.load) {
+                    reject(new Error('Google API loader unavailable'));
+                    return;
+                }
+                window.gapi.load('picker', {
+                    callback: () => resolve(),
+                    onerror: () => reject(new Error('Failed to load Google Picker')),
+                });
+            };
+
+            if (window.gapi?.load) {
+                onGapiReady();
+                return;
+            }
+
+            const script = document.createElement('script');
+            script.src = 'https://apis.google.com/js/api.js';
+            script.async = true;
+            script.onload = onGapiReady;
+            script.onerror = () => reject(new Error('Failed to load Google API script'));
+            document.head.appendChild(script);
+        }).catch((err) => {
+            this._pickerLoadPromise = null;
+            throw err;
+        });
+        return this._pickerLoadPromise;
+    }
+
+    async _openGoogleDrivePdfPicker() {
+        const [cfg] = await Promise.all([
+            api.getStoragePickerConfig('google_drive'),
+            this._loadGooglePickerApi(),
+        ]);
+        const pickerApi = window.google?.picker;
+        if (!pickerApi) {
+            throw new Error('Google Picker failed to initialize');
+        }
+        return new Promise((resolve) => {
+            const view = new pickerApi.DocsView(pickerApi.ViewId.PDFS)
+                .setIncludeFolders(true);
+            const picker = new pickerApi.PickerBuilder()
+                .addView(view)
+                .enableFeature(pickerApi.Feature.MULTISELECT_ENABLED)
+                .setMaxItems(25)
+                .setOAuthToken(cfg.access_token)
+                .setDeveloperKey(cfg.api_key)
+                .setAppId(cfg.app_id)
+                .setTitle('Select PDF Pitch Decks from Folder (up to 25)')
+                .setCallback((data) => {
+                    if (data.action === pickerApi.Action.PICKED) {
+                        const docs = (Array.isArray(data.docs) ? data.docs : [])
+                            .map((d) => ({
+                                id: String(d?.id || '').trim(),
+                                name: String(d?.name || d?.id || 'Deck.pdf').trim()
+                            }))
+                            .filter((d) => Boolean(d.id))
+                            .slice(0, 25);
+                        resolve(docs);
+                    } else if (data.action === pickerApi.Action.CANCEL) {
+                        resolve(null);
+                    }
+                })
+                .build();
+            picker.setVisible(true);
+        });
+    }
+
+    async _openGoogleDriveFolderPicker() {
+        const [cfg] = await Promise.all([
+            api.getStoragePickerConfig('google_drive'),
+            this._loadGooglePickerApi(),
+        ]);
+        const pickerApi = window.google?.picker;
+        if (!pickerApi) {
+            throw new Error('Google Picker failed to initialize');
+        }
+        return new Promise((resolve) => {
+            const view = new pickerApi.DocsView(pickerApi.ViewId.FOLDERS)
+                .setIncludeFolders(true)
+                .setSelectFolderEnabled(true)
+                .setMimeTypes('application/vnd.google-apps.folder');
+            const picker = new pickerApi.PickerBuilder()
+                .addView(view)
+                .setOAuthToken(cfg.access_token)
+                .setDeveloperKey(cfg.api_key)
+                .setAppId(cfg.app_id)
+                .setTitle('Select Output Folder for Deal Memos')
+                .setCallback((data) => {
+                    if (data.action === pickerApi.Action.PICKED && Array.isArray(data.docs) && data.docs[0]?.id) {
+                        resolve({
+                            id: String(data.docs[0].id).trim(),
+                            name: String(data.docs[0].name || data.docs[0].id).trim()
+                        });
+                    } else if (data.action === pickerApi.Action.CANCEL) {
+                        resolve(null);
+                    }
+                })
+                .build();
+            picker.setVisible(true);
+        });
+    }
+
+    async getStagedOrPickGoogleDriveDecks() {
+        if (this.stagedDriveFiles.length > 0) {
+            return [...this.stagedDriveFiles];
+        }
+        const picked = await this._openGoogleDrivePdfPicker();
+        if (!picked || !picked.length) {
+            return [];
+        }
+        this.stagedDriveFiles = picked;
+        this.renderPitchdeckFolderCard(this.connections);
+        return [...picked];
+    }
+
+    async getOrPickGoogleDrivePdfs() {
+        const decks = await this.getStagedOrPickGoogleDriveDecks();
+        return decks.map((f) => f.id);
+    }
+
+    _createPickerField({ id, labelText, placeholder, onBrowse, onReset = null }) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'storage-config-field';
+
+        const label = document.createElement('label');
+        label.htmlFor = id;
+        label.textContent = labelText;
+
+        const row = document.createElement('div');
+        row.className = 'storage-picker-row';
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.id = id;
+        input.className = 'storage-input storage-input--picker';
+        input.readOnly = true;
+        input.placeholder = placeholder;
+
+        const browseBtn = document.createElement('button');
+        browseBtn.type = 'button';
+        browseBtn.className = 'btn-secondary btn-sm';
+        browseBtn.textContent = 'Browse…';
+        browseBtn.addEventListener('click', () => onBrowse(browseBtn));
+        input.addEventListener('click', () => {
+            if (!browseBtn.disabled) onBrowse(browseBtn);
+        });
+
+        row.appendChild(input);
+        row.appendChild(browseBtn);
+
+        let resetBtn = null;
+        if (typeof onReset === 'function') {
+            resetBtn = document.createElement('button');
+            resetBtn.type = 'button';
+            resetBtn.className = 'btn-secondary btn-sm hidden';
+            resetBtn.textContent = 'Auto';
+            resetBtn.title = 'Reset to auto-created "Authenix Deal Briefs"';
+            resetBtn.setAttribute('aria-label', 'Reset output folder to auto-create Authenix Deal Briefs');
+            resetBtn.addEventListener('click', onReset);
+            row.appendChild(resetBtn);
+        }
+
+        wrapper.appendChild(label);
+        wrapper.appendChild(row);
+        return { wrapper, input, browseBtn, resetBtn };
     }
 
     _createInputField(id, labelText, initialValue, placeholder) {
