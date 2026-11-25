@@ -140,9 +140,14 @@ class PitchdeckModule {
 
             // Feature A: Thesis Configuration & Scorecard
             thesisGate: document.getElementById('pd-thesis-gate'),
-            thesisActivePills: document.getElementById('pd-thesis-active-pills'),
+            thesisStatusDot: document.getElementById('pd-thesis-status-dot'),
             thesisToggleBtn: document.getElementById('pd-thesis-toggle-btn'),
             thesisEditor: document.getElementById('pd-thesis-editor'),
+            thesisEnabledCheckbox: document.getElementById('pd-thesis-enabled-checkbox'),
+            thesisStatusHint: document.getElementById('pd-thesis-status-hint'),
+            thesisClearBtn: document.getElementById('pd-thesis-clear-btn'),
+            thesisDoneBtn: document.getElementById('pd-thesis-done-btn'),
+            thesisDimensions: document.getElementById('pd-thesis-dimensions'),
             thesisGeoTags: document.getElementById('pd-thesis-geo-tags'),
             thesisSectorTags: document.getElementById('pd-thesis-sector-tags'),
             thesisStageTags: document.getElementById('pd-thesis-stage-tags'),
@@ -151,6 +156,8 @@ class PitchdeckModule {
             thesisSectorInput: document.getElementById('pd-thesis-sector-input'),
             thesisSectorAddBtn: document.getElementById('pd-thesis-sector-add-btn'),
             thesisScorecard: document.getElementById('pd-thesis-scorecard'),
+            scorecardTitleGroup: document.getElementById('pd-scorecard-title-group'),
+            scorecardGrid: document.getElementById('pd-scorecard-grid'),
             thesisOverallBadge: document.getElementById('pd-thesis-overall-badge'),
             scorecardGeoVal: document.getElementById('pd-scorecard-geo-val'),
             scorecardGeoBadge: document.getElementById('pd-scorecard-geo-badge'),
@@ -342,7 +349,23 @@ class PitchdeckModule {
             if (!editor) return;
             const isHidden = editor.classList.toggle('hidden');
             this.elements.thesisToggleBtn.setAttribute('aria-expanded', String(!isHidden));
-            this.elements.thesisToggleBtn.textContent = isHidden ? '⚙️ Configure Thesis' : '✓ Done';
+        });
+
+        this.elements.thesisDoneBtn?.addEventListener('click', () => {
+            this.elements.thesisEditor?.classList.add('hidden');
+            this.elements.thesisToggleBtn?.setAttribute('aria-expanded', 'false');
+        });
+
+        this.elements.thesisEnabledCheckbox?.addEventListener('change', (e) => {
+            this.thesisConfig.enabled = Boolean(e.target.checked);
+            this.saveThesisConfig();
+        });
+
+        this.elements.thesisClearBtn?.addEventListener('click', () => {
+            this.thesisConfig.geographies = [];
+            this.thesisConfig.sectors = [];
+            this.thesisConfig.stages = [];
+            this.saveThesisConfig();
         });
 
         [this.elements.thesisGeoTags, this.elements.thesisSectorTags, this.elements.thesisStageTags].forEach(container => {
@@ -443,6 +466,7 @@ class PitchdeckModule {
      */
     loadThesisConfig() {
         const defaultConfig = {
+            enabled: false,
             geographies: ['DACH', 'EU'],
             sectors: ['B2B SaaS', 'DeepTech', 'FinTech'],
             stages: ['Pre-Seed', 'Seed'],
@@ -454,6 +478,7 @@ class PitchdeckModule {
             if (!raw) return defaultConfig;
             const parsed = JSON.parse(raw);
             return {
+                enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : false,
                 geographies: Array.isArray(parsed.geographies) ? parsed.geographies : defaultConfig.geographies,
                 sectors: Array.isArray(parsed.sectors) ? parsed.sectors : defaultConfig.sectors,
                 stages: Array.isArray(parsed.stages) ? parsed.stages : defaultConfig.stages,
@@ -523,31 +548,42 @@ class PitchdeckModule {
     }
 
     /**
-     * Render the Thesis Configuration bar summary pills and tag buttons
+     * Render the Thesis Configuration status dot, activation state, and tag buttons
      */
     renderThesisConfigUI() {
-        const { thesisActivePills, thesisGeoTags, thesisSectorTags, thesisStageTags } = this.elements;
+        const {
+            thesisStatusDot,
+            thesisEnabledCheckbox,
+            thesisStatusHint,
+            thesisClearBtn,
+            thesisDimensions,
+            thesisGeoTags,
+            thesisSectorTags,
+            thesisStageTags
+        } = this.elements;
 
-        // 1. Render active mandate summary pills in header bar
-        if (thesisActivePills) {
-            const { geographies, sectors, stages } = this.thesisConfig;
-            const totalSelected = geographies.length + sectors.length + stages.length;
+        const isEnabled = Boolean(this.thesisConfig.enabled);
+        const totalSelected =
+            (this.thesisConfig.geographies?.length || 0) +
+            (this.thesisConfig.sectors?.length || 0) +
+            (this.thesisConfig.stages?.length || 0);
 
-            if (totalSelected === 0) {
-                thesisActivePills.innerHTML = `<span class="pd-thesis-empty-hint">No mandate filters active — click Configure Thesis to set target Geography, Sector &amp; Stage</span>`;
-            } else {
-                const groups = [];
-                if (geographies.length > 0) {
-                    groups.push(`<span class="pd-mandate-chip"><strong>Geo:</strong> ${DOMPurify.sanitize(geographies.join(', '))}</span>`);
-                }
-                if (sectors.length > 0) {
-                    groups.push(`<span class="pd-mandate-chip"><strong>Sector:</strong> ${DOMPurify.sanitize(sectors.join(', '))}</span>`);
-                }
-                if (stages.length > 0) {
-                    groups.push(`<span class="pd-mandate-chip"><strong>Stage:</strong> ${DOMPurify.sanitize(stages.join(', '))}</span>`);
-                }
-                thesisActivePills.innerHTML = groups.join('');
-            }
+        if (thesisStatusDot) {
+            thesisStatusDot.classList.toggle('active', isEnabled);
+        }
+        if (thesisEnabledCheckbox) {
+            thesisEnabledCheckbox.checked = isEnabled;
+        }
+        if (thesisStatusHint) {
+            thesisStatusHint.textContent = isEnabled
+                ? 'Active — deck will be scored against your target mandate.'
+                : 'Off — deck will be fact-checked without thesis fit scoring.';
+        }
+        if (thesisDimensions) {
+            thesisDimensions.classList.toggle('disabled', !isEnabled);
+        }
+        if (thesisClearBtn) {
+            thesisClearBtn.disabled = !isEnabled || totalSelected === 0;
         }
 
         // 2. Render interactive tag buttons in collapsible editor
@@ -675,6 +711,17 @@ class PitchdeckModule {
     renderThesisScorecard(result) {
         const scorecard = this.elements.thesisScorecard;
         if (!scorecard || !result) return;
+
+        if (!this.thesisConfig.enabled) {
+            this.currentThesisAlignment = null;
+            this.elements.scorecardTitleGroup?.classList.add('hidden');
+            this.elements.scorecardGrid?.classList.add('hidden');
+            scorecard.classList.remove('hidden');
+            return;
+        }
+
+        this.elements.scorecardTitleGroup?.classList.remove('hidden');
+        this.elements.scorecardGrid?.classList.remove('hidden');
 
         const alignment = this.evaluateThesisAlignment(result);
         this.currentThesisAlignment = alignment;
@@ -2148,11 +2195,14 @@ class PitchdeckModule {
         const decisionStr = DECISION_LABELS[this.currentDecision] || 'Pending';
         const notesStr = (this.currentNotes || '').trim() || 'None';
 
-        const align = this.currentThesisAlignment || {
-            geography: { extracted: r.startup_profile?.geography || 'Not Disclosed', status: 'partial' },
-            sector: { extracted: r.startup_profile?.sector || r.sector || 'Not Disclosed', status: 'partial' },
-            stage: { extracted: r.startup_profile?.stage || 'Not Disclosed', status: 'partial' }
-        };
+        const align = this.currentThesisAlignment;
+        const thesisLines = align ? [
+            ``,
+            `## Thesis Alignment`,
+            `* **Geography:** ${dec(align.geography.extracted)} (${align.geography.status})`,
+            `* **Sector:** ${dec(align.sector.extracted)} (${align.sector.status})`,
+            `* **Stage:** ${dec(align.stage.extracted)} (${align.stage.status})`
+        ] : [];
 
         const highClaims = (this.extractedClaims || []).filter(c => this._getClaimRiskLevel(c) === 'high');
         const medClaims = (this.extractedClaims || []).filter(c => this._getClaimRiskLevel(c) === 'medium');
@@ -2188,11 +2238,7 @@ class PitchdeckModule {
             `**Date Analyzed:** ${analyzedDate}`,
             `**Decision:** ${decisionStr}`,
             `**Investor Notes:** ${notesStr}`,
-            ``,
-            `## Thesis Alignment`,
-            `* **Geography:** ${dec(align.geography.extracted)} (${align.geography.status})`,
-            `* **Sector:** ${dec(align.sector.extracted)} (${align.sector.status})`,
-            `* **Stage:** ${dec(align.stage.extracted)} (${align.stage.status})`,
+            ...thesisLines,
             ``,
             `## Executive Summary`,
             `${dec(r.summary) || 'No summary available.'}`,
@@ -2246,11 +2292,14 @@ class PitchdeckModule {
         const decisionStr = DECISION_LABELS[this.currentDecision] || 'Pending';
         const notesStr = (this.currentNotes || '').trim() || 'None';
 
-        const align = this.currentThesisAlignment || {
-            geography: { extracted: r.startup_profile?.geography || 'Not Disclosed', status: 'partial' },
-            sector: { extracted: r.startup_profile?.sector || r.sector || 'Not Disclosed', status: 'partial' },
-            stage: { extracted: r.startup_profile?.stage || 'Not Disclosed', status: 'partial' }
-        };
+        const align = this.currentThesisAlignment;
+        const thesisRowHtml = align ? `
+            <div class="pd-print-thesis-row">
+                <div class="pd-print-thesis-pill"><strong>Geography:</strong> ${align.geography.extracted} (${align.geography.status.toUpperCase()})</div>
+                <div class="pd-print-thesis-pill"><strong>Sector:</strong> ${align.sector.extracted} (${align.sector.status.toUpperCase()})</div>
+                <div class="pd-print-thesis-pill"><strong>Stage:</strong> ${align.stage.extracted} (${align.stage.status.toUpperCase()})</div>
+            </div>
+        ` : '';
 
         const highClaims = (this.extractedClaims || []).filter(c => this._getClaimRiskLevel(c) === 'high');
         const medClaims = (this.extractedClaims || []).filter(c => this._getClaimRiskLevel(c) === 'medium');
@@ -2306,11 +2355,7 @@ class PitchdeckModule {
                 <div class="pd-print-decision">Decision: <strong>${decisionStr}</strong></div>
             </div>
             <div class="pd-print-notes"><strong>Investor Notes:</strong> ${notesStr}</div>
-            <div class="pd-print-thesis-row">
-                <div class="pd-print-thesis-pill"><strong>Geography:</strong> ${align.geography.extracted} (${align.geography.status.toUpperCase()})</div>
-                <div class="pd-print-thesis-pill"><strong>Sector:</strong> ${align.sector.extracted} (${align.sector.status.toUpperCase()})</div>
-                <div class="pd-print-thesis-pill"><strong>Stage:</strong> ${align.stage.extracted} (${align.stage.status.toUpperCase()})</div>
-            </div>
+            ${thesisRowHtml}
             <div class="pd-print-section">
                 <h2>Executive Summary</h2>
                 <p>${r.summary || '—'}</p>

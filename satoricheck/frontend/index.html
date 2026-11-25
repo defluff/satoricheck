@@ -181,81 +181,6 @@
     <!-- Pitchdeck Workspace (default view) -->
     <div id="pitchdeck-view">
         <main class="pitchdeck-workspace">
-            <!-- Feature A: Persistent Thesis Configuration Gate -->
-            <section class="pd-card pd-thesis-gate" id="pd-thesis-gate">
-                <div class="pd-thesis-bar">
-                    <div class="pd-thesis-bar-left">
-                        <div class="pd-thesis-bar-summary">
-                            <span class="pd-thesis-bar-title">Fund Thesis Mandate</span>
-                            <div class="pd-thesis-active-pills" id="pd-thesis-active-pills">
-                                <!-- Populated by JS -->
-                            </div>
-                        </div>
-                        <button type="button" class="btn-secondary btn-sm pd-thesis-toggle-btn" id="pd-thesis-toggle-btn"
-                            aria-expanded="false">
-                            ⚙️ Configure Thesis
-                        </button>
-                    </div>
-                    <div class="pd-thesis-bar-actions">
-                        <button type="button" class="btn-secondary btn-sm" id="pd-archive-toggle-btn"
-                            aria-expanded="false" title="View Zero-File Deal Archive & Decision Log">
-                            Deal Archive (<span id="pd-archive-count">0</span>)
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Feature C: Collapsible Zero-File Deal Archive Drawer -->
-                <div class="pd-archive-drawer hidden" id="pd-archive-drawer">
-                    <div class="pd-archive-drawer-header">
-                        <span class="pd-thesis-dim-label">Zero-File Deal Archive &amp; Decision Log (Local Browser Storage)</span>
-                        <span class="pd-archive-privacy-note">Raw PDFs are purged on new upload; only lightweight deal metadata is retained.</span>
-                    </div>
-                    <div class="pd-archive-list" id="pd-archive-list">
-                        <!-- Populated by JS -->
-                    </div>
-                </div>
-
-                <!-- Collapsible Mandate Editor -->
-                <div class="pd-thesis-editor hidden" id="pd-thesis-editor">
-                    <div class="pd-thesis-dimension">
-                        <div class="pd-thesis-dim-header">
-                            <label class="pd-thesis-dim-label">Target Geographies</label>
-                            <div class="pd-thesis-custom-add">
-                                <input type="text" id="pd-thesis-geo-input" class="pd-thesis-input"
-                                    placeholder="+ Custom region (e.g. Nordics)" maxlength="40" />
-                                <button type="button" class="btn-secondary btn-sm" id="pd-thesis-geo-add-btn">Add</button>
-                            </div>
-                        </div>
-                        <div class="pd-thesis-tag-group" id="pd-thesis-geo-tags" data-dimension="geographies">
-                            <!-- Populated by JS -->
-                        </div>
-                    </div>
-
-                    <div class="pd-thesis-dimension">
-                        <div class="pd-thesis-dim-header">
-                            <label class="pd-thesis-dim-label">Target Sectors</label>
-                            <div class="pd-thesis-custom-add">
-                                <input type="text" id="pd-thesis-sector-input" class="pd-thesis-input"
-                                    placeholder="+ Custom sector (e.g. BioTech)" maxlength="40" />
-                                <button type="button" class="btn-secondary btn-sm" id="pd-thesis-sector-add-btn">Add</button>
-                            </div>
-                        </div>
-                        <div class="pd-thesis-tag-group" id="pd-thesis-sector-tags" data-dimension="sectors">
-                            <!-- Populated by JS -->
-                        </div>
-                    </div>
-
-                    <div class="pd-thesis-dimension">
-                        <div class="pd-thesis-dim-header">
-                            <label class="pd-thesis-dim-label">Target Stages</label>
-                        </div>
-                        <div class="pd-thesis-tag-group" id="pd-thesis-stage-tags" data-dimension="stages">
-                            <!-- Populated by JS -->
-                        </div>
-                    </div>
-                </div>
-            </section>
-
             <!-- Upload Section -->
             <section class="pd-upload-section">
                 <div class="pd-upload-row">
@@ -328,6 +253,98 @@
                 </button>
             </section>
 
+            <!-- Feature A & C: Optional Checks (Fund Thesis) & Deal Archive Bar -->
+            <section class="pd-optional-checks-section" id="pd-thesis-gate">
+                <div class="pd-optional-checks-bar">
+                    <div class="pd-optional-checks-left">
+                        <span class="pd-optional-checks-label">Optional Checks:</span>
+                        <button type="button" class="pd-optional-check-pill" id="pd-thesis-toggle-btn"
+                            aria-expanded="false" aria-controls="pd-thesis-editor">
+                            <span class="pd-thesis-status-dot" id="pd-thesis-status-dot" aria-hidden="true"></span>
+                            <span>Fund Thesis</span>
+                            <svg class="pd-optional-check-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"
+                                aria-hidden="true">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="pd-optional-checks-right">
+                        <button type="button" class="btn-secondary btn-sm" id="pd-archive-toggle-btn"
+                            aria-expanded="false" title="View Zero-File Deal Archive & Decision Log">
+                            Deal Archive (<span id="pd-archive-count">0</span>)
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Feature C: Collapsible Zero-File Deal Archive Drawer -->
+                <div class="pd-card pd-archive-drawer hidden" id="pd-archive-drawer">
+                    <div class="pd-archive-drawer-header">
+                        <span class="pd-thesis-dim-label">Zero-File Deal Archive &amp; Decision Log (Local Browser Storage)</span>
+                        <span class="pd-archive-privacy-note">Raw PDFs are purged on new upload; only lightweight deal metadata is retained.</span>
+                    </div>
+                    <div class="pd-archive-list" id="pd-archive-list">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Collapsible Mandate Editor -->
+                <div class="pd-card pd-thesis-editor hidden" id="pd-thesis-editor">
+                    <div class="pd-thesis-editor-header">
+                        <label class="pd-thesis-enable-label" for="pd-thesis-enabled-checkbox">
+                            <input type="checkbox" id="pd-thesis-enabled-checkbox" class="pd-thesis-enable-checkbox" />
+                            <span>Activate Fund Thesis Scoring</span>
+                        </label>
+                        <span class="pd-thesis-status-hint" id="pd-thesis-status-hint">
+                            Off — deck will be fact-checked without thesis fit scoring.
+                        </span>
+                        <div class="pd-thesis-editor-actions">
+                            <button type="button" class="btn-secondary btn-sm" id="pd-thesis-clear-btn">Clear All</button>
+                            <button type="button" class="btn-secondary btn-sm" id="pd-thesis-done-btn">Done</button>
+                        </div>
+                    </div>
+
+                    <div class="pd-thesis-dimensions" id="pd-thesis-dimensions">
+                        <div class="pd-thesis-dimension">
+                            <div class="pd-thesis-dim-header">
+                                <label class="pd-thesis-dim-label">Target Geographies</label>
+                                <div class="pd-thesis-custom-add">
+                                    <input type="text" id="pd-thesis-geo-input" class="pd-thesis-input"
+                                        placeholder="+ Custom region (e.g. Nordics)" maxlength="40" />
+                                    <button type="button" class="btn-secondary btn-sm" id="pd-thesis-geo-add-btn">Add</button>
+                                </div>
+                            </div>
+                            <div class="pd-thesis-tag-group" id="pd-thesis-geo-tags" data-dimension="geographies">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+
+                        <div class="pd-thesis-dimension">
+                            <div class="pd-thesis-dim-header">
+                                <label class="pd-thesis-dim-label">Target Sectors</label>
+                                <div class="pd-thesis-custom-add">
+                                    <input type="text" id="pd-thesis-sector-input" class="pd-thesis-input"
+                                        placeholder="+ Custom sector (e.g. BioTech)" maxlength="40" />
+                                    <button type="button" class="btn-secondary btn-sm" id="pd-thesis-sector-add-btn">Add</button>
+                                </div>
+                            </div>
+                            <div class="pd-thesis-tag-group" id="pd-thesis-sector-tags" data-dimension="sectors">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+
+                        <div class="pd-thesis-dimension">
+                            <div class="pd-thesis-dim-header">
+                                <label class="pd-thesis-dim-label">Target Stages</label>
+                            </div>
+                            <div class="pd-thesis-tag-group" id="pd-thesis-stage-tags" data-dimension="stages">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             <!-- Executive & Triage Dashboard (Top Overview) -->
             <section class="pd-triage-section">
                 <!-- Feature A & C: Thesis Match Header Scorecard, Decision Control & Deal Export -->
@@ -340,7 +357,7 @@
                     </div>
 
                     <div class="pd-scorecard-header">
-                        <div class="pd-scorecard-title-group">
+                        <div class="pd-scorecard-title-group" id="pd-scorecard-title-group">
                             <span class="pd-scorecard-label">Thesis Alignment Scorecard</span>
                             <span class="badge badge-neutral" id="pd-thesis-overall-badge">Pending</span>
                         </div>
